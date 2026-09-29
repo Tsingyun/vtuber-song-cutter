@@ -47,6 +47,17 @@ MIN_CHECK_N = 6         # 有效校验点下限
 GATE_RMS = 0.35         # 残差 RMS（去中位）门槛
 GATE_MED = 1.5          # 系统性偏移修正上限（秒）
 
+# ---- DTW 截距粗校正（2026-09-30 达尔文案例新增）----
+# 直播版常整段增删前奏/开场白（结构性偏移可达 10s+，达尔文案例 12.6s）：
+# 切入点检测给的 onset_abs 只是「录播里第一声」，未必等于参考曲有声区 head
+# 的对应点；而下方局部互相关搜索窗仅 ±SEARCH 秒，够不到大偏移——反而会在
+# 重复和弦结构上匹配到自相似段，给出 rms=0.017 的假绿（偏差被放行）。
+# 修法：用全曲 DTW 稳健回归截距 ic（t_cov ≈ slope·t_ref + ic，X 以 cut_start
+# 为 0）反推原曲 head 对应的绝对时间 = cut_start + slope·head + ic，先做全局
+# 粗校正，再交给局部互相关做 ±2s 级细校。采信条件（三者全过才用）：
+DTW_IC_GATE = 30.0      # |粗校正量| 上限（秒）：覆盖前奏整段增删，超出即路径可疑
+DTW_IC_FIT = 1.0        # IRLS 全路径拟合残差上限（秒）
+
 
 # ================================================================
 # ① 切入点检测
@@ -221,11 +232,30 @@ def analyze(title, artist, ffmpeg, src, onset_abs, cut_start, rough_end, lrc_tex
         # 全曲 DTW（先验偏移锚定，避免「翻唱窗口长于原曲」时粗对齐失效）
         prior = max(0.0, head - (onset_abs - cut_start))
         res = LS.align_audio(Y, X, verbose=False, prior=prior)
-        slope_raw, _ic, _rms_fit = _robust_slope(res["t_ref"], res["t_cov"])
+        slope_raw, ic, rms_fit = _robust_slope(res["t_ref"], res["t_cov"])
         # 斜率策略（step8 实证）：全曲 DTW 路径在直播音频上可能跑飞（曾给出 1.05~1.18），
-        # 而伴奏是原速播放的。偏差 ≤0.5% 视为真实速度比；跑飞则直接取 1.0。
-        # 质量把关交给下面的局部互相关校验。
-        slope = slope_raw if abs(slope_raw - 1.0) <= 0.005 else 1.0
+        # 而伴奏是原速播放的。稳健拟合后仍偏离 >0.5% 即判定路径跑飞。
+        # 质量把关在下方：跑飞 → 整体降级；自洽 → 截距粗校正 + 局部互相关细校。
+        if abs(slope_raw - 1.0) > 0.005:
+            # 路径大面积跑飞 = 参考曲与直播音频结构不一致（编曲/版本不同）。
+            # 此时锚点不可信，且局部互相关搜索窗仅 ±SEARCH 秒——对大于窗宽的
+            # 偏移是盲区，会在重复和弦上给出 rms≈0.02 的假绿（达尔文案例：
+            # slope_raw=1.33 却 rms=0.017，实际歌词偏早 12.6s）。宁可整体降级
+            # （CTC/ASR 链直接听人声对齐），也不输出错锚时间轴。
+            return dict(ok=False, reason=(
+                "全曲 DTW 斜率跑飞（slope_raw=%.3f）→ 参考曲结构不一致，时间轴降级" % slope_raw))
+        slope = slope_raw
+
+        # ★ DTW 截距粗校正：t_cov ≈ slope·t_ref + ic（X 以 cut_start 为 0）
+        #   → 原曲 head 对应绝对时间 = cut_start + slope·head + ic。
+        ic_anchor = cut_start + slope * head + ic
+        ic_delta = ic_anchor - onset_abs
+        if abs(ic_delta) <= DTW_IC_GATE and rms_fit <= DTW_IC_FIT:
+            if abs(ic_delta) > 0.35:
+                log("    DTW截距: 锚点 %+.2fs（%.2f → %.2f），局部校验复核中"
+                    % (ic_delta, onset_abs, ic_anchor))
+            onset_abs = ic_anchor
+        # 不采信时静默维持先验锚（后续局部互相关仍会做 ±GATE_MED 的小修正）
 
         info = dict(ok=True, slope=slope, slope_raw=round(slope_raw, 6),
                     head=head, song_len=song_len,

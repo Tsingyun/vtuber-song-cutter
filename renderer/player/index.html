@@ -843,6 +843,7 @@ var HL = { on:new URLSearchParams(location.search).has('render'), fps:60, dur:0,
            total:0, prog:0, phase:'idle', err:null, haloTable:null, ready:false };
 let lyrics = [], lrcMode = false, offset = 0, autoSpeed = 1;
 let act = [], bl = [], bs = [], scrollY = 0;   // act=行对焦明暗  bl=行连续模糊量(px, 0=清晰)  bs=行明暗平滑值
+let oxs = [], prevLyrIdx = -1;                 // oxs=行长行横向滚动偏移(px，仅当前行)  prevLyrIdx=行切换检测（切行归零）
 let exporting = false, rec = null, chunks = [], recMime = '', recIsMp4 = false;
 /* 画面装饰开关 */
 let karaokeOn = true, haloOn = true;
@@ -924,7 +925,7 @@ function parseLyrics(text){
       for(let k=i;k<j;k++) out[k].time = prev + (next-prev)*(k-i+1)/(j-i+1);
     }
   }
-  lyrics = out; act = out.map(()=>0); bl = out.map(()=>9); bs = out.map(()=>null); scrollY = 0;
+  lyrics = out; act = out.map(()=>0); bl = out.map(()=>9); bs = out.map(()=>null); oxs = out.map(()=>0); prevLyrIdx = -1; scrollY = 0;
   buildSprites();
   $('lyricTip').textContent = out.length
     ? `已载入 ${out.length} 行 · ${lrcMode ? 'LRC 时间轴模式' : '纯文本自动对齐模式'}`
@@ -1235,7 +1236,7 @@ function backupCache(){
 }
 
 /* ---------------- 歌词精灵缓存（流畅度） ---------------- */
-const SPR_FS = 56, SPR_PAD = 12, SPR_MAXW = 1040;
+const SPR_FS = 56, SPR_PAD = 12, SPR_MAXW = 1500;
 /* 精灵栅格倍率：基准 2 是「超采样」（精灵按 2 倍像素栅格化，缩回设计尺寸绘制 → 边缘更锐）。
    4K 输出（OUT_SCALE=2）必须同步放大到 4，否则精灵像素密度低于画布 → 文字被放大插值变糊。 */
 const SPR_SS = 2 * OUT_SCALE;
@@ -1274,19 +1275,22 @@ function buildSprites(){
         wordOffs.push({ x:wa, w:ww }); wa += ww;
       }
     }
-    /* ink = 已唱/当前（700 字重，墨色）；mut = 未唱（500 字重，浅蓝灰）
-       —— 明暗由绘制时的 globalAlpha 控制，字重在此处固化，两者叠加形成
-          「字重 + 明暗」双重层级，浅色纸面上依然一眼可辨进度。 */
+    /* ink = 已唱/当前（700 字重，墨色）；mut = 非当前行未唱（500 字重，浅蓝灰）；
+       mutCur = 当前行未唱薄底（700 字重，浅蓝灰）—— 必须与 ink 同字体同字重：
+       英文是比例字宽，500 与 700 的字符 advance 不同，两层叠加时每个已唱
+       字母与薄底字母横向错位几像素，视觉上就是「重影」（中文方块字不受影响，
+       英文歌必现）。位置测量 offs 用的也是 HarmonyOS 700，三者保持一致。 */
     const mk = (color, weight)=>{
       const c = document.createElement('canvas');
       c.width = Math.ceil(w*SPR_SS); c.height = Math.ceil(h*SPR_SS);
       const g = c.getContext('2d'); g.scale(SPR_SS, SPR_SS);
-      g.font = `${weight} ${SPR_FS}px "Noto Sans SC",sans-serif`;
+      g.font = `${weight} ${SPR_FS}px "HarmonyOS Sans SC",sans-serif`;
       g.textBaseline = 'middle'; g.fillStyle = color;
       g.fillText(text, SPR_PAD, h/2+2);
       return c;
     };
-    return { ink: mk(INK.sprInk, 700), mut: mk(INK.sprMut, 500), w, h, offs, wordOffs, tw: acc };
+    return { ink: mk(INK.sprInk, 700), mut: mk(INK.sprMut, 500),
+             mutCur: mk(INK.sprMut, 700), w, h, offs, wordOffs, tw: acc };
   });
 }
 
@@ -2504,6 +2508,10 @@ function drawLyrics(now, dt){
   const lastL = lyrics[lyrics.length-1];
   const sungAll = idx < 0 && lastL && lastL.end != null && t >= lastL.end + 0.2;
   const anchor = sungAll ? lyrics.length : Math.max(0, idx);
+  if(idx !== prevLyrIdx){                       // 切行：新当前行滚动偏移归零
+    if(idx >= 0 && oxs[idx] != null) oxs[idx] = 0;
+    prevLyrIdx = idx;
+  }
   const off = lyricFocusY() - LY.y;
   const target = (idx<0 ? (sungAll ? lyrics.length-1 : 0) : idx)*LH - off;
   if(!lyricDrag) scrollY += (target - scrollY) * Math.min(1, dt*5.5);   // 缓动跟随
@@ -2542,7 +2550,7 @@ function drawLyrics(now, dt){
       const fs = 48 + 17*a;                           // 当前行 65 / 其余 48：更突出的强调（≈1.35x）
       let sc = fs/SPR_FS;
       { const fit = (vw - 12) / Math.max(1, spr.w - SPR_PAD*2);   // 长行钳制：放大后文字仍收在视口内
-        if(sc > fit) sc = fit; }
+        if(i !== idx && sc > fit) sc = fit; }   // 仅非当前行缩小收口；当前行保持字号，超宽走横向滚动
       /* 层级（字重 + 明暗 + 距离模糊三重区分，Apple Music 特质保留）：
            已唱（上方）  .40   700 字重 · 清晰
            当前行        1.0   未唱部分 400/.26 · 已唱部分 700/.95 · 对焦清晰
@@ -2581,11 +2589,33 @@ function drawLyrics(now, dt){
         ctx.globalAlpha = alpha;
         ctx.drawImage(spr.ink, dx, dy, dw, dh);
       } else {
-        // 当前行：400 字重薄底（未唱部分）→ 700 字重白色随演唱进度逐字点亮
+        // 当前行：薄底（未唱部分）→ 700 字重随演唱进度逐字点亮
         const kf = karaokeFrac(lyrics[i], t);
         const fw = karaokeWidth(spr, kf);
-        /* 未唱薄底：跟随 bl 连续模糊 —— 对焦时 3px→0 平滑锐化（Apple Music 动效） */
-        drawBlurred(spr, Math.max(bl[i], (1-enter)*3), dx, dy, dw, dh, alpha*0.32);
+        /* 长行横向滚动：当前行文字宽超出视口时保持字号、按演唱进度向左平移，
+           使「唱到的位置」稳定停在视口 ~42% 处（Apple Music 式）。平移只改
+           绘制 x（等价 transform，无重排/布局抖动）；want 经 oxs[i] 缓动
+           （τ≈0.3s）保证帧间连续，避免逐帧跳变被编码放大成闪烁。
+           短行 want=0 完全不受影响；fit 钳制已对本行豁免（见上）。 */
+        let ox = 0;
+        {
+          const availW = vw - 12, textW = (spr.w - SPR_PAD*2) * sc;
+          if(textW > availW){
+            const want = Math.max(0, Math.min(textW - availW, fw*sc - availW*0.42));
+            oxs[i] += (want - oxs[i]) * Math.min(1, dt*3.2);
+            ox = oxs[i];
+          } else if(oxs[i]){
+            oxs[i] += (0 - oxs[i]) * Math.min(1, dt*3.2);
+            ox = oxs[i];
+          }
+        }
+        const cdx = dx - ox;
+        /* 未唱薄底：用 mutCur（700 字重浅蓝灰），与 ink 同字体同字重 —— 同字形
+           才不会重影（见 buildSprites 注释）。不再走 drawBlurred：当前行的 bl
+           目标本就是 0（τ≈0.08s 快速对焦），放弃进入瞬间 ≤3px 的薄底模糊，
+           换取已唱/未唱两层字形严格同位。 */
+        ctx.globalAlpha = alpha*0.32;
+        ctx.drawImage(spr.mutCur, cdx, dy, dw, dh);
         drawLyricMarker(yTop + LH/2, a, now);           // 当前行标记（品牌色点睛，方案=标记形状）
         if(fw > 0.5){
           /* 柔和渐变填充：ink 经横向渐变蒙版点亮 —— 已唱 .95 → 约 48px 平滑过渡 → 0，
@@ -2603,7 +2633,7 @@ function drawLyrics(now, dt){
           g.fillRect(0, 0, Math.min(x1, spr.w), spr.h);
           g.globalCompositeOperation = 'source-over';
           ctx.globalAlpha = alpha;
-          ctx.drawImage(kScratch, dx, dy, dw, dh);
+          ctx.drawImage(kScratch, cdx, dy, dw, dh);
         }
       }
       ctx.globalAlpha = 1;
