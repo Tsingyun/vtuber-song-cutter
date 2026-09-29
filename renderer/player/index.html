@@ -2283,9 +2283,40 @@ function drawInfo(t){
      字号随行宽自适应，收在书脊轴左侧；标题顶部轻微压入封面下缘形成叠层关系 */
   const title = $('songTitle').value.trim() || '未命名歌曲';
   const chs = Array.from(title);
-  const twoLine = chs.length > 8;
-  const perLine = twoLine ? Math.ceil(chs.length/2) : chs.length;
-  const hf = twoLine ? 76 : Math.max(64, Math.min(168, Math.floor(780/(chs.length*1.08))));
+  /* 分行策略：中文按「字数」（>8 字两行）；西文按「词」——单词绝不拆断，
+     且 ≤2 词的短标题（如 "Lover Girl"）强制单行。
+     ⚠ 旧实现统一按字符数判换行（10 字符的 "Lover Girl" 被拆成 Lover / Girl），
+        英文标题不再出现这种行为。 */
+  const CJK_RE = /[\u2E80-\u9FFF\uFF00-\uFFEF\u3040-\u30FF\uAC00-\uD7AF]/;
+  const hasCJK = CJK_RE.test(title);
+  const words = title.split(/\s+/).filter(Boolean);
+  let lines;
+  if(hasCJK){
+    const half = Math.ceil(chs.length/2);
+    lines = chs.length > 8 ? [chs.slice(0, half).join(''), chs.slice(half).join('')] : [title];
+  }else if(words.length <= 2){
+    lines = [words.join(' ')];                       // 短英文：整行不拆
+  }else{
+    const half = Math.ceil(words.length/2);
+    lines = [words.slice(0, half).join(' '), words.slice(half).join(' ')];
+  }
+  const twoLine = lines.length > 1;
+  /* 字号：西文改用「实测字宽反算」——英文字符宽远窄于汉字，沿用中文的
+     字数估算式（780/(n·1.08)）会把 10 字符的英文压到 72px，小得不合理。 */
+  const TITLE_W = 820;
+  let hf;
+  if(hasCJK){
+    hf = twoLine ? 76 : Math.max(64, Math.min(168, Math.floor(780/(chs.length*1.08))));
+  }else{
+    /* 总宽 = Σ字宽 + hsp·(n−1)，字宽与 hsp 均正比于字号 → 宽度严格正比，一次比例即精确 */
+    const PF = 100, PSP = Math.round(PF*0.06);
+    ctx.save();
+    ctx.font = '600 '+PF+'px "HarmonyOS Sans SC",sans-serif';
+    let w0 = -PSP;
+    for(const ch of lines[lines.length-1]) w0 += ctx.measureText(ch).width + PSP;
+    ctx.restore();
+    hf = Math.max(56, Math.min(168, Math.floor(PF * TITLE_W / Math.max(1, w0))));
+  }
   const hsp = Math.round(hf*0.06);
   const lineH = Math.round(hf*1.16);
   const lastBase = 800;                                  // 末行基线恒定：标题顶部明确压入封面下缘约四成字身（叠压构图）
@@ -2303,9 +2334,9 @@ function drawInfo(t){
   ctx.shadowColor = tInk.halo; ctx.shadowBlur = 20*OUT_SCALE; ctx.shadowOffsetY = 3;
   ctx.fillStyle = tInk.fill;
   ctx.globalAlpha = enT;
-  const tW1 = drawSpaced(twoLine ? chs.slice(0, perLine).join('') : title, 96, l1Base - (1-enT)*14, hsp);
+  const tW1 = drawSpaced(lines[0], 96, l1Base - (1-enT)*14, hsp);
   let lastW = tW1;
-  if(twoLine) lastW = drawSpaced(chs.slice(perLine).join(''), 96, lastBase, hsp);
+  if(twoLine) lastW = drawSpaced(lines[1], 96, lastBase, hsp);
   ctx.globalAlpha = 1;
   ctx.restore();
   /* ②⁻ 落款印：横向标题末端的绯玫红小方印（杂志落款意象，品牌点睛） */
