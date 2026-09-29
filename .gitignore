@@ -1,0 +1,39 @@
+# ---- 本机配置（含真实路径 / 账号 / 私人歌单地址，绝不入库）----
+config.json
+config.local.json
+*.local.txt
+*.local.json
+
+# ---- 运行时产物与业务数据 ----
+cuts/
+segments/
+transcript/out/
+_media_cache/
+kdocs_songs.json
+song_library.txt
+_render_job.json
+*.render.mp4
+
+# ---- 私有素材（第三方美术作品的本地副本）----
+_private_assets/
+
+# ---- 开发期归档（一次性脚本 / 旧版备份 / 构建产物）----
+archive/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# ---- Node ----
+node_modules/
+package-lock.json
+
+# ---- 编辑器与系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

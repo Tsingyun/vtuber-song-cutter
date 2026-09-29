@@ -1,0 +1,3387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Song Cut · 歌词视频工坊</title>
+<link href="fonts/fonts.css" rel="stylesheet">
+<style>
+/* HarmonyOS Sans SC（本地全字符集 woff2：中文/拉丁/日文汉字假名全覆盖，可商用） */
+@font-face{font-family:'HarmonyOS Sans SC';font-weight:400;font-style:normal;font-display:swap;src:url(fonts/harmonyos/HarmonyOS_Sans_SC_Regular.woff2) format('woff2');}
+@font-face{font-family:'HarmonyOS Sans SC';font-weight:500;font-style:normal;font-display:swap;src:url(fonts/harmonyos/HarmonyOS_Sans_SC_Medium.woff2) format('woff2');}
+@font-face{font-family:'HarmonyOS Sans SC';font-weight:600;font-style:normal;font-display:swap;src:url(fonts/harmonyos/HarmonyOS_Sans_SC_Bold.woff2) format('woff2');}
+@font-face{font-family:'HarmonyOS Sans SC';font-weight:700;font-style:normal;font-display:swap;src:url(fonts/harmonyos/HarmonyOS_Sans_SC_Bold.woff2) format('woff2');}
+</style>
+<style>
+  :root{
+    --bg:#0d0d0f; --panel:#161618; --panel-2:#1d1d20; --line:#2b2b2f;
+    --text:#f5f5f7; --sub:#9b9ba1;
+    --rose:#da5d77; --ice:#58b7d6; --gold:#cfa668;
+    --accent:#da5d77; --accent-2:#58b7d6;
+    --hero-a:#3a2b3f; --hero-b:#151318;
+    --radius:14px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit; cursor:pointer; border:none; background:none; color:inherit;}
+  input,textarea{font-family:inherit;}
+
+  /* ============ ① 侧边导航（Apple Music：左侧「资料库」常驻侧栏） ============ */
+  .sidebar{
+    position:fixed; left:0; top:0; bottom:0; width:244px; z-index:30;
+    background:linear-gradient(180deg,#1a1a1d,#131315);
+    border-right:1px solid var(--line);
+    display:flex; flex-direction:column; padding:22px 16px;
+  }
+  .brand{display:flex; align-items:center; gap:10px; margin-bottom:26px;}
+  .brand .mark{
+    width:38px; height:38px; border-radius:10px; flex:none;
+    background:linear-gradient(135deg,var(--rose),var(--ice));
+    display:flex; align-items:center; justify-content:center;
+    font-family:"Playfair Display",serif; font-style:italic; font-weight:900; font-size:20px; color:#fff;
+  }
+  .brand .name{font-weight:900; font-size:15px; letter-spacing:.5px;}
+  .brand .sub{font-size:11px; color:var(--sub); letter-spacing:2px;}
+  .nav-label{font-size:11px; color:#6e6e75; letter-spacing:2px; margin:0 8px 8px; font-weight:700;}
+  .nav{display:flex; flex-direction:column; gap:2px;}
+  .nav button{
+    display:flex; align-items:center; gap:10px; width:100%;
+    padding:9px 10px; border-radius:9px; font-size:13.5px; font-weight:500; color:var(--sub);
+    transition:background .15s ease,color .15s ease;
+  }
+  .nav button:hover{background:rgba(255,255,255,.06); color:var(--text);}
+  .nav button.active{background:rgba(255,255,255,.09); color:var(--text); font-weight:700;}
+  .nav button i{width:16px; text-align:center; font-style:normal; opacity:.8;}
+  .side-foot{margin-top:auto; font-size:11px; color:#63636a; line-height:1.7; padding-top:14px; border-top:1px solid var(--line);}
+  .side-foot b{color:var(--sub); font-weight:700;}
+  .toggle-annot{
+    margin-top:12px; width:100%; padding:8px; border-radius:9px; font-size:12px; font-weight:700;
+    border:1px solid var(--line); color:var(--sub);
+  }
+  .toggle-annot.on{background:rgba(218,93,119,.14); color:var(--rose); border-color:rgba(218,93,119,.4);}
+
+  /* ============ 主体 ============ */
+  .app{margin-left:244px; min-height:100vh;}
+
+  /* ============ ② 顶部常驻播放条（Apple Music：顶部 Now Playing 常驻条） ============ */
+  .playbar{
+    position:sticky; top:0; z-index:25; height:74px;
+    display:grid; grid-template-columns:minmax(180px,1fr) auto minmax(240px,2fr) auto;
+    align-items:center; gap:18px; padding:0 22px;
+    background:rgba(16,16,18,.94); backdrop-filter:blur(18px);
+    border-bottom:1px solid var(--line);
+  }
+  .np{display:flex; align-items:center; gap:12px; min-width:0;}
+  .np .thumb{
+    width:46px; height:46px; border-radius:9px; flex:none; object-fit:cover;
+    background:linear-gradient(135deg,#3a2b3f,#1b1b1e);
+  }
+  .np .meta{min-width:0;}
+  .np .t{font-size:13.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .np .a{font-size:11.5px; color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .pb-ctrls{display:flex; align-items:center; gap:14px;}
+  .pb-ctrls button{font-size:15px; color:var(--sub); transition:color .15s,transform .15s;}
+  .pb-ctrls button:hover{color:var(--text);}
+  .pb-ctrls .play{
+    width:34px; height:34px; border-radius:50%; background:var(--text); color:#111;
+    display:flex; align-items:center; justify-content:center; font-size:13px;
+  }
+  .pb-ctrls .play:hover{transform:scale(1.06);}
+  .pb-scrub{display:flex; align-items:center; gap:10px;}
+  .pb-scrub .time{font-size:11px; color:var(--sub); font-variant-numeric:tabular-nums; min-width:36px;}
+  .pb-scrub input[type=range]{flex:1; accent-color:var(--accent); height:3px; cursor:pointer;}
+  .pb-right{display:flex; align-items:center; gap:14px;}
+  .pb-right input[type=range]{width:74px; accent-color:var(--sub);}
+  .btn{
+    padding:8px 16px; border-radius:999px; font-size:13px; font-weight:700;
+    background:var(--accent); color:#fff; transition:opacity .15s,transform .15s;
+  }
+  .btn:hover{opacity:.9; transform:translateY(-1px);}
+  .btn.ghost{background:rgba(255,255,255,.08); color:var(--text);}
+  .btn.dark{background:var(--text); color:#111;}
+  .btn:disabled{opacity:.4; transform:none; cursor:not-allowed;}
+
+  /* ============ ③ 内容区 ============ */
+  .content{max-width:1200px; margin:0 auto; padding:26px 26px 80px; display:flex; flex-direction:column; gap:22px;}
+
+  /* ③-A 专辑详情 Hero（Apple Music：专辑页大幅封面 + 从封面取色的渐变背景） */
+  .hero{
+    position:relative; border-radius:18px; overflow:hidden;
+    background:linear-gradient(170deg,var(--hero-a),var(--hero-b));
+    padding:34px; display:grid; grid-template-columns:260px 1fr; gap:34px; align-items:end;
+    min-height:330px; transition:background .8s ease;
+  }
+  .hero::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(120% 90% at 12% 0%,rgba(255,255,255,.16),transparent 60%);
+  }
+  .hero .cover-wrap{position:relative; z-index:1;}
+  .hero .cover{
+    width:260px; height:260px; border-radius:12px; object-fit:cover; display:block;
+    box-shadow:0 24px 60px rgba(0,0,0,.5);
+    background:linear-gradient(135deg,#4a3a4e,#1d1d20);
+  }
+  .hero .info{position:relative; z-index:1; padding-bottom:4px;}
+  .hero .kind{font-size:11px; letter-spacing:3px; color:rgba(255,255,255,.72); font-weight:700; margin-bottom:10px;}
+  .hero h1{
+    font-size:44px; line-height:1.08; font-weight:900; letter-spacing:-.5px; margin-bottom:8px;
+    text-shadow:0 2px 24px rgba(0,0,0,.35);
+  }
+  .hero .by{font-size:15px; color:rgba(255,255,255,.78); margin-bottom:16px;}
+  .hero .chips{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;}
+  .chip{
+    font-size:12px; font-weight:700; padding:5px 12px; border-radius:999px;
+    background:rgba(255,255,255,.16); color:#fff; border:1px solid rgba(255,255,255,.14);
+  }
+  .hero .actions{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+
+  /* ============ 主标题装饰：5 套方案（同一字体 · 同一配色 · 同一视觉语言） ============ */
+  .hero h1{
+    position:relative; display:block; isolation:isolate;
+    font-size:clamp(27px,4.4vw,44px); line-height:1.16;
+    font-weight:900; letter-spacing:-.5px;
+    margin-bottom:10px; max-width:100%;
+  }
+  .hero h1 .tsl{
+    display:block; font:inherit; font-weight:900; letter-spacing:inherit; line-height:inherit;
+    opacity:0; transform:translateY(6px);
+    transition:opacity .42s cubic-bezier(.33,.72,.34,1), transform .42s cubic-bezier(.33,.72,.34,1);
+    will-change:opacity, transform;
+  }
+  .hero h1 .tsl:first-child{position:relative;}
+  .hero h1 .tsl:not(:first-child){position:absolute; left:0; top:0; width:100%;}
+  .hero h1 .tsl.on{opacity:1; transform:none;}
+  .hero h1 .tsl:not(.on){animation-play-state:paused;}
+
+  /* ① 流光渐变：粉 → 金 → 冰蓝渐变填充，高光缓慢流动 */
+  .tsl-0{
+    background:linear-gradient(96deg,#ffe4ea 0%,var(--rose) 26%,var(--gold) 50%,var(--ice) 78%,#e4f6fc 100%);
+    background-size:230% 100%; background-position:0% 50%;
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 2px 14px rgba(0,0,0,.34));
+    animation:tsSheen 9s ease-in-out infinite alternate;
+  }
+  @keyframes tsSheen{from{background-position:0% 50%;}to{background-position:100% 50%;}}
+
+  /* ② 描边镂空：冰白描边 + 冷调外光 */
+  .tsl-1{
+    color:transparent; -webkit-text-stroke:2px rgba(255,255,255,.94); paint-order:stroke fill;
+    filter:drop-shadow(0 0 12px rgba(88,183,214,.34)) drop-shadow(0 2px 12px rgba(0,0,0,.30));
+  }
+
+  /* ③ 霓虹柔光：纯白字 + 玫红/冰蓝呼吸光晕 */
+  .tsl-2{ color:#fff; animation:tsGlow 3.8s ease-in-out infinite alternate; }
+  @keyframes tsGlow{
+    from{text-shadow:0 0 4px rgba(255,255,255,.50),0 0 14px rgba(218,93,119,.40),0 0 30px rgba(88,183,214,.32);}
+    to  {text-shadow:0 0 7px rgba(255,255,255,.75),0 0 24px rgba(218,93,119,.68),0 0 52px rgba(88,183,214,.52);}
+  }
+
+  /* ④ 色块高亮：粉 → 冰蓝渐变色块衬底（色块贴住文字而非整行） */
+  .hero h1 .tsl.tsl-3{ color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.28); width:fit-content; max-width:100%; }
+  .tsl-3::before{
+    content:""; position:absolute; z-index:-1;
+    left:-.30em; right:-.30em; top:.06em; bottom:.10em;
+    border-radius:.20em;
+    background:linear-gradient(96deg,var(--rose),#a8497f 52%,var(--ice));
+    box-shadow:0 10px 24px rgba(0,0,0,.30), inset 0 0 0 1px rgba(255,255,255,.16);
+  }
+
+  /* ⑤ 双色错位：玫红 / 冰蓝双层轻微错位，白字压顶 */
+  .tsl-4{ color:#fff; filter:drop-shadow(0 2px 10px rgba(0,0,0,.32)); }
+  .tsl-4::before,.tsl-4::after{
+    content:attr(data-text); position:absolute; left:0; top:0; width:100%; z-index:-1;
+    font:inherit; letter-spacing:inherit;
+  }
+  .tsl-4::before{color:var(--rose); transform:translate(-3px,2px);}
+  .tsl-4::after {color:var(--ice);  transform:translate(3px,-2px);}
+
+  @media (prefers-reduced-motion:reduce){
+    .tsl-0,.tsl-2{animation:none;}
+    .hero h1 .tsl{transition-duration:.18s;}
+  }
+  @media (max-width:640px){
+    .hero h1 .tsl.tsl-3::before{ left:-.14em; right:-.14em; }
+  }
+
+  /* 切换按钮 */
+  .ts-btn{display:inline-flex; align-items:center; gap:8px; font-size:12.5px; white-space:nowrap;}
+  .ts-btn .ts-dot{
+    width:14px; height:14px; border-radius:50%; flex:none;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);
+    transition:background .42s ease, transform .32s ease;
+  }
+  .ts-btn:hover .ts-dot{transform:rotate(90deg) scale(1.1);}
+  .ts-btn b{font-variant-numeric:tabular-nums;}
+
+  /* 通用卡片 / 折叠区 */
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;}
+  .card > header{
+    display:flex; align-items:center; gap:12px; padding:16px 18px; cursor:pointer;
+    transition:background .15s;
+  }
+  .card > header:hover{background:rgba(255,255,255,.03);}
+  .card > header .idx{
+    width:22px; height:22px; border-radius:7px; flex:none; font-size:11px; font-weight:900;
+    background:rgba(255,255,255,.08); color:var(--sub); display:flex; align-items:center; justify-content:center;
+  }
+  .card > header h2{font-size:14.5px; font-weight:800; letter-spacing:.3px;}
+  .card > header .hint{font-size:11.5px; color:#6e6e75; margin-left:auto;}
+  .card > header .chev{font-size:11px; color:var(--sub); transition:transform .2s ease;}
+  .card.open > header .chev{transform:rotate(90deg);}
+  .card .body{display:none; padding:4px 18px 20px; border-top:1px solid var(--line);}
+  .card.open .body{display:block;}
+  .row{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .row3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;}
+  .f{display:flex; flex-direction:column; gap:6px; margin-bottom:14px;}
+  .f label{font-size:11px; letter-spacing:1.5px; color:var(--sub); font-weight:700;}
+  .f input[type=text]{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:9px;
+    padding:10px 12px; font-size:13.5px; color:var(--text); outline:none; transition:border-color .15s;
+  }
+  .f input[type=text]:focus{border-color:var(--accent);}
+  .sub-note{font-size:11.5px; color:#6e6e75; line-height:1.7;}
+
+  /* 预览卡 */
+  .preview-card .body{display:block;}
+  .stage-wrap{position:relative; border-radius:10px; overflow:hidden; background:#111;}
+  canvas#cv{display:block; width:100%; aspect-ratio:16/9; cursor:pointer;}
+  .stage-meta{
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    margin-top:12px; font-size:11.5px; color:var(--sub);
+  }
+  .stage-meta .dot{width:6px; height:6px; border-radius:50%; background:var(--ice); display:inline-block;}
+
+  /* 画面装饰控件行 */
+  .deco-ctl{margin-top:12px;}
+  .deco-ctl .chk{font-size:12.5px;}
+
+  /* 贴纸层（可编辑覆盖层：只画边框与手柄，内容由 canvas 绘制，避免重影） */
+  .sticker-layer{position:absolute; inset:0; z-index:3;}
+  .sticker-layer[hidden]{display:none;}
+  .st-item{
+    position:absolute; cursor:grab; touch-action:none; user-select:none;
+    border:1px dashed rgba(255,255,255,.5); border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    font-family:"Noto Sans SC",sans-serif; color:#fff; line-height:1;
+  }
+  .st-item.sel{border-style:solid; border-color:#fff;}
+  .st-item:active{cursor:grabbing;}
+  .st-item img{pointer-events:none; display:block;}
+  .st-h{
+    position:absolute; width:24px; height:24px; border-radius:50%; background:#fff; color:#111;
+    font-size:12px; font-weight:900; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 10px rgba(0,0,0,.45); touch-action:none;
+  }
+  .st-h.del{left:-12px; top:-12px; background:var(--rose); color:#fff; cursor:pointer;}
+  .st-h.rt {right:-12px; top:-12px; cursor:grab;}
+  .st-h.sc {right:-12px; bottom:-12px; cursor:nwse-resize;}
+  .sticker-panel{
+    margin-top:12px; padding:12px 14px; border-radius:12px;
+    background:var(--panel-2); border:1px solid var(--line);
+  }
+  .sticker-panel[hidden]{display:none;}
+  .sp-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:9px;}
+  .sp-row:last-child{margin-bottom:0;}
+  .sp-lab{font-size:11px; letter-spacing:1.5px; color:var(--sub); font-weight:700; min-width:52px;}
+  .st-pick{
+    width:34px; height:34px; border-radius:9px; font-size:17px; line-height:1;
+    background:rgba(255,255,255,.07); border:1px solid var(--line);
+  }
+  .st-pick:hover{background:rgba(255,255,255,.15);}
+
+  /* 素材上传 */
+  .uploads{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .drop{
+    border:1px dashed var(--line); border-radius:12px; padding:18px; text-align:center;
+    background:var(--panel-2); transition:border-color .15s,background .15s;
+  }
+  .drop:hover{border-color:var(--accent);}
+  .drop .ic{font-size:20px; margin-bottom:8px;}
+  .drop .tt{font-size:13px; font-weight:700; margin-bottom:4px;}
+  .drop .ds{font-size:11.5px; color:var(--sub); margin-bottom:12px;}
+  input[type=file]{display:none;}
+  .filebtn{font-size:12.5px; font-weight:700; padding:7px 14px; border-radius:999px; background:rgba(255,255,255,.08);}
+  .filebtn:hover{background:rgba(255,255,255,.14);}
+  .media-state{
+    margin-top:14px; padding:14px 16px; border-radius:11px; font-size:12.5px;
+    background:rgba(88,183,214,.08); border:1px solid rgba(88,183,214,.22); color:#cfeaf4;
+  }
+  .media-state.warn{background:rgba(218,93,119,.09); border-color:rgba(218,93,119,.28); color:#f3ced6;}
+  .bar{height:5px; border-radius:3px; background:rgba(255,255,255,.14); overflow:hidden; margin:10px 0 8px;}
+  .bar > i{display:block; height:100%; width:0; border-radius:3px; background:linear-gradient(90deg,var(--rose),var(--ice)); transition:width .25s linear;}
+  .linkbtn{font-size:12px; font-weight:700; color:var(--ice); text-decoration:underline;}
+
+  /* 歌词区 */
+  textarea#lyricsText{
+    width:100%; height:170px; resize:vertical; background:var(--panel-2);
+    border:1px solid var(--line); border-radius:10px; padding:12px; font-size:13px; line-height:1.9;
+    color:var(--text); outline:none;
+  }
+  textarea#lyricsText:focus{border-color:var(--accent);}
+  .ctl{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px;}
+  .ctl label{font-size:12px; color:var(--sub); font-weight:700;}
+  .ctl input[type=range]{accent-color:var(--accent); width:170px;}
+  .val{font-size:12px; font-weight:800; color:var(--accent); min-width:50px;}
+  .mini{padding:6px 12px; border-radius:999px; font-size:12px; font-weight:700; background:rgba(255,255,255,.08);}
+  .mini:hover{background:rgba(255,255,255,.14);}
+  .mini:disabled{opacity:.38; cursor:not-allowed;}
+  .mini.primary{background:var(--accent); color:#fff;}
+  .mini.primary:hover{opacity:.9;}
+
+  /* 歌词工具块（B 智能铺开 / A 打点校准） */
+  .lyr-tool{
+    margin-top:14px; padding:14px 16px; border-radius:12px;
+    background:var(--panel-2); border:1px solid var(--line);
+  }
+  .lt-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
+  .lt-badge{
+    width:20px; height:20px; border-radius:6px; flex:none; font-size:11px; font-weight:900;
+    display:flex; align-items:center; justify-content:center; color:#fff;
+  }
+  .lt-badge.b{background:var(--ice);}
+  .lt-badge.a{background:var(--rose);}
+  .lt-head b{font-size:13px; font-weight:800; letter-spacing:.3px;}
+  .lt-head .sub-note{flex:1; min-width:180px;}
+  .lyr-tool .ctl{margin-top:6px;}
+
+  /* A：打点面板（按需出现） */
+  .tap{
+    margin-top:12px; padding:14px 16px; border-radius:12px;
+    background:linear-gradient(150deg,rgba(218,93,119,.12),rgba(88,183,214,.07));
+    border:1px solid rgba(218,93,119,.32);
+  }
+  .tap-top{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
+  .tap-top b{font-size:12.5px; font-weight:800; color:#f3ced6; letter-spacing:.5px;}
+  .tap-dot{width:7px; height:7px; border-radius:50%; background:var(--rose); box-shadow:0 0 0 0 rgba(218,93,119,.6); animation:tapPulse 1.4s infinite;}
+  @keyframes tapPulse{ 0%{box-shadow:0 0 0 0 rgba(218,93,119,.55);} 70%{box-shadow:0 0 0 9px rgba(218,93,119,0);} 100%{box-shadow:0 0 0 0 rgba(218,93,119,0);} }
+  .tap-spacer{flex:1;}
+  .tap-line{
+    font-size:24px; font-weight:900; line-height:1.35; color:#fff; margin-bottom:6px;
+    min-height:34px; letter-spacing:.5px;
+  }
+  .tap-line.empty{color:var(--sub); font-size:15px; font-weight:700;}
+  .tap-next{font-size:13.5px; font-weight:600; color:rgba(255,255,255,.42); min-height:20px; margin-bottom:12px;}
+  .kbd{
+    display:inline-block; padding:1px 7px; border-radius:5px; font-size:11px; font-weight:800;
+    background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.16); color:#fff;
+  }
+  .tap-meter{height:4px; border-radius:2px; background:rgba(255,255,255,.14); overflow:hidden; margin:10px 0 12px;}
+  .tap-meter > i{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--rose),var(--ice)); transition:width .2s ease;}
+
+  /* 缓存提示条 */
+  .cache-bar{
+    margin-top:14px; padding:11px 14px; border-radius:11px; font-size:12px; line-height:1.8;
+    background:rgba(207,166,104,.09); border:1px solid rgba(207,166,104,.26); color:#e8d6b4;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .cache-bar[hidden]{display:none;}   /* display:flex 会覆盖 hidden，需显式复位 */
+
+  /* 导出区 */
+  .export-row{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .chk{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--sub); font-weight:700;}
+  input[type=checkbox]{accent-color:var(--accent);}
+  #exportStatus{font-size:12.5px; font-weight:700; color:var(--accent);}
+  .spec{display:flex; gap:26px; flex-wrap:wrap; margin-bottom:16px;}
+  .spec div{font-size:11px; color:var(--sub); letter-spacing:1px;}
+  .spec b{display:block; font-size:15px; color:var(--text); letter-spacing:0; margin-top:3px; font-weight:800;}
+
+  /* 布局标注（按需出现） */
+  .annot{
+    display:none; position:absolute; z-index:5; font-size:11px; font-weight:800;
+    padding:4px 9px; border-radius:6px; background:var(--rose); color:#fff;
+    box-shadow:0 6px 18px rgba(0,0,0,.4);
+  }
+  body.annotate .annot{display:inline-block;}
+
+  /* 裁切弹窗 */
+  .modal{
+    position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.66); backdrop-filter:blur(6px);
+  }
+  .modal.show{display:flex;}
+  .modal-card{
+    width:min(1000px,94vw); background:var(--panel); border:1px solid var(--line);
+    border-radius:16px; padding:22px; display:grid; grid-template-columns:1fr 240px; gap:20px;
+  }
+  .modal-card h3{font-size:15px; font-weight:900; margin-bottom:4px; grid-column:1/-1;}
+  .modal-card .lead{font-size:12px; color:var(--sub); margin-bottom:6px; grid-column:1/-1;}
+  canvas#cropCv{width:100%; border-radius:10px; background:#0b0b0d; cursor:grab; touch-action:none; display:block;}
+  canvas#cropCv:active{cursor:grabbing;}
+  .crop-side{display:flex; flex-direction:column; gap:14px;}
+  .crop-side .pv{
+    width:220px; height:220px; border-radius:10px; overflow:hidden; background:#0b0b0d;
+  }
+  canvas#cropPrev{width:100%; height:100%; display:block;}
+  .crop-side .lab{font-size:11px; letter-spacing:1.5px; color:var(--sub); font-weight:700;}
+  .crop-actions{display:flex; flex-direction:column; gap:8px; margin-top:auto;}
+
+  @media (max-width:1040px){
+    .sidebar{display:none;}
+    .app{margin-left:0;}
+    .hero{grid-template-columns:1fr; gap:20px;}
+    .hero .cover{width:200px; height:200px;}
+    .playbar{grid-template-columns:1fr auto; grid-template-areas:"np ctrls" "scrub right"; height:auto; padding:10px 16px; row-gap:8px;}
+    .np{grid-area:np;} .pb-ctrls{grid-area:ctrls;} .pb-scrub{grid-area:scrub;} .pb-right{grid-area:right;}
+    .row,.row3,.uploads{grid-template-columns:1fr;}
+    .modal-card{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ========= ① 侧边导航（Apple Music 参考点：左侧常驻「资料库」侧栏） ========= -->
+<aside class="sidebar">
+  <div class="brand">
+    <div class="mark">S</div>
+    <div>
+      <div class="name">SONG CUT</div>
+      <div class="sub">LYRIC STUDIO</div>
+    </div>
+  </div>
+  <div class="nav-label">制作流程</div>
+  <nav class="nav" id="nav">
+    <button data-target="sec-preview" class="active"><i>▣</i>导出画面</button>
+    <button data-target="sec-media"><i>♫</i>素材</button>
+    <button data-target="sec-lyrics"><i>❝</i>歌词</button>
+    <button data-target="sec-meta"><i>◎</i>信息</button>
+    <button data-target="sec-export"><i>↗</i>导出</button>
+  </nav>
+  <button class="toggle-annot" id="btnAnnot">显示布局标注</button>
+  <div class="side-foot">
+    <b>1080P · 60FPS</b><br>
+    H.264 / 24Mbps<br>
+    SONG CUT · 歌词视频工坊
+  </div>
+</aside>
+
+<div class="app">
+  <!-- ========= ② 顶部常驻播放条（Apple Music 参考点：顶部 Now Playing 常驻条） ========= -->
+  <header class="playbar">
+    <div class="np">
+      <img class="thumb" id="miniCover" alt="">
+      <div class="meta">
+        <div class="t" id="miniTitle">未选择歌曲</div>
+        <div class="a" id="miniArtist">上传音频后开始</div>
+      </div>
+    </div>
+    <div class="pb-ctrls">
+      <button id="pbPrev" title="上一首">◀◀</button>
+      <button id="pbPlay" class="play" title="播放/暂停">▶</button>
+      <button id="pbNext" title="下一首">▶▶</button>
+    </div>
+    <div class="pb-scrub">
+      <span class="time" id="pbCur">0:00</span>
+      <input type="range" id="pbSeek" min="0" max="1000" value="0">
+      <span class="time" id="pbDur">0:00</span>
+    </div>
+    <div class="pb-right">
+      <input type="range" id="volume" min="0" max="1" step="0.05" value="0.9" title="音量">
+      <button class="btn" id="btnExportTop">导出视频</button>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- ========= ③-A 专辑详情 Hero（Apple Music 参考点：专辑页大幅封面 + 取色渐变背景） ========= -->
+    <section class="hero" id="hero">
+      <span class="annot" style="left:14px;top:14px;">① 大幅封面 + 取色渐变背景</span>
+      <div class="cover-wrap">
+        <img class="cover" id="heroCover" alt="">
+      </div>
+      <div class="info">
+        <div class="kind" id="heroKind">正在制作</div>
+        <h1 id="heroTitle">
+          <span class="tsl tsl-0">笑忘书</span>
+          <span class="tsl tsl-1" aria-hidden="true">笑忘书</span>
+          <span class="tsl tsl-2" aria-hidden="true">笑忘书</span>
+          <span class="tsl tsl-3" aria-hidden="true">笑忘书</span>
+          <span class="tsl tsl-4" aria-hidden="true">笑忘书</span>
+        </h1>
+        <div class="by" id="heroBy">原唱 · 王菲</div>
+        <div class="chips" id="heroChips"></div>
+        <div class="actions">
+          <button class="btn dark" id="btnPlayHero">▶ 播放预览</button>
+          <button class="btn ghost" id="btnGotoMedia">更换素材</button>
+          <button class="btn ghost" id="btnRecrop">重新构图</button>
+          <button class="btn ghost ts-btn" id="btnTsSwitch" title="循环切换主标题装饰方案（快捷键 T）">
+            <span class="ts-dot" id="tsDot"></span><span id="tsLabel">标题样式 · 1/5 流光渐变</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= ③-B 导出画面（WYSIWYG 预览） ========= -->
+    <section class="card preview-card open" id="sec-preview">
+      <span class="annot" style="right:14px;top:52px;">② 内容区 · 画面预览</span>
+      <header>
+        <span class="idx">1</span>
+        <h2>导出画面</h2>
+        <span class="hint">所见即所得 · 1920×1080 · 60fps</span>
+        <span class="chev">›</span>
+      </header>
+      <div class="body">
+        <div class="stage-wrap">
+          <canvas id="cv" width="1920" height="1080"></canvas>
+          <div id="stickerLayer" class="sticker-layer" hidden></div>
+        </div>
+        <div class="stage-meta">
+          <span><span class="dot"></span> 画面由封面自动取色生成渐变</span>
+          <span>·</span><span>点击画面底部进度条可跳转</span>
+          <span>·</span><span>空格键播放/暂停</span>
+        </div>
+        <div class="ctl deco-ctl">
+          <label class="chk"><input type="checkbox" id="karaokeOn" checked>逐字卡拉OK</label>
+          <label class="chk"><input type="checkbox" id="haloOn" checked>频谱光环</label>
+          <span style="width:12px"></span>
+          <button class="mini" id="btnSticker">贴纸层：关</button>
+          <span class="sub-note">开启后可添加 / 拖拽 / 缩放 / 旋转贴纸，自动保存</span>
+          <span style="width:12px"></span>
+          <button class="mini" id="btnArtImage">立绘图层：未载入</button>
+          <input type="file" id="artImageFile" accept="image/*" hidden>
+          <button class="mini" id="btnArtImageClear" hidden>移除立绘</button>
+          <span class="sub-note">右侧装饰图层 · 自动淡入与渐隐融边</span>
+        </div>
+        <div class="sticker-panel" id="stickerPanel" hidden>
+          <div class="sp-row">
+            <span class="sp-lab">内置</span>
+            <button class="st-pick" data-ch="♪">♪</button>
+            <button class="st-pick" data-ch="♥">♥</button>
+            <button class="st-pick" data-ch="✦">✦</button>
+            <button class="st-pick" data-ch="☾">☾</button>
+            <button class="st-pick" data-ch="❀">❀</button>
+            <button class="st-pick" data-ch="✧">✧</button>
+            <button class="st-pick" data-ch="⚡">⚡</button>
+            <button class="st-pick" data-ch="☁">☁</button>
+            <button class="st-pick" data-ch="❄">❄</button>
+            <button class="st-pick" data-ch="✿">✿</button>
+          </div>
+          <div class="sp-row">
+            <span class="sp-lab">图片</span>
+            <button class="mini" id="btnStickerImg">上传图片贴纸</button>
+            <input type="file" id="stickerImgFile" accept="image/*">
+          </div>
+          <div class="sp-row">
+            <span class="sp-lab">选中项</span>
+            <button class="mini" id="stUp">上移一层</button>
+            <button class="mini" id="stDown">下移一层</button>
+            <button class="mini" id="stDel">删除</button>
+            <span class="sub-note" id="stInfo">未选中</span>
+          </div>
+          <div class="sp-row">
+            <button class="mini" id="stClear">清除全部贴纸</button>
+            <span class="sub-note">贴纸随画面一起导出到视频 · 位置/大小/角度自动持久化</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= ③-C 素材（音频/视频上传 + 视频提取音轨 + 封面裁切） ========= -->
+    <section class="card" id="sec-media">
+      <span class="annot" style="right:14px;top:14px;">③ 素材区（按需展开）</span>
+      <header>
+        <span class="idx">2</span>
+        <h2>素材</h2>
+        <span class="hint" id="mediaHint">未上传音源</span>
+        <span class="chev">›</span>
+      </header>
+      <div class="body">
+        <div class="uploads">
+          <div class="drop">
+            <div class="ic">♫</div>
+            <div class="tt">音源</div>
+            <div class="ds">支持音频文件，或直接选择视频（自动提取音轨）</div>
+            <input type="file" id="mediaFile" accept="audio/*,video/*">
+            <button class="filebtn" onclick="document.getElementById('mediaFile').click()">选择音频 / 视频</button>
+          </div>
+          <div class="drop">
+            <div class="ic">▣</div>
+            <div class="tt">封面</div>
+            <div class="ds">上传后可拖拽、缩放裁切构图</div>
+            <input type="file" id="coverFile" accept="image/*">
+            <button class="filebtn" onclick="document.getElementById('coverFile').click()">选择封面图</button>
+            <div style="margin-top:10px;">
+              <button class="mini" id="btnRecrop2">重新构图</button>
+            </div>
+          </div>
+        </div>
+        <div class="media-state" id="mediaState" hidden></div>
+      </div>
+    </section>
+
+    <!-- ========= ③-D 歌词 ========= -->
+    <section class="card" id="sec-lyrics">
+      <header>
+        <span class="idx">3</span>
+        <h2>歌词</h2>
+        <span class="hint" id="lyricHint">未载入</span>
+        <span class="chev">›</span>
+      </header>
+      <div class="body">
+        <textarea id="lyricsText" spellcheck="false"></textarea>
+        <div class="sub-note" id="lyricTip" style="margin-top:8px;"></div>
+
+        <!-- 方案 B：启发式智能铺开（全自动生成时间轴初稿） -->
+        <div class="lyr-tool">
+          <div class="lt-head">
+            <span class="lt-badge b">B</span>
+            <b>智能铺开</b>
+            <span class="sub-note">全自动：按字数权重、句式停顿、段落分布估算每行时间，并自动留出前奏 / 间奏</span>
+          </div>
+          <div class="ctl">
+            <button class="mini primary" id="btnSmart">一键生成时间轴</button>
+            <span class="sub-note" id="smartInfo">需先载入音源（用于读取歌曲时长）</span>
+          </div>
+        </div>
+
+        <!-- 方案 A：播放中逐行打点校准 -->
+        <div class="lyr-tool">
+          <div class="lt-head">
+            <span class="lt-badge a">A</span>
+            <b>打点校准</b>
+            <span class="sub-note">边听边打：听到某行唱出时按 <span class="kbd">Enter</span>，逐行精校（精度最高）</span>
+          </div>
+          <div class="ctl">
+            <button class="mini primary" id="btnTap">从头开始打点</button>
+            <button class="mini" id="btnTapFrom">从当前行续打</button>
+            <button class="mini" id="btnSaveCache">按歌名保存</button>
+            <button class="mini" id="btnBackupCache">备份全部缓存</button>
+          </div>
+
+          <div class="tap" id="tapPanel" hidden>
+            <div class="tap-top">
+              <span class="tap-dot"></span>
+              <b>打点中</b>
+              <span class="sub-note" id="tapCount">0 / 0</span>
+              <span class="tap-spacer"></span>
+              <span class="sub-note">听到下面这行唱出时按 <span class="kbd">Enter</span></span>
+            </div>
+            <div class="tap-line" id="tapCur">—</div>
+            <div class="tap-next" id="tapNext"></div>
+            <div class="tap-meter"><i id="tapMeter"></i></div>
+            <div class="ctl">
+              <button class="mini primary" id="tapHit">打点 Enter</button>
+              <button class="mini" id="tapUndo">撤销 ⌫</button>
+              <button class="mini" id="tapSkip">跳过本行 ↓</button>
+              <button class="mini" id="tapApply">完成并应用 Esc</button>
+              <button class="mini" id="tapCancel">取消</button>
+            </div>
+            <div class="sub-note" style="margin-top:10px;">
+              未打点的行会按相邻节奏自动插值 · 完成后写入 LRC 并自动按「歌曲名」缓存，下次打开可直接复用
+            </div>
+          </div>
+        </div>
+
+        <div class="cache-bar" id="cacheBar" hidden></div>
+
+        <div class="ctl">
+          <label>歌词偏移</label>
+          <button class="mini" id="offMinus">−0.1s</button>
+          <input type="range" id="offRange" min="-5" max="5" step="0.1" value="0">
+          <button class="mini" id="offPlus">+0.1s</button>
+          <span class="val" id="offVal">0.0s</span>
+          <button class="mini" id="offReset">复位</button>
+          <span style="width:14px"></span>
+          <label>铺开速度</label>
+          <input type="range" id="autoSpeed" min="0.6" max="1.8" step="0.1" value="1">
+          <span class="val" id="autoSpeedVal">1.0×</span>
+        </div>
+        <div class="ctl">
+          <button class="mini" id="btnSample">载入示例</button>
+          <button class="mini" id="btnClearLyrics">清空</button>
+          <button class="mini" id="btnExportLrc">导出 .lrc</button>
+          <button class="mini" id="btnClearCache">清除本歌缓存</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= ③-E 元数据 ========= -->
+    <section class="card" id="sec-meta">
+      <header>
+        <span class="idx">4</span>
+        <h2>信息</h2>
+        <span class="hint">标题 / 原唱 / 标签 / 署名</span>
+        <span class="chev">›</span>
+      </header>
+      <div class="body">
+        <div class="row">
+          <div class="f"><label>歌曲名</label><input type="text" id="songTitle" value="笑忘书"></div>
+          <div class="f"><label>原唱</label><input type="text" id="artist" value="王菲"></div>
+          <div class="f"><label>演唱者</label><input type="text" id="vocalText" value="" placeholder="演唱者"></div>
+        </div>
+        <div class="row">
+          <div class="f"><label>P 主（术力口曲填写）</label><input type="text" id="producerText" value="" placeholder="如 SolPie"></div>
+        </div>
+        <div class="row3">
+          <div class="f"><label>角标</label><input type="text" id="trackLabel" value="TRACK 01"></div>
+          <div class="f"><label>品牌签名</label><input type="text" id="badgeText" value="MUSIC ARCHIVE"></div>
+          <div class="f"><label>罗马字</label><input type="text" id="romajiText" value="" placeholder="JI MING YUE"></div>
+          <div class="f"><label>标签（逗号分隔）</label><input type="text" id="tagsText" value="流行, 华语"></div>
+        </div>
+        <div class="f"><label>歌曲注释</label><input type="text" id="noteText" value="让我亲手写这样的感触，写一封情书送给自己"></div>
+        <div class="row">
+          <div class="f"><label>左下角小字</label><input type="text" id="footerLeft" value="SONG ARCHIVE"></div>
+          <div class="f"><label>右下角出处 / 日期</label><input type="text" id="footerRight" value="切自【歌】放点歌板 2026年09月19日15点场"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= ③-F 导出 ========= -->
+    <section class="card" id="sec-export">
+      <header>
+        <span class="idx">5</span>
+        <h2>导出</h2>
+        <span class="hint">实时录制 · 时长等于歌曲时长</span>
+        <span class="chev">›</span>
+      </header>
+      <div class="body">
+        <div class="spec">
+          <div>分辨率<b>1920 × 1080</b></div>
+          <div>帧率<b>60 fps</b></div>
+          <div>编码<b>H.264 · 24 Mbps</b></div>
+          <div>封装<b>MP4（不支持时降级 WebM）</b></div>
+        </div>
+        <div class="export-row">
+          <button class="btn" id="btnExport">● 开始导出</button>
+          <button class="btn ghost" id="btnStop" disabled>停止</button>
+          <label class="chk"><input type="checkbox" id="muteMonitor"> 导出时静音监听</label>
+          <span id="exportStatus"></span>
+        </div>
+        <div class="sub-note" style="margin-top:12px;">
+          导出期间请保持本页面在前台（切走后画面会冻结）。若浏览器不支持 MP4 录制会降级为 WebM，
+          可用 <code>ffmpeg -i in.webm -c:v libx264 -r 60 -pix_fmt yuv420p out.mp4</code> 转封装。
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- ========= 封面构图裁切（按需出现） ========= -->
+<div class="modal" id="cropModal">
+  <div class="modal-card">
+    <h3>封面构图</h3>
+    <div class="lead">拖拽移动画面，滚轮或滑杆缩放；确认后按此构图生成封面。</div>
+    <div>
+      <canvas id="cropCv" width="760" height="520"></canvas>
+    </div>
+    <div class="crop-side">
+      <div class="lab">预览（导出画面效果）</div>
+      <div class="pv"><canvas id="cropPrev" width="240" height="240"></canvas></div>
+      <div class="lab">缩放</div>
+      <input type="range" id="cropScale" min="1" max="3" step="0.01" value="1">
+      <div class="crop-actions">
+        <button class="btn" id="cropOk">确认构图</button>
+        <button class="btn ghost" id="cropReset">重新调整</button>
+        <button class="btn ghost" id="cropCancel">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<audio id="audio" preload="metadata"></audio>
+<video id="video" preload="metadata" style="display:none"></video>
+
+<script src="mp4-muxer.js"></script>
+<script>
+"use strict";
+/* ==================================================================
+ *  Song Cut 歌词视频工坊 · 「霁 Jì」视觉体系
+ *  设计语言：雾霁晨光 —— 低饱和自然色 + 柔和渐变 + 克制的层级与留白
+ *    · 背景：封面取色降饱和后的双层薄雾 + 缓慢漂移柔光 + 极细噪点
+ *    · 主体：大尺寸封面（柔和光晕替代重阴影）+ 玻璃斜切高光
+ *    · 歌词：字重（400/700）与明暗双重区分的逐字卡拉OK，焦点行居中偏上
+ *    · 动效：渐显 / 缓动位移 / 极缓呼吸，周期为 3~9s，无高频闪烁
+ *  画面：1920×1080 Canvas 逐帧绘制；交互几何统一由 *_geom() 提供，
+ *        绘制与命中测试同源，缩放/窄屏下不会错位。
+ * ================================================================== */
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const W = 1920, H = 1080;
+/* 输出倍率（?res=2 → 3840×2160，4K 成片；缺省或 1 → 1920×1080，工作坊预览）。
+   设计坐标系恒为 1920×1080：全部绘制代码不动，靠画布放大 + setTransform 整体缩放。
+   ⚠ 三类「设备像素敏感」项必须同步 ×OUT_SCALE，否则 4K 与 1080P 观感不一致：
+     · ctx.filter 的模糊半径（设备像素，不随 CTM 缩放）
+     · ctx.shadowBlur（实测同样在设备像素；shadowOffsetX/Y 反之随 CTM）
+     · 逐像素生成的纹理（颗粒噪声：需同比例放大，才能保持颗粒相对大小）
+   文字精灵另走 2×OUT_SCALE 栅格（超采样），见 SPR_SS / buildSprites。 */
+const OUT_SCALE = (() => {
+  const v = parseInt(new URLSearchParams(location.search).get('res') || '1', 10);
+  return (v >= 1 && v <= 4) ? v : 1;
+})();
+if(OUT_SCALE !== 1){ cv.width = W*OUT_SCALE; cv.height = H*OUT_SCALE; }
+const $ = id => document.getElementById(id);
+const audio = $('audio'), video = $('video');
+
+/* ---------------- 配色（「明纸」明亮编辑部体系） ----------------
+ * 纸面底色固定为暖白/冷白；品牌双色（冰蓝 #87EAFF / 绯玫红 #DA5D77）
+ * 只作点睛（细线、小标记、播放头），不铺陈大面积；
+ * 文字走墨色系（深蓝灰），层级由字重 + 明度拉开。
+ * PAL 仍由封面取色派生，但仅以 ≤0.04 的 alpha 作为背景「气息」。 */
+const BRAND = { ice:'#87EAFF', iceRGB:[135,234,255], iceDeep:[56,178,208],
+                rose:'#DA5D77', roseRGB:[218,93,119] };
+const INK = { title:'#1E2836', sprInk:'#232B3A', sprMut:'#9FAAB9' };
+let PAL = { top:[250,249,246], bottom:[241,240,235], accent:[168,178,190],
+            vibrant:[150,160,172], muted:[150,160,172], soft1:[190,196,204],
+            hue:0.58, sat:0.10, fromCover:false };
+const rgba = (c,a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+/* 立绘装饰层开关：默认关闭（视觉重构后右侧留白由歌词区承接） */
+const SHOW_ART = false;
+/* 品牌短标记：刊眉带/题饰/封面占位用的小字；离线渲染由 meta.mark 覆盖 */
+let BRAND_MARK = 'SC';
+
+/* ---------------- 状态 ---------------- */
+let coverImg = null;          // 裁切后的封面（Image 或 Canvas）
+let cropSrc  = null;          // 原始封面（用于重新构图）
+let playing = false, hasStarted = false, duration = 0;
+/* HL：离线逐帧渲染状态（?render=1 激活，见文件尾部模块） */
+var HL = { on:new URLSearchParams(location.search).has('render'), fps:60, dur:0, vT:0, frame:0,
+           total:0, prog:0, phase:'idle', err:null, haloTable:null, ready:false };
+let lyrics = [], lrcMode = false, offset = 0, autoSpeed = 1;
+let act = [], bl = [], bs = [], scrollY = 0;   // act=行对焦明暗  bl=行连续模糊量(px, 0=清晰)  bs=行明暗平滑值
+let exporting = false, rec = null, chunks = [], recMime = '', recIsMp4 = false;
+/* 画面装饰开关 */
+let karaokeOn = true, haloOn = true;
+
+/* ---------------- 歌词解析 ---------------- */
+const TAG_RE_SRC = String.raw`\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]`;
+function tagSec(m){ return (+m[1])*60 + (+m[2]) + (m[3] ? parseFloat('0.'+m[3]) : 0); }
+/** 逐字/逐词时间轴解析：
+ *  ① 增强 LRC「[00:12.00]我 [00:12.30]爱 [00:12.60]你」
+ *  ② 内嵌尖括号「我<00:12.30>爱<00:12.60>你」
+ *  两者皆无时返回 null → 由行时长均分驱动卡拉OK
+ */
+function parseWordLevel(line){
+  const mseq = [...line.matchAll(new RegExp(TAG_RE_SRC,'g'))];
+  if(mseq.length >= 2){
+    const ws = mseq.map((m,i)=>({
+      t: tagSec(m),
+      text: line.slice(m.index + m[0].length, i+1<mseq.length ? mseq[i+1].index : line.length).trim()
+    })).filter(w=>w.text.length);
+    if(ws.length >= 2) return ws;
+  }
+  if(/<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>/.test(line)){
+    const stripped = line.replace(new RegExp(TAG_RE_SRC,'g'),'');
+    const parts = stripped.split(/(<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>)/g);
+    let ws = [], pending = null, last = mseq.length ? tagSec(mseq[0]) : 0;
+    for(const p of parts){
+      const m = /^<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>$/.exec(p);
+      if(m){ pending = tagSec(m); continue; }
+      for(const ch of p){
+        if(ch === '\n') continue;
+        if(!ch.trim() && ch !== ' ') continue;
+        ws.push({ t: pending != null ? pending : last, text: ch });
+        last = pending != null ? pending : last;
+        pending = null;
+      }
+    }
+    if(ws.length >= 2) return ws;
+  }
+  return null;
+}
+function parseLyrics(text){
+  const out = []; let hasTime = false, stanza = 0;
+  text.split(/\r?\n/).forEach(line => {
+    if(!line.trim()){ stanza++; return; }        // 空行 = 段落分隔（B 方案据此推断间奏）
+    if(/^\[(ti|ar|al|by|offset):/i.test(line.trim())) return;
+    /* 行尾独立 <mm:ss.x> 标签 = 该行实际唱完时刻（卡拉OK填充终点；间奏不摊入填充） */
+    let fillEnd = null;
+    const endM = /<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>\s*$/.exec(line);
+    if(endM){
+      fillEnd = (+endM[1])*60 + (+endM[2]) + (endM[3] ? parseFloat('0.'+endM[3]) : 0);
+      line = line.slice(0, endM.index);
+    }
+    const wl = parseWordLevel(line);
+    if(wl){                                   // 逐字/逐词时间轴
+      hasTime = true;
+      if(fillEnd != null) wl.lineEnd = fillEnd;
+      out.push({ time: wl[0].t, text: wl.map(w=>w.text).join(''), words: wl,
+                 fillEnd: fillEnd, stanza });
+      return;
+    }
+    const tags = [...line.matchAll(new RegExp(TAG_RE_SRC,'g'))];
+    const txt  = line.replace(/\[[^\]]*\]/g,'').trim();
+    if(tags.length){
+      hasTime = true;
+      tags.forEach(m => {
+        const ms = m[3] ? parseFloat('0.'+m[3]) : 0;
+        out.push({ time:(+m[1])*60+(+m[2])+ms, text: txt || '♪', fillEnd: fillEnd, stanza });
+      });
+    } else if(txt) out.push({ time:null, text:txt, fillEnd: fillEnd, stanza });
+  });
+  lrcMode = hasTime;
+  if(hasTime){
+    out.sort((a,b)=>(a.time??1e9)-(b.time??1e9));
+    for(let i=0;i<out.length;i++){
+      if(out[i].time !== null) continue;
+      let j=i; while(j<out.length && out[j].time===null) j++;
+      const prev = i>0 ? out[i-1].time : 0;
+      const next = j<out.length ? out[j].time : (prev+(j-i)*4);
+      for(let k=i;k<j;k++) out[k].time = prev + (next-prev)*(k-i+1)/(j-i+1);
+    }
+  }
+  lyrics = out; act = out.map(()=>0); bl = out.map(()=>9); bs = out.map(()=>null); scrollY = 0;
+  buildSprites();
+  $('lyricTip').textContent = out.length
+    ? `已载入 ${out.length} 行 · ${lrcMode ? 'LRC 时间轴模式' : '纯文本自动对齐模式'}`
+    : 'LRC 示例：[00:12.50]没 有蜡烛';
+  $('lyricHint').textContent = out.length ? `${out.length} 行` : '未载入';
+}
+/* 末行展示时长上限：按字数推算（0.42s/字，clamp 4~9s）——片尾再长也不跟随延伸 */
+const lastLineCap = l => Math.min(9, Math.max(4, (((l&&l.text)||'')).replace(/\s/g,'').length * 0.42));
+function buildTimeline(){
+  const n = lyrics.length; if(!n || !duration) return;
+  if(lrcMode){
+    lyrics.forEach((l,i)=>{ l.start=l.time; l.end = i<n-1 ? lyrics[i+1].time : Math.min(duration, Math.max(l.time + lastLineCap(l), l.fillEnd || 0)); });
+    /* 卡拉OK填充终点：唱完该句即收束 —— 行尾标签优先，无标签按字重估算；
+       间奏/换气留白不再摊入填充（修复间奏前整句推进过慢）。末行放宽到片长。 */
+    lyrics.forEach((l,i)=>{
+      const gap = l.end - l.start;
+      const est = 0.9 + 0.42 * lineWeight(l.text || '');
+      const hardEnd = (i === lyrics.length-1) ? Math.min(duration || 1e9, l.start + 12) : l.end;
+      let fe = (l.fillEnd != null && l.fillEnd > l.start) ? l.fillEnd
+             : l.start + Math.min(est, Math.max(0.8, gap));
+      l.fillEnd = Math.min(Math.max(fe, l.start + 0.8), hardEnd);
+    });
+  } else {
+    const intro = Math.min(6, duration*0.05), tail = duration*0.985;
+    const span = Math.max(1,(tail-intro)/autoSpeed);
+    lyrics.forEach((l,i)=>{
+      l.start = n===1 ? intro : intro + span*i/(n-1);
+      l.end   = i<n-1 ? intro + span*(i+1)/(n-1) : duration;
+    });
+  }
+}
+function currentIdx(t){
+  let idx = -1;
+  for(let i=0;i<lyrics.length;i++){
+    const l = lyrics[i];
+    if(t < l.start - 1e-4) break;
+    /* 行尾 +0.2s 宽限内仍算当前行；间奏期 end=下一行起点，高亮持续，行为不变 */
+    if(l.end == null || t < l.end + 0.2) idx = i;
+  }
+  return idx;
+}
+
+/* ==================================================================
+ *  LRC 工具
+ * ================================================================== */
+function lrcTag(t){
+  t = Math.max(0, t || 0);
+  const m = Math.floor(t/60), s = Math.floor(t%60), cs = Math.min(99, Math.round((t%1)*100));
+  return `[${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}]`;
+}
+function lrcWrite(lines, times){
+  return lines.map((txt,i)=>lrcTag(times[i])+txt).join('\n');
+}
+
+/* ==================================================================
+ *  方案 B：启发式智能铺开（全自动生成时间轴初稿）
+ *  字数权重 → 行耗时；段落（空行）→ 间奏；时长富余 → 间奏/尾奏
+ * ================================================================== */
+const SEC_PER_UNIT = 0.245;   // 每单位"字权重"的演唱耗时（≈4 字/秒）
+const LINE_BASE    = 0.55;    // 每行最短驻留
+function lineWeight(text){
+  let w = 0;
+  for(const ch of text.replace(/\s+/g,'')){
+    if(/[㐀-鿿぀-ヿ가-힯]/.test(ch)) w += 1;          // 中日韩：全字
+    else if(/[a-zA-Z]/.test(ch))    w += 0.45;        // 拉丁：按字母半权
+    else if(/[0-9]/.test(ch))       w += 0.40;
+    else if(/[，、,;；:：—…~～]/.test(ch)) w += 0.30;  // 句内停顿
+    else if(/[。！？!?.]/.test(ch)) w += 0.45;        // 句末
+    else w += 0.20;
+  }
+  return w;
+}
+function lineDur(text){
+  const tail = /[。！？!?.…~～]$/.test(text.trim()) ? 0.42 : 0.12;
+  return LINE_BASE + SEC_PER_UNIT*lineWeight(text) + tail;
+}
+function splitStanzas(text){
+  const stanzas = []; let cur = null;
+  for(const ln of text.split(/\r?\n/)){
+    const s = ln.trim();
+    if(!s){ cur = null; continue; }
+    if(/^\[(ti|ar|al|by|offset):/i.test(s)) continue;
+    const txt = s.replace(/\[[^\]]*\]/g,'').trim();
+    if(!txt) continue;
+    if(!cur){ cur = []; stanzas.push(cur); }
+    cur.push(txt);
+  }
+  return stanzas;
+}
+function smartSpread(){
+  if(!duration){ alert('请先载入音源 —— 智能铺开需要读取歌曲时长'); openCard('sec-media'); return; }
+  const stanzas = splitStanzas($('lyricsText').value);
+  const flat = stanzas.flat();
+  if(flat.length < 2){ alert('请至少填入 2 行歌词'); return; }
+
+  const n = flat.length;
+  const durs = flat.map(lineDur);
+  const gaps = new Array(Math.max(0, stanzas.length-1)).fill(1.3);
+  const notes = [];
+
+  // 前奏 / 尾奏启发式
+  let intro = Math.min(14, Math.max(1.6, duration*0.055));
+  if(n >= 24) intro = Math.min(intro, duration*0.045);
+  let outro = Math.min(5, Math.max(1.2, duration*0.03));
+
+  const avail = Math.max(2, (duration - intro - outro) / autoSpeed);
+  const raw = durs.reduce((a,b)=>a+b,0) + gaps.reduce((a,b)=>a+b,0);
+
+  if(raw > avail){                       // 歌词偏密 → 整体压缩
+    const k = avail/raw;
+    for(let i=0;i<durs.length;i++) durs[i] *= k;
+    for(let i=0;i<gaps.length;i++) gaps[i] *= k;
+    if(k < 0.72) notes.push(`歌词密度偏高（已压缩至 ${(k*100).toFixed(0)}%）`);
+  } else {                               // 有富余 → 优先摊到段落间（间奏）
+    let extra = avail - raw, guard = 0;
+    while(extra > 0.05 && gaps.length && guard++ < 60){   // ① 先喂给段落间奏
+      const per = Math.min(0.35, extra/gaps.length);
+      let used = 0;
+      for(let i=0;i<gaps.length;i++){
+        const add = Math.min(per, Math.max(0, 5.0-gaps[i]), extra);
+        gaps[i] += add; extra -= add; used += add;
+      }
+      if(used < 0.01) break;
+    }
+    guard = 0;
+    while(extra > 0.05 && guard++ < 60){                  // ② 再摊回每行演唱时长（≤1.8×）
+      let used = 0;
+      for(let i=0;i<n;i++){
+        const add = Math.min(extra, Math.max(0, durs[i]*0.8), 0.3);
+        durs[i] += add; extra -= add; used += add;
+      }
+      if(used < 0.01) break;
+    }
+    if(extra > 0.05) outro += extra;                      // ③ 剩余归尾奏
+    if(outro > duration*0.22) notes.push('歌词偏少，富余时间已归入尾奏');
+  }
+
+  const times = []; let t = intro;
+  stanzas.forEach((st, k) => {
+    st.forEach(()=>{ times.push(t); t += durs[times.length-1]; });
+    if(k < stanzas.length-1) t += gaps[k];
+  });
+
+  const lrc = lrcWrite(flat, times);
+  $('lyricsText').value = lrc;
+  parseLyrics(lrc);
+  setOffset(0);
+  const avg = (times[n-1]-times[0])/Math.max(1,n-1);
+  $('smartInfo').textContent =
+    `已生成 ${n} 行 · 前奏 ${intro.toFixed(1)}s · ${stanzas.length} 段 · 平均行距 ${avg.toFixed(1)}s · 尾奏 ${outro.toFixed(1)}s`
+    + (notes.length ? ` · ${notes.join('；')}` : '')
+    + ' · 可用 A 继续精校';
+  $('lyricTip').textContent = `已载入 ${n} 行 · LRC 时间轴模式（B 智能铺开）`;
+  $('lyricHint').textContent = `${n} 行 · 时间轴`;
+}
+
+/* ==================================================================
+ *  方案 A：播放中逐行打点校准（Enter）
+ * ================================================================== */
+let tap = { on:false, i:0, from:0, times:[] };
+function tapStart(from){
+  if(!audio.src){ alert('请先在「素材」中上传音源'); openCard('sec-media'); return; }
+  if(!lyrics.length){ alert('请先填写歌词'); return; }
+  const n = lyrics.length;
+  from = Math.max(0, Math.min(n-1, from|0));
+  tap.times = lyrics.map((l,i)=> (i<from && l.time!=null) ? l.time : null);
+  tap.from = from; tap.i = from; tap.on = true;
+  $('tapPanel').hidden = false;
+  ensureAudioGraph();
+  if(actx && actx.state === 'suspended') actx.resume();
+  const anchor = from>0 ? (tap.times[from-1] ?? lyrics[from].start ?? 0) - 1.2
+                        : (lyrics[0].start ?? 0) - 2.2;
+  try{ audio.currentTime = Math.max(0, anchor); audio.play(); }catch(e){}
+  tapRender();
+}
+function tapRender(){
+  const n = lyrics.length;
+  const done = tap.times.filter(v=>v!=null).length;
+  $('tapCount').textContent = `${done} / ${n}`;
+  $('tapMeter').style.width = (n ? done/n*100 : 0)+'%';
+  const cur = $('tapCur');
+  if(tap.i < n){
+    cur.textContent = lyrics[tap.i].text || '♪';
+    cur.classList.remove('empty');
+    $('tapNext').textContent = tap.i+1<n ? '下一行：'+(lyrics[tap.i+1].text||'♪') : '这是最后一行';
+    $('tapHit').disabled = false;
+  } else {
+    cur.textContent = '全部打完 · 按 Esc 应用';
+    cur.classList.add('empty');
+    $('tapNext').textContent = '';
+    $('tapHit').disabled = true;
+  }
+}
+function tapAdvance(){
+  tap.i++;
+  if(tap.i >= lyrics.length){ tapRender(); return; }
+  tapRender(); tapSyncTimeline();
+}
+function tapHit(){
+  if(!tap.on || tap.i >= lyrics.length) return;
+  tap.times[tap.i] = audio.currentTime;
+  tapAdvance();
+}
+function tapUndo(){
+  if(!tap.on || tap.i <= tap.from) return;
+  tap.i--; tap.times[tap.i] = null;
+  const prev = tap.i>tap.from ? tap.times[tap.i-1] : (lyrics[tap.i].start ?? 0);
+  try{ audio.currentTime = Math.max(0, (prev ?? 0) - 0.8); }catch(e){}
+  tapRender(); tapSyncTimeline();
+}
+function tapSkip(){ if(!tap.on || tap.i >= lyrics.length) return; tap.times[tap.i] = null; tapAdvance(); }
+/** 已打点 + 插值 → 完整时间数组 */
+function tapEstimate(){
+  const n = lyrics.length, ts = tap.times.slice();
+  const known = ts.map((v,i)=>({v,i})).filter(x=>x.v!=null);
+  if(!known.length) return null;
+  let avg;
+  if(known.length < 2) avg = Math.max(1.2, Math.min(4.5, duration/Math.max(1,n)));
+  else {
+    let sum = 0;
+    for(let k=0;k<known.length-1;k++) sum += (known[k+1].v-known[k].v)/(known[k+1].i-known[k].i);
+    avg = Math.max(0.6, sum/(known.length-1));
+  }
+  for(let i=known[0].i-1;i>=0;i--) ts[i] = Math.max(0, ts[i+1]-avg);
+  for(let k=0;k<known.length-1;k++){
+    const a = known[k], b = known[k+1];
+    for(let i=a.i+1;i<b.i;i++) ts[i] = a.v + (b.v-a.v)*(i-a.i)/(b.i-a.i);
+  }
+  for(let i=known[known.length-1].i+1;i<n;i++) ts[i] = ts[i-1]+avg;
+  for(let i=1;i<n;i++) if(ts[i] <= ts[i-1]+0.05) ts[i] = ts[i-1]+0.08;   // 保证单调
+  return ts;
+}
+/** 打点过程中让画面跟着已打点的时间轴滚动 */
+function tapSyncTimeline(){
+  const ts = tapEstimate(); if(!ts) return;
+  const n = lyrics.length;
+  lyrics.forEach((l,i)=>{ l.start = ts[i]; l.end = i<n-1 ? ts[i+1] : Math.min(duration, Math.max(ts[i] + lastLineCap(l), l.fillEnd || 0)); });
+  tlKey = 'tap';
+}
+function tapExit(){
+  tap.on = false;
+  $('tapPanel').hidden = true;
+  audio.pause();
+  tlKey = '';
+}
+function tapFinish(apply){
+  if(!tap.on) return;
+  if(!apply){ tapExit(); return; }
+  const ts = tapEstimate();
+  if(!ts){ alert('还没有任何打点记录，已取消'); tapExit(); return; }
+  const lrc = lrcWrite(lyrics.map(l=>l.text||'♪'), ts);
+  tapExit();
+  $('lyricsText').value = lrc;
+  parseLyrics(lrc);
+  setOffset(0);
+  saveCache(true);
+  $('lyricTip').textContent = `✔ 打点校准完成 · ${lyrics.length} 行时间轴已应用并按歌名缓存`;
+  $('lyricHint').textContent = `${lyrics.length} 行 · 已校准`;
+}
+
+/* ==================================================================
+ *  LRC 缓存：按歌曲名持久化，永久复用
+ * ================================================================== */
+const LS_PREFIX = 'scLrc:v1:';
+const cacheKey = () => LS_PREFIX + ($('songTitle').value.trim() || '未命名').replace(/\s+/g,'');
+function saveCache(auto){
+  try{
+    localStorage.setItem(cacheKey(), JSON.stringify({
+      title: $('songTitle').value.trim() || '未命名',
+      lrc: $('lyricsText').value, dur: duration, ts: Date.now()
+    }));
+    renderCacheBar();
+    if(!auto) $('lyricTip').textContent = `✔ 已按歌名「${$('songTitle').value.trim()}」缓存当前歌词`;
+    return true;
+  }catch(e){
+    if(!auto) alert('缓存写入失败（可能是浏览器隐私模式或空间不足）');
+    return false;
+  }
+}
+function readCache(){
+  try{ return JSON.parse(localStorage.getItem(cacheKey()) || 'null'); }catch(e){ return null; }
+}
+function renderCacheBar(){
+  const bar = $('cacheBar'), c = readCache();
+  if(!c || !c.lrc){ bar.hidden = true; bar.innerHTML = ''; return; }
+  const d = new Date(c.ts);
+  bar.hidden = false;
+  bar.innerHTML =
+    `<span>已缓存《${escapeHtml(c.title)}》的校准歌词 · ${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} · ${c.lrc.split(/\r?\n/).filter(x=>x.trim()).length} 行</span>`
+    + `<button class="linkbtn" data-act="load">载入</button>`
+    + `<button class="linkbtn" data-act="del">删除</button>`;
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function backupCache(){
+  const out = {};
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(k && k.startsWith(LS_PREFIX)){ try{ out[k.slice(LS_PREFIX.length)] = JSON.parse(localStorage.getItem(k)); }catch(e){} }
+  }
+  const keys = Object.keys(out);
+  if(!keys.length){ alert('当前还没有任何歌词缓存'); return; }
+  const blob = new Blob([JSON.stringify(out,null,2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'lrc-cache-backup.json';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+/* ---------------- 歌词精灵缓存（流畅度） ---------------- */
+const SPR_FS = 56, SPR_PAD = 12, SPR_MAXW = 1040;
+/* 精灵栅格倍率：基准 2 是「超采样」（精灵按 2 倍像素栅格化，缩回设计尺寸绘制 → 边缘更锐）。
+   4K 输出（OUT_SCALE=2）必须同步放大到 4，否则精灵像素密度低于画布 → 文字被放大插值变糊。 */
+const SPR_SS = 2 * OUT_SCALE;
+/* 卡拉OK 渐变蒙版工作画布：全片只有「当前行」用到，复用同一块即可，
+   避免每行常驻一份 SPR_SS 栅格大画布（4K 下每行可达数 MB，整曲数百 MB）。 */
+const kScratch = document.createElement('canvas');
+const kSctx = kScratch.getContext('2d');
+function karaokeScratch(spr){
+  const w2 = Math.ceil(spr.w*SPR_SS), h2 = Math.ceil(spr.h*SPR_SS);
+  if(kScratch.width !== w2 || kScratch.height !== h2){ kScratch.width = w2; kScratch.height = h2; }
+  kSctx.setTransform(SPR_SS, 0, 0, SPR_SS, 0, 0);      // 设尺寸会重置变换，必须每次重设
+  kSctx.globalCompositeOperation = 'source-over';
+  kSctx.clearRect(-1, -1, spr.w + 2, spr.h + 2);
+  return kSctx;
+}
+let sprites = [];
+function buildSprites(){
+  sprites = lyrics.map(l=>{
+    ctx.font = `700 ${SPR_FS}px "HarmonyOS Sans SC",sans-serif`;   /* 与 ink 字重一致：卡拉OK逐字偏移对齐实际字形 */
+    let text = (l.text || '♪');
+    if(ctx.measureText(text).width > SPR_MAXW){
+      let k = text.length;
+      while(k>0 && ctx.measureText(text.slice(0,k)+'…').width > SPR_MAXW) k--;
+      text = text.slice(0,k)+'…';
+    }
+    const w = Math.ceil(ctx.measureText(text).width) + SPR_PAD*2;
+    const h = SPR_FS + SPR_PAD*2;
+    // 逐字卡拉OK：预计算每个字符 / 每个词的横向偏移与宽度（一次栅格化，帧内零测量）
+    let acc = 0; const offs = [];
+    for(const ch of text){ const cw = ctx.measureText(ch).width; offs.push({ x:acc, w:cw }); acc += cw; }
+    let wordOffs = null;
+    if(l.words && l.words.length){
+      let wa = 0; wordOffs = [];
+      for(const wd of l.words){
+        const ww = ctx.measureText(wd.text).width;
+        wordOffs.push({ x:wa, w:ww }); wa += ww;
+      }
+    }
+    /* ink = 已唱/当前（700 字重，墨色）；mut = 未唱（500 字重，浅蓝灰）
+       —— 明暗由绘制时的 globalAlpha 控制，字重在此处固化，两者叠加形成
+          「字重 + 明暗」双重层级，浅色纸面上依然一眼可辨进度。 */
+    const mk = (color, weight)=>{
+      const c = document.createElement('canvas');
+      c.width = Math.ceil(w*SPR_SS); c.height = Math.ceil(h*SPR_SS);
+      const g = c.getContext('2d'); g.scale(SPR_SS, SPR_SS);
+      g.font = `${weight} ${SPR_FS}px "Noto Sans SC",sans-serif`;
+      g.textBaseline = 'middle'; g.fillStyle = color;
+      g.fillText(text, SPR_PAD, h/2+2);
+      return c;
+    };
+    return { ink: mk(INK.sprInk, 700), mut: mk(INK.sprMut, 500), w, h, offs, wordOffs, tw: acc };
+  });
+}
+
+/* ---------------- 音频图 ---------------- */
+let actx = null, monitorGain = null, recDest = null, analyser = null, freqData = null;
+function ensureAudioGraph(){
+  if(actx) return;
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = actx.createMediaElementSource(audio);
+  monitorGain = actx.createGain();
+  monitorGain.gain.value = parseFloat($('volume').value);
+  recDest = actx.createMediaStreamDestination();
+  src.connect(monitorGain); monitorGain.connect(actx.destination);
+  src.connect(recDest);
+  // 频谱分析旁路（不接输出，仅用于可视化）
+  analyser = actx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = .72;
+  src.connect(analyser);
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+}
+$('volume').addEventListener('input', e => { if(monitorGain) monitorGain.gain.value = +e.target.value; });
+
+/* ---------------- 播放控制 ---------------- */
+function togglePlay(){
+  if(!audio.src){ alert('请先在「素材」中上传音源'); openCard('sec-media'); return; }
+  ensureAudioGraph();
+  if(actx.state === 'suspended') actx.resume();
+  if(audio.paused) audio.play(); else audio.pause();
+}
+audio.addEventListener('play',  ()=>{ ensureAudioGraph(); playing = true; hasStarted = true; syncPlayBtn(); });
+audio.addEventListener('pause', ()=>{ playing = false; syncPlayBtn(); });
+audio.addEventListener('ended', ()=>{ playing = false; syncPlayBtn(); });
+audio.addEventListener('loadedmetadata', ()=>{
+  const d = audio.duration;
+  if(!isFinite(d)){
+    // Chrome 已知问题：MediaRecorder 产出的 WebM 时长为 Infinity，
+    // 用大偏移 seek 触发浏览器解析真实时长
+    const probe = ()=>{
+      if(isFinite(audio.duration)){
+        duration = audio.duration || 0;
+        buildTimeline(); updatePlaybar();
+        if(audio.paused) audio.currentTime = 0;
+        audio.removeEventListener('timeupdate', probe);
+      }
+    };
+    audio.addEventListener('timeupdate', probe);
+    audio.currentTime = 1e7;
+    return;
+  }
+  duration = d || 0; buildTimeline();
+});
+audio.addEventListener('timeupdate', updatePlaybar);
+function syncPlayBtn(){ $('pbPlay').textContent = playing ? '❚❚' : '▶'; $('btnPlayHero').textContent = playing ? '❚❚ 暂停' : '▶ 播放预览'; }
+function updatePlaybar(){
+  const { t, ok } = progressNow();
+  $('pbCur').textContent = ok ? fmt(t) : '0:00';
+  $('pbDur').textContent = ok ? fmt(duration) : '--:--';
+  if(!seeking) $('pbSeek').value = ok ? (t/duration*1000) : 0;
+}
+let seeking = false;
+$('pbSeek').addEventListener('input', e => { seeking = true; $('pbCur').textContent = fmt(duration * (+e.target.value/1000)); });
+$('pbSeek').addEventListener('change', e => { if(duration){ audio.currentTime = duration * (+e.target.value/1000); } seeking = false; });
+$('pbPlay').addEventListener('click', togglePlay);
+$('btnPlayHero').addEventListener('click', togglePlay);
+$('pbPrev').addEventListener('click', ()=>{ audio.currentTime = 0; });
+$('pbNext').addEventListener('click', ()=>{ audio.currentTime = Math.min(duration, audio.currentTime+10); });
+document.addEventListener('keydown', e => {
+  if(e.code==='Space' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)){ e.preventDefault(); togglePlay(); }
+});
+
+/* ---------------- 素材：音频 / 视频（自动提取音轨） ---------------- */
+$('mediaFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if(!f) return;
+  if(/^video\//.test(f.type) || /\.(mp4|mov|mkv|webm|m4v|avi|flv)$/i.test(f.name)){
+    extractAudioFromVideo(f);
+  } else {
+    audio.src = URL.createObjectURL(f);
+    hasStarted = false;
+    setMediaState(`已载入音频：${f.name}`, false);
+    $('mediaHint').textContent = f.name;
+  }
+});
+let convRec = null, convCtx = null, convCancel = false;
+async function extractAudioFromVideo(file){
+  const box = $('mediaState');
+  $('mediaHint').textContent = '视频 · 提取音轨中';
+  setMediaState(`检测到视频文件：${file.name}<br>正在提取音轨（实时转换，耗时约等于视频时长）…`, false);
+  video.src = URL.createObjectURL(file);
+  try{
+    await new Promise((res,rej)=>{
+      if(video.readyState >= 1) res();
+      video.onloadedmetadata = res;
+      video.onerror = () => rej(new Error('视频无法解码'));
+      setTimeout(()=>rej(new Error('读取视频超时')), 15000);
+    });
+  }catch(err){ setMediaState(`✕ ${err.message}。可改用音频文件，或用本地 ffmpeg：<br><code>ffmpeg -i "${file.name}" -vn -acodec libmp3lame out.mp3</code>`, true); return; }
+
+  let stream;
+  try{
+    stream = video.captureStream ? video.captureStream() : (video.mozCaptureStream && video.mozCaptureStream());
+    if(!stream) throw new Error('当前浏览器不支持从视频抓取音轨');
+    if(stream.getAudioTracks().length === 0) throw new Error('该视频没有音轨（可先用音频文件，或用本地 ffmpeg 提取）');
+  }catch(err){ setMediaState(`✕ ${err.message}`, true); return; }
+
+  // 静音监听：AudioContext 分支增益 0，录制分支保持满电平
+  try{
+    convCtx = convCtx || new (window.AudioContext||window.webkitAudioContext)();
+    await convCtx.resume();
+    const vsrc = convCtx.createMediaElementSource(video);
+    const silent = convCtx.createGain(); silent.gain.value = 0;
+    const out = convCtx.createMediaStreamDestination();
+    vsrc.connect(silent); silent.connect(convCtx.destination);
+    vsrc.connect(out);
+    stream = out.stream;
+  }catch(e){ /* 降级：直接用 captureStream，可能会有声音 */ }
+
+  const mime = ['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(m => MediaRecorder.isTypeSupported(m));
+  if(!mime){ setMediaState('✕ 当前浏览器不支持录制音轨，请使用音频文件或本地 ffmpeg 转换', true); return; }
+
+  const parts = [];
+  convRec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 256000 });
+  convRec.ondataavailable = e => { if(e.data && e.data.size) parts.push(e.data); };
+  convRec.onstop = () => {
+    if(convCancel){ setMediaState('已取消音轨提取', true); return; }
+    const blob = new Blob(parts, { type: mime.split(';')[0] });
+    audio.src = URL.createObjectURL(blob);
+    hasStarted = false;
+    setMediaState(`✔ 音轨提取完成 · ${(blob.size/1048576).toFixed(1)} MB · 时长 ${fmt(video.duration||0)}`, false);
+    $('mediaHint').textContent = `${file.name} → 音轨`;
+  };
+  convCancel = false;
+  convRec.start(1000);
+  video.currentTime = 0;
+  try{ await video.play(); }catch(e){ /* 忽略自动播放限制 */ }
+  const tick = setInterval(()=>{
+    if(convCancel){ clearInterval(tick); return; }
+    const p = video.duration ? video.currentTime/video.duration : 0;
+    setProgress(p);
+    if(!video.duration || video.currentTime >= video.duration - 0.05 || video.ended){
+      clearInterval(tick);
+      if(convRec.state !== 'inactive') convRec.stop();
+    }
+  }, 250);
+}
+function setMediaState(html, warn){
+  const box = $('mediaState');
+  box.hidden = false;
+  box.className = 'media-state' + (warn ? ' warn' : '');
+  box.innerHTML = html + `<div class="bar"><i id="convBar"></i></div>
+    <div style="display:flex;gap:12px;align-items:center;">
+      <button class="linkbtn" id="convCancelBtn">取消提取</button>
+      <span id="convPct"></span>
+    </div>`;
+  const cb = $('convCancelBtn');
+  if(cb) cb.onclick = () => { convCancel = true; if(convRec && convRec.state!=='inactive') convRec.stop(); video.pause(); };
+}
+function setProgress(p){
+  const bar = $('convBar'), pct = $('convPct');
+  if(bar) bar.style.width = Math.round(p*100) + '%';
+  if(pct) pct.textContent = Math.round(p*100) + '%';
+}
+
+/* ---------------- 封面：裁切构图 ---------------- */
+const CROP_CV = $('cropCv'), cropCtx = CROP_CV.getContext('2d');
+const CROP_SIDE = 380, CX = 380, CY = 260;
+let cropState = { s:1, dx:0, dy:0 };
+$('coverFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if(!f) return;
+  const img = new Image();
+  img.onload = () => { cropSrc = img; cropState = { s:1, dx:0, dy:0 }; $('cropScale').value = 1; openCrop(); };
+  img.src = URL.createObjectURL(f);
+});
+$('btnRecrop').addEventListener('click', ()=>{ if(cropSrc) openCrop(); else $('coverFile').click(); });
+$('btnRecrop2').addEventListener('click', ()=>{ if(cropSrc) openCrop(); else $('coverFile').click(); });
+function openCrop(){ $('cropModal').classList.add('show'); drawCrop(); }
+function closeCrop(){ $('cropModal').classList.remove('show'); }
+$('cropCancel').addEventListener('click', closeCrop);
+$('cropReset').addEventListener('click', ()=>{ cropState = { s:1, dx:0, dy:0 }; $('cropScale').value = 1; drawCrop(); });
+$('cropScale').addEventListener('input', e => { cropState.s = +e.target.value; clampCrop(); drawCrop(); });
+function fitScale(){ const iw = cropSrc.width, ih = cropSrc.height; return Math.max(CROP_SIDE/iw, CROP_SIDE/ih); }
+function curGeom(){
+  const s = fitScale() * cropState.s;
+  const w = cropSrc.width*s, h = cropSrc.height*s;
+  return { s, w, h, x: CX + cropState.dx - w/2, y: CY + cropState.dy - h/2 };
+}
+function clampCrop(){
+  const g = curGeom();
+  const mx = Math.max(0,(g.w-CROP_SIDE)/2), my = Math.max(0,(g.h-CROP_SIDE)/2);
+  cropState.dx = Math.min(mx, Math.max(-mx, cropState.dx));
+  cropState.dy = Math.min(my, Math.max(-my, cropState.dy));
+}
+function drawCrop(){
+  const g = curGeom();
+  cropCtx.clearRect(0,0,760,520);
+  cropCtx.fillStyle = '#0b0b0d'; cropCtx.fillRect(0,0,760,520);
+  cropCtx.save();
+  cropCtx.beginPath(); cropCtx.rect(CX-CROP_SIDE/2, CY-CROP_SIDE/2, CROP_SIDE, CROP_SIDE); cropCtx.clip();
+  cropCtx.drawImage(cropSrc, g.x, g.y, g.w, g.h);
+  cropCtx.restore();
+  cropCtx.fillStyle = 'rgba(0,0,0,.55)';
+  cropCtx.fillRect(0,0,760,520);
+  cropCtx.save();
+  cropCtx.globalCompositeOperation = 'destination-out';
+  cropCtx.beginPath(); cropCtx.rect(CX-CROP_SIDE/2, CY-CROP_SIDE/2, CROP_SIDE, CROP_SIDE); cropCtx.fill();
+  cropCtx.restore();
+  // 需要重绘裁切窗内的画面（上面 destination-out 挖掉了）
+  cropCtx.save();
+  cropCtx.beginPath(); cropCtx.rect(CX-CROP_SIDE/2, CY-CROP_SIDE/2, CROP_SIDE, CROP_SIDE); cropCtx.clip();
+  cropCtx.drawImage(cropSrc, g.x, g.y, g.w, g.h);
+  cropCtx.restore();
+  // 网格 + 边框
+  cropCtx.strokeStyle = 'rgba(255,255,255,.18)'; cropCtx.lineWidth = 1;
+  for(let i=1;i<3;i++){
+    cropCtx.beginPath();
+    cropCtx.moveTo(CX-CROP_SIDE/2+CROP_SIDE*i/3, CY-CROP_SIDE/2);
+    cropCtx.lineTo(CX-CROP_SIDE/2+CROP_SIDE*i/3, CY+CROP_SIDE/2);
+    cropCtx.moveTo(CX-CROP_SIDE/2, CY-CROP_SIDE/2+CROP_SIDE*i/3);
+    cropCtx.lineTo(CX+CROP_SIDE/2, CY-CROP_SIDE/2+CROP_SIDE*i/3);
+    cropCtx.stroke();
+  }
+  cropCtx.strokeStyle = 'rgba(255,255,255,.85)'; cropCtx.lineWidth = 2;
+  cropCtx.strokeRect(CX-CROP_SIDE/2, CY-CROP_SIDE/2, CROP_SIDE, CROP_SIDE);
+  drawCropPreview();
+}
+function drawCropPreview(){
+  const g = curGeom();
+  const pc = $('cropPrev'), pg = pc.getContext('2d');
+  const out = 240;
+  pg.clearRect(0,0,out,out);
+  const sx = ((CX-CROP_SIDE/2) - g.x)/g.s, sy = ((CY-CROP_SIDE/2) - g.y)/g.s;
+  const sw = CROP_SIDE/g.s;
+  pg.drawImage(cropSrc, sx, sy, sw, sw, 0, 0, out, out);
+  // 柔化边缘（与导出画面一致）
+  pg.globalCompositeOperation = 'destination-in';
+  const m = pg.createRadialGradient(out/2,out/2,0, out/2,out/2, out*0.72);
+  m.addColorStop(0,'rgba(0,0,0,1)'); m.addColorStop(.62,'rgba(0,0,0,1)'); m.addColorStop(1,'rgba(0,0,0,.32)');
+  pg.fillStyle = m; pg.fillRect(0,0,out,out);
+  pg.globalCompositeOperation = 'source-over';
+}
+let drag = null;
+CROP_CV.addEventListener('pointerdown', e => {
+  const r = CROP_CV.getBoundingClientRect();
+  drag = { x:(e.clientX-r.left)*760/r.width, y:(e.clientY-r.top)*520/r.height, dx:cropState.dx, dy:cropState.dy };
+  CROP_CV.setPointerCapture(e.pointerId);
+});
+CROP_CV.addEventListener('pointermove', e => {
+  if(!drag) return;
+  const r = CROP_CV.getBoundingClientRect();
+  const x = (e.clientX-r.left)*760/r.width, y = (e.clientY-r.top)*520/r.height;
+  cropState.dx = drag.dx + (x-drag.x); cropState.dy = drag.dy + (y-drag.y);
+  clampCrop(); drawCrop();
+});
+CROP_CV.addEventListener('pointerup', ()=>{ drag = null; });
+CROP_CV.addEventListener('wheel', e => {
+  e.preventDefault();
+  cropState.s = Math.min(3, Math.max(1, cropState.s * (e.deltaY>0 ? 0.96 : 1.04)));
+  $('cropScale').value = cropState.s; clampCrop(); drawCrop();
+}, { passive:false });
+
+$('cropOk').addEventListener('click', ()=>{
+  const g = curGeom();
+  const out = document.createElement('canvas'); out.width = out.height = 1200;
+  const og = out.getContext('2d');
+  const sx = ((CX-CROP_SIDE/2) - g.x)/g.s, sy = ((CY-CROP_SIDE/2) - g.y)/g.s, sw = CROP_SIDE/g.s;
+  og.imageSmoothingQuality = 'high';
+  og.drawImage(cropSrc, sx, sy, sw, sw, 0, 0, 1200, 1200);
+  applyCover(out);
+  closeCrop();
+});
+
+/* ---------------- 封面取色 → 渐变背景 ---------------- */
+function applyCover(img){
+  coverImg = img;
+  maskedCover = null;
+  const url = img.toDataURL ? img.toDataURL('image/png') : img.src;
+  $('heroCover').src = url; $('miniCover').src = url;
+  extractPalette(img);
+  $('mediaHint').textContent = $('mediaHint').textContent || '已上传封面';
+}
+/* 封面取色 → 渐变背景（Apple Music 式：中位切分提主色，色相继承封面，
+   亮度/饱和按「深底白字」规范重映射，保证白字对比度） */
+function _rgbToHsl(c){
+  const r=c[0]/255, g=c[1]/255, b=c[2]/255;
+  const max=Math.max(r,g,b), min=Math.min(r,g,b), l=(max+min)/2, d=max-min;
+  let h=0, s=0;
+  if(d){
+    s = l>0.5 ? d/(2-max-min) : d/(max+min);
+    if(max===r) h = ((g-b)/d + (g<b?6:0));
+    else if(max===g) h = (b-r)/d + 2;
+    else h = (r-g)/d + 4;
+    h /= 6;
+  }
+  return [h,s,l];
+}
+/** 中位切分：把像素聚成 k 个色簇，返回 [[rgb, 权重], ...]（按权重降序） */
+function _medianCut(px, k){
+  let boxes = [px];
+  let guard = 0;
+  while(boxes.length < k && guard++ < 24){
+    boxes.sort((a,b)=>b.length-a.length);
+    const box = boxes.shift();
+    if(box.length < 2){ boxes.push(box); break; }
+    let ch = 0, span = -1;                     // 取跨度最大的通道切分
+    for(let c=0;c<3;c++){
+      let mn=255, mx=0;
+      for(const p of box){ if(p[c]<mn) mn=p[c]; if(p[c]>mx) mx=p[c]; }
+      if(mx-mn > span){ span = mx-mn; ch = c; }
+    }
+    box.sort((a,b)=>a[ch]-b[ch]);
+    const mid = box.length >> 1;
+    boxes.push(box.slice(0, mid), box.slice(mid));
+  }
+  const out = boxes.filter(b=>b.length).map(b=>{
+    let r=0,g=0,bl=0;
+    for(const p of b){ r+=p[0]; g+=p[1]; bl+=p[2]; }
+    return [[r/b.length, g/b.length, bl/b.length], b.length/px.length];
+  });
+  out.sort((a,b)=>b[1]-a[1]);
+  return out;
+}
+function extractPalette(img){
+  const S = 64, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d', { willReadFrequently:true });
+  try{ g.drawImage(img, 0, 0, S, S); }catch(e){ return; }
+  let d; try{ d = g.getImageData(0,0,S,S).data; }catch(e){ return; }
+  const px = [];
+  let lumSum = 0, bandSum = 0, bandN = 0;
+  for(let i=0;i<d.length;i+=4){
+    if(d[i+3] < 125) continue;                 // 跳过透明像素
+    px.push([d[i], d[i+1], d[i+2]]);
+    const yy = (i/4/S)|0, lum = 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
+    lumSum += lum;
+    if(yy >= S*0.78){ bandSum += lum; bandN++; }   // 标题叠压带 = 封面下部 22%
+  }
+  if(px.length < 16) return;
+  PAL.luma = lumSum / px.length / 255;
+  PAL.lumaBand = bandN ? bandSum / bandN / 255 : (lumSum / px.length / 255);
+  const dom = _medianCut(px, 6);
+  // 主色：面积权重 × 饱和度加成（太灰的大色块不适合当主色）
+  let best = dom[0], bs = -1;
+  for(const it of dom){
+    const s2 = _rgbToHsl(it[0])[1];
+    const sc = it[1] * (0.35 + Math.min(s2, 0.9) * 0.9);
+    if(sc > bs){ bs = sc; best = it; }
+  }
+  const [h, s] = _rgbToHsl(best[0]);
+  // 色相完全继承封面 → 背景与封面同色系；亮度钳在深区间 → 白字对比度充足
+  // 低饱和派生：背景大片色把饱和度压到 0.22 以内（薄雾感），
+  // accent / vibrant 留到 0.36 以内供高亮使用，仍远低于高饱和阈值。
+  /* 明亮派生：纸面几乎不变，只带一丝封面色相；accent 供 ≤0.04 的气息光晕 */
+  PAL.top     = hslToRgb(h, Math.min(0.10, s*0.30), 0.975);
+  PAL.bottom  = hslToRgb((h + 0.035) % 1, Math.min(0.08, s*0.24), 0.945);
+  PAL.accent  = hslToRgb(h, Math.min(0.30, s*0.60 + 0.06), 0.62);
+  PAL.vibrant = hslToRgb(h, Math.min(0.26, s*0.50), 0.50);
+  PAL.muted   = hslToRgb((h + 0.500) % 1, Math.min(0.18, s*0.34), 0.62);
+  PAL.soft1   = hslToRgb((h + 0.090) % 1, Math.min(0.20, s*0.36), 0.66);
+  PAL.hue = h; PAL.sat = s; PAL.fromCover = true;
+  const root = document.documentElement.style;
+  root.setProperty('--hero-a', rgbStr(PAL.top));
+  root.setProperty('--hero-b', rgbStr(PAL.bottom));
+  root.setProperty('--accent', rgbStr(PAL.accent));
+}
+function tune(c, L, S){
+  const [r,g,b] = c.map(v=>v/255);
+  const max = Math.max(r,g,b), min = Math.min(r,g,b);
+  let h = 0, s = 0; const l = (max+min)/2;
+  const dd = max-min;
+  if(dd){
+    s = l>0.5 ? dd/(2-max-min) : dd/(max+min);
+    if(max===r) h = ((g-b)/dd + (g<b?6:0));
+    else if(max===g) h = (b-r)/dd + 2;
+    else h = (r-g)/dd + 4;
+    h /= 6;
+  }
+  return hslToRgb(h, Math.max(S, Math.min(0.8, s)), L);
+}
+function hslToRgb(h,s,l){
+  const hue = v => {
+    let r,g,b; const q = l<0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+    const hk = (v+1)%1;
+    const f = t => {
+      const u = (t+1)%1;                       // 必须归一：否则 hk-1/3 为负会算出负通道
+      if(u < 1/6) return p+(q-p)*6*u;
+      if(u < 1/2) return q;
+      if(u < 2/3) return p+(q-p)*(2/3-u)*6;
+      return p;
+    };
+    const cl = x => Math.max(0, Math.min(255, Math.round(x*255)));
+    r = f(hk+1/3); g = f(hk); b = f(hk-1/3);
+    return [cl(r),cl(g),cl(b)];
+  };
+  return hue(h);
+}
+const rgbStr = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+/* ---------------- 元数据联动 ---------------- */
+['songTitle','artist','tagsText','trackLabel'].forEach(id=>{
+  $(id).addEventListener('input', syncHero);
+});
+function syncHero(){
+  setHeroTitle($('songTitle').value.trim() || '未命名歌曲');
+  $('heroBy').textContent = '原唱 · ' + ($('artist').value.trim() || '—');
+  $('miniTitle').textContent = $('songTitle').value.trim() || '未选择歌曲';
+  $('miniArtist').textContent = $('artist').value.trim() || '上传音频后开始';
+  const tags = $('tagsText').value.split(/[,，、]/).map(s=>s.trim()).filter(Boolean);
+  $('heroChips').innerHTML = tags.map(t=>`<span class="chip">${t}</span>`).join('');
+}
+/* ---------------- 主标题装饰：5 套方案循环切换 ---------------- */
+const TS_STYLES = [
+  {name:'流光渐变', dot:'linear-gradient(96deg,#ffe4ea,var(--rose) 40%,var(--gold) 62%,var(--ice))'},
+  {name:'描边镂空', dot:'linear-gradient(96deg,rgba(255,255,255,.92),var(--ice))'},
+  {name:'霓虹柔光', dot:'radial-gradient(circle at 34% 34%,#fff,var(--rose) 56%,var(--ice))'},
+  {name:'色块高亮', dot:'linear-gradient(96deg,var(--rose),#a8497f 54%,var(--ice))'},
+  {name:'双色错位', dot:'linear-gradient(96deg,var(--rose) 45%,var(--ice) 55%)'}
+];
+const TS_KEY = 'scTitleStyle:v1';
+let tsIdx = 0;
+// 画布内标题装饰序号（与 TS_STYLES 同序号）。必须在此处声明：
+// applyTs() 在启动流程中就会调用 setTitleScheme()，若声明在其后会撞上 TDZ。
+let titleScheme = 0;
+try{
+  const v = parseInt(localStorage.getItem(TS_KEY) || '0', 10);
+  if(!isNaN(v) && v >= 0 && v < TS_STYLES.length) tsIdx = v;
+}catch(e){}
+
+function setHeroTitle(t){
+  $('heroTitle').querySelectorAll('.tsl').forEach(s => { s.textContent = t; s.dataset.text = t; });
+}
+function applyTs(i){
+  tsIdx = ((i % TS_STYLES.length) + TS_STYLES.length) % TS_STYLES.length;
+  $('heroTitle').querySelectorAll('.tsl').forEach((s, k) => {
+    s.classList.toggle('on', k === tsIdx);
+    s.setAttribute('aria-hidden', k === tsIdx ? 'false' : 'true');
+  });
+  const st = TS_STYLES[tsIdx];
+  $('tsLabel').innerHTML = '标题样式 · <b>' + (tsIdx + 1) + '</b>/5 ' + st.name;
+  $('tsDot').style.background = st.dot;
+  try{ localStorage.setItem(TS_KEY, String(tsIdx)); }catch(e){}
+  if(typeof setTitleScheme === 'function') setTitleScheme(tsIdx);   // 画布内标题同步同套装饰
+}
+$('btnTsSwitch').addEventListener('click', e => { applyTs(tsIdx + 1); e.currentTarget.blur(); });
+document.addEventListener('keydown', e => {
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  if(e.key !== 't' && e.key !== 'T') return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if(tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+  applyTs(tsIdx + 1);
+});
+syncHero();
+applyTs(tsIdx);
+
+/* ---------------- 折叠卡片 + 侧边导航 ---------------- */
+function openCard(id){
+  document.querySelectorAll('.card').forEach(c=>c.classList.remove('open'));
+  const c = $(id); if(c){ c.classList.add('open'); c.scrollIntoView({behavior:'smooth', block:'start'}); }
+}
+document.querySelectorAll('.card > header').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
+});
+$('nav').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  openCard(b.dataset.target);
+});
+$('btnGotoMedia').addEventListener('click', ()=>openCard('sec-media'));
+$('btnExportTop').addEventListener('click', ()=>openCard('sec-export'));
+$('btnAnnot').addEventListener('click', e => {
+  document.body.classList.toggle('annotate');
+  e.target.classList.toggle('on', document.body.classList.contains('annotate'));
+  e.target.textContent = document.body.classList.contains('annotate') ? '隐藏布局标注' : '显示布局标注';
+});
+
+/* ---------------- 歌词控件 ---------------- */
+$('lyricsText').addEventListener('input', e => { if(tap.on) tapExit(); parseLyrics(e.target.value); });
+$('autoSpeed').addEventListener('input', e => { autoSpeed = +e.target.value; $('autoSpeedVal').textContent = autoSpeed.toFixed(1)+'×'; buildTimeline(); });
+function setOffset(v){
+  offset = Math.round(Math.min(5,Math.max(-5,v))*10)/10;
+  $('offRange').value = offset;
+  $('offVal').textContent = (offset>0?'+':'')+offset.toFixed(1)+'s';
+}
+$('offRange').addEventListener('input', e => setOffset(+e.target.value));
+$('offMinus').addEventListener('click', ()=>setOffset(offset-0.1));
+$('offPlus') .addEventListener('click', ()=>setOffset(offset+0.1));
+$('offReset').addEventListener('click', ()=>setOffset(0));
+const SAMPLE = `没 有蜡烛\n就不用勉强庆祝\n没 想到答案\n就不要寻找题目\n没 有退路\n那我也不要散步\n没 人去仰慕\n那我就继续忙碌\n来不及 将心跳抚平\nalready 早已有人代替\n让我亲手写这样的感触\n写一封情书送给自己\n感动得像一个悲剧\n让我渐渐忘了姓名\n却记得那段旋律`;
+$('btnSample').addEventListener('click', ()=>{ $('lyricsText').value = SAMPLE; parseLyrics(SAMPLE); });
+$('btnClearLyrics').addEventListener('click', ()=>{ $('lyricsText').value = ''; parseLyrics(''); });
+
+/* ---- 方案 B ---- */
+$('btnSmart').addEventListener('click', smartSpread);
+
+/* ---- 方案 A ---- */
+$('btnTap').addEventListener('click', ()=>tapStart(0));
+$('btnTapFrom').addEventListener('click', ()=>{
+  const cur = currentIdx(audio.currentTime + offset);
+  tapStart(cur < 0 ? 0 : Math.min(lyrics.length-1, cur+1));
+});
+// 按钮点击后立即失焦，避免随后按 Enter 既触发 keydown 又触发按钮 click（重复打点）
+const tapBtn = (id, fn) => $(id).addEventListener('click', e => { e.currentTarget.blur(); fn(); });
+tapBtn('tapHit', tapHit);
+tapBtn('tapUndo', tapUndo);
+tapBtn('tapSkip', tapSkip);
+tapBtn('tapApply', ()=>tapFinish(true));
+tapBtn('tapCancel', ()=>tapFinish(false));
+
+/* ---- 缓存 ---- */
+$('btnSaveCache').addEventListener('click', ()=>saveCache(false));
+$('btnBackupCache').addEventListener('click', backupCache);
+$('btnClearCache').addEventListener('click', ()=>{
+  const t = $('songTitle').value.trim() || '未命名';
+  if(!readCache()){ alert(`「${t}」还没有缓存`); return; }
+  if(!confirm(`删除「${t}」的歌词缓存？`)) return;
+  localStorage.removeItem(cacheKey()); renderCacheBar();
+});
+$('cacheBar').addEventListener('click', e => {
+  const act = e.target.dataset && e.target.dataset.act;
+  if(act === 'load'){
+    const c = readCache();
+    if(c){ $('lyricsText').value = c.lrc; parseLyrics(c.lrc); $('lyricTip').textContent = `已载入缓存歌词 · ${lyrics.length} 行`; }
+  } else if(act === 'del'){
+    localStorage.removeItem(cacheKey()); renderCacheBar();
+  }
+});
+$('songTitle').addEventListener('input', renderCacheBar);
+
+/* ---- 导出 .lrc ---- */
+$('btnExportLrc').addEventListener('click', ()=>{
+  const txt = $('lyricsText').value.trim();
+  if(!txt){ alert('歌词为空'); return; }
+  const safe = ($('songTitle').value.trim() || 'lyrics').replace(/[\\/:*?"<>|]/g,'_');
+  const blob = new Blob([txt], { type:'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = safe + '.lrc'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+});
+
+/* ---- A 方案键盘：Enter 打点 / ⌫ 撤销 / ↓ 跳过 / Esc 应用 ---- */
+window.addEventListener('keydown', e => {
+  if(!tap.on) return;
+  if(e.code === 'Enter' || e.code === 'NumpadEnter'){ e.preventDefault(); tapHit(); }
+  else if(e.code === 'Backspace'){ e.preventDefault(); tapUndo(); }
+  else if(e.code === 'ArrowDown'){ e.preventDefault(); tapSkip(); }
+  else if(e.code === 'Escape'){ e.preventDefault(); tapFinish(true); }
+}, true);
+
+/* ==================================================================
+ *  画面绘制（1920×1080）
+ *  参考 Apple Music 专辑页：取色渐变铺满 + 大幅封面 + 白色信息层
+ * ================================================================== */
+const grain0 = document.createElement('canvas'); grain0.width = grain0.height = 256;
+{
+  const g = grain0.getContext('2d'); const d = g.createImageData(256,256);
+  for(let i=0;i<d.data.length;i+=4){ d.data[i]=32; d.data[i+1]=40; d.data[i+2]=54; d.data[i+3]=Math.random()*9|0; }
+  g.putImageData(d,0,0);
+}
+/* 颗粒按 OUT_SCALE 最近邻放大再作 pattern：pattern 会被 CTM 一并放大，
+   不预补偿的话 4K 下颗粒尺寸相对画面会粗一档，与 1080P 观感不一致。 */
+const grain = (()=>{
+  if(OUT_SCALE === 1) return grain0;
+  const c = document.createElement('canvas'); c.width = c.height = 256*OUT_SCALE;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  g.drawImage(grain0, 0, 0, c.width, c.height);
+  return c;
+})();
+let grainPat = null;
+const petals = Array.from({length:9},()=>({
+  x:Math.random()*W, y:Math.random()*H, s:6+Math.random()*7,
+  rot:Math.random()*6.28, vr:(Math.random()-.5)*1.1, vy:12+Math.random()*16, ph:Math.random()*7
+}));
+/* 逐字排版（字距 sp）。padMap 是「按字符额外补白」映射（单侧），用于修正窄字形：
+   HarmonyOS Sans SC 的 '.' ink 仅约 1.6px 宽（设计单位），且恰好贴在自身推进框左沿，
+   经亚像素提示渲染后放大到约 3px，几乎吃光 3px 字距 —— 11.5px 下与相邻数字视觉粘连。 */
+function drawSpaced(text, x, y, sp, align='left', padMap=null){
+  const pad = ch => (padMap && padMap[ch]) || 0;
+  let total = 0;
+  for(const ch of text) total += ctx.measureText(ch).width + sp + pad(ch)*2;
+  total -= sp;
+  let cx = align==='right' ? x-total : x;
+  for(const ch of text){
+    cx += pad(ch);                                   // 左侧补白
+    ctx.fillText(ch, cx, y);
+    cx += ctx.measureText(ch).width + sp + pad(ch);  // 右侧补白
+  }
+  return total;
+}
+function fmt(s){
+  if(!isFinite(s)) s = 0; s = Math.max(0, Math.floor(s));
+  return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
+
+/* 柔和光斑：低 alpha、大半径，模拟毛玻璃后的弥散光（非硬边色块） */
+function _blob(x, y, r, col, a){
+  const g = ctx.createRadialGradient(x,y,0, x,y,r);
+  g.addColorStop(0, rgba(col, a));
+  g.addColorStop(0.55, rgba(col, a*0.42));
+  g.addColorStop(1, rgba(col, 0));
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+}
+function drawBackground(now, dt){
+  /* 纸面基底：暖白 → 冷白，极缓垂直过渡 */
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#FBFAF7'); g.addColorStop(1,'#F1F0EB');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  /* 封面取色的「气息」：两片极淡光晕（alpha ≤0.035，26~34s 缓漂），似有似无 */
+  const a1 = now/26000, a2 = now/34000;
+  /* 播放律动：光晕半径与透明度随频谱能量轻微起伏（暂停时 haloAvg=0，回到静止气息） */
+  const rb = 1 + haloAvg*0.35, ab = 0.72 + haloAvg*1.1;
+  _blob( 300 + Math.sin(a1)*200,  820 + Math.cos(a1*0.8)*110, 900*rb, PAL.accent, 0.028*ab);
+  _blob(W-430 + Math.cos(a2)*240, H-380 + Math.sin(a2*0.7)*130, 860*rb, PAL.soft1, 0.022*ab);
+  /* 封面正后方一片极淡主色环境光（取色同源，26s 缓漂 + 能量轻起伏）——封面主视觉的空间延伸 */
+  _blob(568 + Math.sin(a2*0.5)*70, 410 + Math.cos(a1*0.6)*46, 940*rb, PAL.accent, 0.042*ab);
+  if(!grainPat) grainPat = ctx.createPattern(grain,'repeat');
+  ctx.globalAlpha = .5; ctx.fillStyle = grainPat; ctx.fillRect(0,0,W,H); ctx.globalAlpha = 1;
+}
+
+/* ---------------- 装饰立绘图层（右侧，低存在感，与封面逻辑互不干扰） ---------------- */
+let artImg = null, artCanvas = null, artAlphaMode = false;
+function setArtImage(img){
+  artImg = img; artCanvas = null;
+  buildArtCanvas();
+}
+function buildArtCanvas(){
+  if(!artImg) return;
+  // 透明通道检测：64px 采样网格，>2% 像素带透明 → 透明底素材（完整呈现，不加底色/不雾化）
+  const pw = 64, ph = Math.max(1, Math.round(64 * artImg.height / artImg.width));
+  const pcv = document.createElement('canvas'); pcv.width = pw; pcv.height = ph;
+  const pg = pcv.getContext('2d');
+  pg.drawImage(artImg, 0, 0, pw, ph);
+  const pd = pg.getImageData(0, 0, pw, ph).data;
+  let nTrans = 0;
+  for(let i = 3; i < pd.length; i += 4){ if(pd[i] < 250) nTrans++; }
+  const hasAlpha = nTrans > pd.length/4 * 0.02;
+  let iw, ih;
+  if(hasAlpha){
+    // 透明底：以高度撑满画布，完整呈现不裁切任何边缘
+    ih = H;
+    iw = Math.round(H * artImg.width / artImg.height);
+    if(iw > 680){ iw = 680; ih = Math.round(iw * artImg.height / artImg.width); }
+  } else {
+    iw = 640; ih = Math.round(iw * artImg.height / artImg.width);
+  }
+  const c = document.createElement('canvas'); c.width = iw; c.height = ih;
+  const g = c.getContext('2d');
+  g.drawImage(artImg, 0, 0, iw, ih);
+  if(!hasAlpha){
+    // 不透明素材（JPG 等）：保留原雾化蒙版 + 左右渐隐方案
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = 'rgba(235,244,252,0.30)';
+    g.fillRect(0,0,iw,ih);
+    const m = g.createLinearGradient(0,0,iw,0);
+    m.addColorStop(0,'rgba(0,0,0,0)');
+    m.addColorStop(0.30,'rgba(0,0,0,1)');
+    m.addColorStop(0.82,'rgba(0,0,0,1)');
+    m.addColorStop(1,'rgba(0,0,0,0.55)');
+    g.globalCompositeOperation = 'destination-in';
+    g.fillStyle = m; g.fillRect(0,0,iw,ih);
+    g.globalCompositeOperation = 'source-over';
+  }
+  artCanvas = c;
+  artAlphaMode = hasAlpha;
+}
+function drawArtLayer(){
+  if(!SHOW_ART || !artCanvas) return;      // 装饰立绘开关（默认关）
+  const offline = (typeof HL !== 'undefined') && HL.on;
+  const pt = offline ? HL.vT : audio.currentTime;
+  const fade = Math.min(1, Math.max(0, pt/9));   // 前 9 秒缓缓淡入
+  const a = fade*fade*(3-2*fade) * (artAlphaMode ? 0.42 : 0.45);  // smoothstep + 整体低存在感
+  if(a <= 0.002) return;
+  const iw = artCanvas.width, ih = artCanvas.height;
+  const dx = artAlphaMode ? (W - iw - 10) : (W - iw + 36);   // 透明 PNG：不出血不裁边
+  const dy = artAlphaMode ? Math.round((H - ih)/2) : 0;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.drawImage(artCanvas, dx, dy, iw, ih);
+  ctx.restore();
+}
+
+/* 封面：圆角 + 柔化边缘（无硬边框）。
+   视觉重构后左栏为「封面 + 声波地平线 + 进度条」，右栏为「信息 + 歌词」，
+   两栏垂直跨度接近，不出现大片空洞。 */
+const COVER_S = 600, COVER_X = 268, COVER_Y = 110;      // Editorial 主视觉：封面放大偏置
+/* 进度条几何：左栏水平基线，与封面左右边缘对齐；细线、低调、精确。
+   绘制与命中测试共用此函数 → 缩放/窄屏下交互不会错位。 */
+function barGeom(){
+  /* 底部通栏页脚基线（杂志基线）：贯穿左右页边距；绘制与命中测试共用 */
+  const bx = 96;
+  const bw = Math.max(200, W - 192);
+  const by = Math.min(1002, H - 78);
+  return { bx, by, bw };
+}
+let maskedCover = null;
+function getMaskedCover(){
+  if(maskedCover) return maskedCover;
+  const c = document.createElement('canvas'); c.width = c.height = COVER_S*2*OUT_SCALE;
+  const g = c.getContext('2d'); g.scale(2*OUT_SCALE, 2*OUT_SCALE);
+  if(coverImg){
+    const r = Math.max(COVER_S/coverImg.width, COVER_S/coverImg.height);
+    const cw = coverImg.width*r, ch = coverImg.height*r;
+    g.drawImage(coverImg, (COVER_S-cw)/2, (COVER_S-ch)/2, cw, ch);
+  } else {
+    const lg = g.createLinearGradient(0,0,COVER_S,COVER_S);
+    lg.addColorStop(0,'#EDECE7'); lg.addColorStop(1,'#DEDDD6');
+    g.fillStyle = lg; g.fillRect(0,0,COVER_S,COVER_S);
+    g.textAlign='center';
+    g.fillStyle='rgba(30,40,54,.16)';
+    g.font='700 120px "HarmonyOS Sans SC",sans-serif';
+    g.fillText(BRAND_MARK, COVER_S/2, COVER_S/2+42);
+  }
+  maskedCover = c;
+  return c;
+}
+/* ==================================================================
+ *  模块：实时频谱光环（封面外围环形可视化）
+ *  开销控制：每帧仅 1 次 getByteFrequencyData（128 bins）、64 条线段；
+ *  暂停 / 静音时目标值归零，按指数平滑收敛为静止环。
+ * ================================================================== */
+const HALO_N = 64;
+const haloLv = new Float32Array(HALO_N);
+let haloRot = 0, haloAvg = 0;
+function updateHalo(dt){
+  let live = !!analyser && playing && !audio.paused
+               && !(monitorGain && monitorGain.gain.value < 0.005);
+  if(HL.on && HL.haloTable){                 // 离线渲染：逐帧查预计算频谱表（确定性）
+    freqData.set(HL.haloTable.subarray(HL.frame*128, HL.frame*128+128));
+    live = true;
+  } else if(live){
+    analyser.getByteFrequencyData(freqData);
+  }
+  const bins = (HL.on ? (HL.haloTable ? freqData.length : 0)
+                      : (analyser ? analyser.frequencyBinCount : 0));
+  let sum = 0;
+  for(let i=0;i<HALO_N;i++){
+    let target = 0;
+    if(live && bins){
+      // 非线性 bin 映射：低频能量集中区占更多环位，视觉更饱满
+      const k = Math.min(bins-1, Math.floor(Math.pow(i/HALO_N, 1.45) * (bins*0.62)) + 1);
+      const v = Math.max(freqData[k], freqData[Math.min(bins-1,k+1)]*0.72) / 255;
+      target = Math.pow(v, 1.2);
+    }
+    // 上升快、下落慢（峰值保持 + 平滑衰减）
+    const rate = target > haloLv[i] ? dt*22 : dt*5.5;
+    haloLv[i] += (target - haloLv[i]) * Math.min(1, rate);
+    sum += haloLv[i];
+  }
+  haloAvg += (sum/HALO_N - haloAvg) * Math.min(1, dt*6);
+  haloRot += dt*0.06;
+}
+function drawHalo(){
+  const ccx = COVER_X+COVER_S/2, ccy = COVER_Y+COVER_S/2;
+  const R0 = COVER_S/2 + 20;
+  // 内圈柔光：随平均能量呼吸
+  const gl = ctx.createRadialGradient(ccx, ccy, R0*0.25, ccx, ccy, R0+70);
+  gl.addColorStop(0, rgba(PAL.accent, (.035 + haloAvg*.075).toFixed(3)));
+  gl.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gl;
+  ctx.beginPath(); ctx.arc(ccx, ccy, R0+70, 0, 6.284); ctx.fill();
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineWidth = 2.4;
+  for(let i=0;i<HALO_N;i++){
+    const lv = haloLv[i];
+    const a = i/HALO_N*6.2832 + haloRot;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const len = 4 + lv*34;
+    ctx.strokeStyle = lv > .5
+      ? 'rgba(255,255,255,'+(.22+lv*.34).toFixed(3)+')'
+      : rgba(PAL.accent, (.14+lv*.30).toFixed(3));
+    ctx.beginPath();
+    ctx.moveTo(ccx+ca*R0, ccy+sa*R0);
+    ctx.lineTo(ccx+ca*(R0+len), ccy+sa*(R0+len));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawCover(now){
+  const ccx = COVER_X+COVER_S/2, ccy = COVER_Y+COVER_S/2;
+  /* 播放态动效：极缓呼吸（9s，±0.6%）+ 节奏脉动（haloAvg=频谱平均能量，暂停时归零静止） */
+  const breathe = 1 + Math.sin(now/9000)*0.006 + haloAvg*0.016;
+  const sz = COVER_S*breathe;
+  /* 主视觉承载：封面取色柔和扩散 + 两圈发丝轨道圆（自封面后缘露出，弱化网页卡片感） */
+  const amb = ctx.createRadialGradient(ccx, ccy, sz*0.30, ccx, ccy, sz*1.06);
+  amb.addColorStop(0, rgba(PAL.accent, (0.048 + haloAvg*0.05).toFixed(3)));
+  amb.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = amb;
+  ctx.beginPath(); ctx.arc(ccx, ccy, sz*1.06, 0, 6.284); ctx.fill();
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(30,40,54,.085)';
+  ctx.beginPath(); ctx.arc(ccx + sz*0.14, ccy - sz*0.06, sz*0.63, 0, 6.284); ctx.stroke();
+  ctx.strokeStyle = 'rgba(30,40,54,.060)';
+  ctx.beginPath(); ctx.arc(ccx - sz*0.26, ccy + sz*0.30, sz*0.62, 0, 6.284); ctx.stroke();
+  { /* 轨道圆上极小的冰蓝节点（7s 极缓漂移，悬于封面右上缘外） */
+    const oa = -0.55 + Math.sin(now/7000)*0.06;
+    ctx.fillStyle = rgba(BRAND.iceDeep, '0.8');
+    ctx.beginPath();
+    ctx.arc(ccx + sz*0.14 + Math.cos(oa)*sz*0.63, ccy - sz*0.06 + Math.sin(oa)*sz*0.63, 2.6, 0, 6.284);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.imageSmoothingQuality = 'high';
+  // 落影：极轻、贴底（editorial 轻投影，非重阴影）
+  ctx.save();
+  const shd = ctx.createRadialGradient(ccx, ccy+sz*0.50, 0, ccx, ccy+sz*0.50, sz*0.62);
+  shd.addColorStop(0,'rgba(40,50,70,.10)');
+  shd.addColorStop(1,'rgba(40,50,70,0)');
+  ctx.fillStyle = shd;
+  ctx.beginPath(); ctx.ellipse(ccx, ccy+sz*0.52, sz*0.60, sz*0.13, 0, 0, 6.284); ctx.fill();
+  ctx.restore();
+  // 封面本体：圆角裁切（视觉主体，不加任何光效）
+  ctx.save();
+  ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(ccx-sz/2, ccy-sz/2, sz, sz, 10);
+  else ctx.rect(ccx-sz/2, ccy-sz/2, sz, sz);
+  ctx.clip();
+  ctx.drawImage(getMaskedCover(), ccx-sz/2, ccy-sz/2, sz, sz);
+  ctx.restore();
+  // 发丝级内描边（1px 界定轮廓）
+  ctx.save();
+  ctx.strokeStyle = 'rgba(30,40,54,.14)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(ccx-sz/2+0.5, ccy-sz/2+0.5, sz-1, sz-1, 10);
+  else ctx.rect(ccx-sz/2+0.5, ccy-sz/2+0.5, sz-1, sz-1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* 缓动工具（Apple Music 式入场动画） */
+const clamp01 = v => v<0?0:v>1?1:v;
+const easeOutC = v => { v = clamp01(v); return 1 - Math.pow(1-v, 3); };
+
+/* ---------------- 标题装饰（5 套，Canvas 侧实现；配色由封面取色驱动，
+   与背景/封面自动同源，避免色系冲突。titleScheme 与工作坊 TS_STYLES 同一序号） ---------------- */
+function setTitleScheme(i){
+  const n = (typeof TS_STYLES !== 'undefined') ? TS_STYLES.length : 5;
+  titleScheme = ((i % n) + n) % n;
+}
+/* 当前行标记（品牌色点睛）：decor_pick 的 5 套「装饰方案」在此落地为
+   5 种极小标记形状 —— 位置在当前行左缘外，绝不与文字争夺注意力。 */
+function drawLyricMarker(cy, a, t){
+  const x = LY.x - 26, s = titleScheme;
+  ctx.save();
+  if(s === 0){                       // 短横线（绯玫红）
+    ctx.strokeStyle = rgba(BRAND.roseRGB, (.95*a).toFixed(3)); ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x-12, cy); ctx.lineTo(x+8, cy); ctx.stroke();
+  } else if(s === 1){                // 短横线（冰蓝·加深保证浅底可读）
+    ctx.strokeStyle = rgba(BRAND.iceDeep, (a).toFixed(3)); ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x-12, cy); ctx.lineTo(x+8, cy); ctx.stroke();
+  } else if(s === 2){                // 圆点（绯玫红，缓呼吸）
+    const r = 4.2 + Math.sin(t*2.4)*0.6;
+    ctx.fillStyle = rgba(BRAND.roseRGB, (a).toFixed(3));
+    ctx.beginPath(); ctx.arc(x-2, cy, r, 0, 6.284); ctx.fill();
+  } else if(s === 3){                // 双横线（玫 + 冰）
+    ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba(BRAND.roseRGB, (.9*a).toFixed(3));
+    ctx.beginPath(); ctx.moveTo(x-14, cy-5); ctx.lineTo(x+6, cy-5); ctx.stroke();
+    ctx.strokeStyle = rgba(BRAND.iceDeep, (a).toFixed(3));
+    ctx.beginPath(); ctx.moveTo(x-14, cy+5); ctx.lineTo(x+6, cy+5); ctx.stroke();
+  } else {                           // 空心三角（冰蓝描边）
+    ctx.strokeStyle = rgba(BRAND.iceDeep, (a).toFixed(3)); ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x-14, cy-6); ctx.lineTo(x-14, cy+6); ctx.lineTo(x-1, cy); ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* 版块分隔：发丝横线（绯玫红起笔点睛）与两栏垂直线 —— 明纸编辑排版骨架 */
+function drawRule(y, x0, x1){
+  ctx.strokeStyle = 'rgba(30,40,54,.12)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x0, y + .5); ctx.lineTo(x1, y + .5); ctx.stroke();
+  ctx.strokeStyle = 'rgba(218,93,119,.85)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + 26, y); ctx.stroke();
+}
+function drawColumnRule(t){
+  /* 纵向时间轴：发丝线自上而下贯穿版面，进度节点随播放沿轴下移 ——
+     时间可视化 × 左右区域视觉联系（杂志跨页的「书脊」） */
+  const ax = 916.5, y0 = 128, y1 = 952;
+  ctx.strokeStyle = 'rgba(30,40,54,.17)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(ax, y0); ctx.lineTo(ax, y1); ctx.stroke();
+  ctx.strokeStyle = 'rgba(30,40,54,.22)';
+  ctx.beginPath(); ctx.moveTo(ax-5, y0+.5); ctx.lineTo(ax+5, y0+.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ax-5, y1+.5); ctx.lineTo(ax+5, y1+.5); ctx.stroke();
+  const pf = progressNow();
+  const ny = y0 + (pf.ok ? pf.frac : 0) * (y1-y0);
+  const na = 0.60 + Math.sin((t||0)*1.3)*0.25;
+  ctx.fillStyle = rgba(BRAND.roseRGB, na.toFixed(3));
+  ctx.beginPath(); ctx.arc(ax, ny, 3, 0, 6.284); ctx.fill();
+  ctx.strokeStyle = rgba(BRAND.roseRGB, (na*0.4).toFixed(3)); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(ax, ny, 7, 0, 6.284); ctx.stroke();
+}
+
+/* 右上角贴纸：懒加载一次；离线渲染在 __setup 等其就绪 */
+var STICKER = { img:null, ok:false, tried:false };
+(function(){
+  const im = new Image();
+  im.onload = () => { STICKER.img = im; STICKER.ok = true; };
+  im.src = 'assets/sticker.png';
+})();
+
+/* ═══ 右侧背景水印：歌词面板右缘的低干扰衬景，canvas 等价实现 ═══
+   对应 CSS 概念：ALPHA=opacity · BLUR=filter:blur · wmSprite 内渐变=mask-image
+   ↓↓↓ 可调参数全部集中在这里 ↓↓↓ */
+var WM = {
+  img:null, ok:false,
+  ALPHA:      0.16,   // ← 整体不透明度（建议 0.1–0.2）
+  BLUR:       2,      // ← 高斯模糊半径 px（1920 宽基准；0=关闭）
+  HEIGHT:     0.96,   // ← 占歌词视口高度比例（>1 时下摆出血，被视口裁掉）
+  RIGHT_PAD:  4,      // ← 距歌词视口右缘 px（负值=向右出血）
+  TOP_RATIO:  0.08,   // ← 顶部位置（占视口高比例，向下偏移量）
+  MASK_TOP:   0.03,   // ← 遮罩：顶部不透明起点（比例）
+  MASK_FADE:  0.20,   // ← 遮罩：顶部渐入带高度（比例）
+  MASK_BOTTOM:0.78,   // ← 遮罩：底部渐出起点（比例，→1 渐隐到 0）
+  MASK_RIGHT: 0.92,   // ← 遮罩：右缘渐出起点（0.9=最右 10% 渐隐；1=关闭）
+};
+(function(){
+  const im = new Image();
+  im.onload = () => { WM.img = im; WM.ok = true; wmSpr = null; };   // 重载时失效缓存
+  im.src = 'assets/watermark.png';
+})();
+let wmSpr = null;                                     // 遮罩合成缓存（只合成一次）
+function wmSprite(){
+  if(!WM.ok) return null;
+  if(wmSpr) return wmSpr;
+  const iw = WM.img.naturalWidth, ih = WM.img.naturalHeight;
+  const c = document.createElement('canvas'); c.width = iw; c.height = ih;
+  const g = c.getContext('2d');
+  g.drawImage(WM.img, 0, 0);
+  /* 渐变遮罩（= CSS mask-image: linear-gradient）：两趟 destination-in 让纵向×横向 alpha 相乘 */
+  g.globalCompositeOperation = 'destination-in';
+  const gv = g.createLinearGradient(0, 0, 0, ih);               // 纵向：顶部渐入 + 底部渐出
+  gv.addColorStop(WM.MASK_TOP, 'rgba(0,0,0,1)');
+  gv.addColorStop(WM.MASK_TOP + WM.MASK_FADE, 'rgba(0,0,0,1)');
+  gv.addColorStop(WM.MASK_BOTTOM, 'rgba(0,0,0,.85)');
+  gv.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gv; g.fillRect(0, 0, iw, ih);
+  if(WM.MASK_RIGHT < 1){                                        // 横向：右缘微收
+    const gh = g.createLinearGradient(iw * WM.MASK_RIGHT, 0, iw, 0);
+    gh.addColorStop(0, 'rgba(0,0,0,1)');
+    gh.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gh; g.fillRect(0, 0, iw, ih);
+  }
+  wmSpr = c;
+  return wmSpr;
+}
+function drawWatermark(){
+  const spr = wmSprite(); if(!spr) return;
+  const h = LY.h * WM.HEIGHT, w = h * spr.width / spr.height;   // 锁定原图宽高比，不拉伸
+  const dx = LY.x + LY.w - w - WM.RIGHT_PAD;
+  const dy = LY.y + LY.h * WM.TOP_RATIO;
+  ctx.save();
+  ctx.globalAlpha = WM.ALPHA;                                   // 不透明度
+  /* ctx.filter 的半径单位是设备像素、不随 CTM 缩放 → 必须乘 OUT_SCALE，
+     否则 4K 输出时水印模糊会只有 1080P 的一半强度 */
+  if(WM.BLUR > 0) ctx.filter = 'blur(' + (WM.BLUR*OUT_SCALE) + 'px)';
+  ctx.drawImage(spr, dx, dy, w, h);
+  ctx.restore();
+}
+function drawInfo(t){
+  if(t == null) t = Math.max(0, audio.currentTime + offset);
+  const x = 96;
+  /* ① 顶部刊眉带（y=76 基线）：左品牌签名 / 右「角标 · 档案编号」。
+     已去除全部图形装饰（蝴蝶结、天使环），四角文字统一边距 x=96 / x=1824、基线 y=76 */
+  ctx.globalAlpha = easeOutC((t - 0.04) / 0.8);
+  ctx.font = '500 13px "HarmonyOS Sans SC",sans-serif';
+  const right = $('trackLabel').value.trim() || 'TRACK 01';
+  ctx.textAlign = 'right';
+  if(STICKER.ok){                                        // 贴纸（替代右侧档案编号文字）
+    const bh = 60, bw = bh * (STICKER.img.naturalWidth / STICKER.img.naturalHeight);
+    ctx.fillStyle = 'rgba(30,40,54,.62)';
+    drawSpaced(right, 1824 - bw - 14, 76, 5, 'right');
+    /* 图片上部留白 33.6% → 整体上移补偿，贴纸视觉主体与文字基线齐平 */
+    ctx.drawImage(STICKER.img, 1824 - bw, 76 - bh + 11, bw, bh);
+  } else {
+    const trW = drawSpaced(right, 1824, 76, 5, 'right');
+    ctx.fillStyle = rgba(BRAND.iceDeep, '0.46');
+    drawSpaced('NO.001', 1824 - trW - 22, 76, 3.5, 'right');
+  }
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(30,40,54,.55)';
+  const bt = $('badgeText').value.trim() || 'MUSIC ARCHIVE';
+  drawSpaced(bt, 96, 76, 6);
+  ctx.globalAlpha = 1;
+
+  /* ② 横向巨题（Editorial Typography）：巨大横向中文主标题 —— 版面第一视觉核心。
+     中文保持从左到右横向阅读；≤8 字单行，超过自动分两行（行内仍为横向文字）；
+     字号随行宽自适应，收在书脊轴左侧；标题顶部轻微压入封面下缘形成叠层关系 */
+  const title = $('songTitle').value.trim() || '未命名歌曲';
+  const chs = Array.from(title);
+  const twoLine = chs.length > 8;
+  const perLine = twoLine ? Math.ceil(chs.length/2) : chs.length;
+  const hf = twoLine ? 76 : Math.max(64, Math.min(168, Math.floor(780/(chs.length*1.08))));
+  const hsp = Math.round(hf*0.06);
+  const lineH = Math.round(hf*1.16);
+  const lastBase = 800;                                  // 末行基线恒定：标题顶部明确压入封面下缘约四成字身（叠压构图）
+  const l1Base = twoLine ? lastBase - lineH : lastBase;
+  const enT = easeOutC((t - 0.16) / 1.0);
+  ctx.font = '600 '+hf+'px "HarmonyOS Sans SC",sans-serif';
+  /* 标题自适应配色：按封面叠压带（下部）亮度切深/浅字，并加反向光晕/投影，
+     保证任意封面上标题清晰可读（黑封面→浅字+暗影；中间调→墨字+白晕） */
+  const lb = (typeof PAL.lumaBand === 'number') ? PAL.lumaBand : 1;
+  const tInk = lb < 0.40 ? { fill:'#F3EFE6', halo:'rgba(8,12,20,.50)' }
+             : lb < 0.60 ? { fill:INK.title, halo:'rgba(255,255,255,.42)' }
+             : { fill:INK.title, halo:'rgba(255,255,255,.14)' };
+  ctx.save();
+  /* shadowBlur 在设备像素、不随 CTM 缩放（偏移量 shadowOffsetY 反之随 CTM，不用补偿） */
+  ctx.shadowColor = tInk.halo; ctx.shadowBlur = 20*OUT_SCALE; ctx.shadowOffsetY = 3;
+  ctx.fillStyle = tInk.fill;
+  ctx.globalAlpha = enT;
+  const tW1 = drawSpaced(twoLine ? chs.slice(0, perLine).join('') : title, 96, l1Base - (1-enT)*14, hsp);
+  let lastW = tW1;
+  if(twoLine) lastW = drawSpaced(chs.slice(perLine).join(''), 96, lastBase, hsp);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  /* ②⁻ 落款印：横向标题末端的绯玫红小方印（杂志落款意象，品牌点睛） */
+  {
+    const sa = easeOutC((t - 0.52) / 0.8);
+    if(sa > 0.01){
+      const scx = 96 + lastW + hsp + 30, scy = lastBase - Math.round(hf*0.30);
+      ctx.save(); ctx.globalAlpha = sa;
+      ctx.fillStyle = rgba(BRAND.roseRGB, '0.88');
+      rr(scx-12, scy-12, 24, 24, 3); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.92)';
+      ctx.font = '600 10px "HarmonyOS Sans SC",sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(BRAND_MARK, scx, scy + 3.5);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+  }
+  /* ②⁼ 罗马字辅助行：标题下方横向小字（大字距，明显小于中文主标题） */
+  const rom = ($('romajiText') ? $('romajiText').value.trim() : '');
+  if(rom){
+    const ra = easeOutC((t - 0.30) / 0.9);
+    if(ra > 0.01){
+      ctx.save();
+      ctx.globalAlpha = ra * 0.6;
+      ctx.font = '500 13px "HarmonyOS Sans SC",sans-serif';
+      ctx.fillStyle = 'rgba(30,40,54,.55)';
+      drawSpaced(rom.toUpperCase(), 100, lastBase + 34, 6);
+      ctx.restore();
+    }
+  }
+
+  /* ③ 档案信息行（colophon）：ORIGINAL / STYLE / LENGTH 并排一行微型编辑信息，唱片内页式 */
+  {
+    const en3 = easeOutC((t - 0.34) / 0.9);
+    if(en3 > 0.01){
+      const artist = $('artist').value.trim();
+      const vocalEl = $('vocalText'), prodEl = $('producerText');
+      const vocal = vocalEl ? vocalEl.value.trim() : '';
+      const producer = prodEl ? prodEl.value.trim() : '';
+      const tags = $('tagsText').value.split(/[，,、]/).map(s=>s.trim()).filter(Boolean).slice(0,4);
+      const rows = [];
+      if(vocal) rows.push(['VOCAL', vocal]);
+      if(artist) rows.push(['ORIGINAL', artist]);
+      if(producer) rows.push(['P', producer]);
+      if(tags.length) rows.push(['STYLE', tags.join(' / ')]);
+      rows.push(['LENGTH', duration > 0 ? fmt(duration) : '--:--']);
+      ctx.globalAlpha = en3;
+      let cx3 = 96;
+      rows.forEach(row=>{
+        ctx.fillStyle = rgba(BRAND.roseRGB, '0.72');     // 组首玫红微方点
+        ctx.fillRect(cx3, lastBase + 66, 4, 4);
+        ctx.font = '500 11.5px "HarmonyOS Sans SC",sans-serif';
+        ctx.fillStyle = 'rgba(30,40,54,.42)';
+        const lw = drawSpaced(row[0], cx3 + 14, lastBase + 74, 3);
+        ctx.font = '400 16px "HarmonyOS Sans SC",sans-serif';
+        ctx.fillStyle = 'rgba(30,40,54,.80)';
+        ctx.fillText(row[1], cx3 + 14 + lw + 12, lastBase + 74.5);
+        cx3 += 14 + lw + 12 + ctx.measureText(row[1]).width + 44;
+      });
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+/** 逐字卡拉OK进度：完全由时间 t 推导（纯函数），
+ *  因此暂停 / 跳转 / 快进后退后高亮状态天然同步，无需增量状态。
+ *  @returns {i:词序号(-1=按字符均分), frac:0~1}
+ */
+function karaokeFrac(l, t){
+  if(l.words && l.words.length){
+    const ws = l.words, n = ws.length;
+    if(t < ws[0].t) return { i:0, frac:0 };
+    /* 零时长词（空格/重复映射时刻）曾被循环跳过 → 填充宽度单帧跳数十px = 逐字闪烁的根源。
+       改为「同时刻词链」整体均分插值：链 [j..k] 共享起点 T0，到下一不同时刻 T1 之间，
+       宽度从链首 x 匀速推进到链尾后边界 —— 宽度对时间严格连续，任何数据都不闪。 */
+    let j = 0;
+    for(let i=0;i<n;i++){ if(ws[i].t <= t) j = i; else break; }
+    const T0 = ws[j].t;
+    let k = j;
+    while(k+1 < n && ws[k+1].t === T0) k++;
+    while(j > 0 && ws[j-1].t === T0) j--;   // 链首向前扩展：j..k = 全部同时刻词
+    let T1;
+    if(k+1 < n) T1 = ws[k+1].t;
+    else T1 = (l.fillEnd != null && l.fillEnd > T0) ? l.fillEnd
+            : (l.end != null && l.end > T0 ? l.end : T0 + 1.2);
+    const frac = Math.max(0, Math.min(1, (t - T0) / Math.max(.05, T1 - T0)));
+    return { i:j, k, frac };
+  }
+  const s = (l.start != null) ? l.start : 0;
+  const e = (l.fillEnd != null && l.fillEnd > s) ? l.fillEnd
+          : ((l.end != null && l.end > s) ? l.end : s + 2);
+  return { i:-1, frac: Math.max(0, Math.min(1,(t-s)/(e-s))) };
+}
+/** 进度 → 已唱像素宽度（未开唱时严格为 0，杜绝行首白色残段）。
+ *  ⚠ 不可用 `frac <= 0 → return 0` 做早退：t 恰好等于某个字的时间标签时
+ *  （浮点精确相等，全片约 10 余次），frac 天然为 0，但此刻已唱宽度应等于
+ *  该字之前的累计宽度 offs[i].x。返回 0 会让整行填充消失一帧（只剩未唱薄底），
+ *  视觉上就是整行突然褪色闪一下 —— 经编码放大后是明显的「整体闪烁」。
+ *  去掉早退后两条路径在 frac=0 时天然正确：行首 offs[0].x=0（不画），
+ *  中间字 offs[j].x>0（保持已唱部分点亮）。 */
+function karaokeWidth(spr, kf){
+  if(!spr) return 0;
+  if(kf.i >= 0 && spr.wordOffs && spr.wordOffs[kf.i]){
+    const offs = spr.wordOffs;
+    if(kf.k != null && kf.k > kf.i){
+      /* 同时刻词链：链首 x → 链尾后边界（下一词 x 或行宽）按 frac 均分，与前后行进度连续 */
+      const x0 = offs[kf.i].x;
+      const x1 = (kf.k + 1 < offs.length) ? offs[kf.k+1].x
+               : (spr.tw != null ? spr.tw : offs[offs.length-1].x + offs[offs.length-1].w);
+      return x0 + (x1 - x0) * kf.frac;
+    }
+    const o = offs[kf.i];
+    return o.x + o.w*kf.frac;
+  }
+  const offs = spr.offs || [];
+  const n = offs.length; if(!n) return 0;
+  const pos = Math.max(0, Math.min(n, kf.frac*n));
+  const ci = Math.min(n-1, Math.floor(pos));
+  return offs[ci].x + offs[ci].w*(pos-ci);
+}
+
+/* 歌词渐进模糊精灵缓存（Apple Music 式距离感模糊）：按 px 分档预模糊，精灵为 2x 栅格 */
+const blurSprCache = new Map();
+const BLUR_LV = [0, 3, 6, 9, 12];                    // 缓存档位(px)
+const blurLvOf = d => d<=1 ? 3 : d===2 ? 6 : d===3 ? 9 : 12;
+function getBlurSpr(spr, px){
+  px = Math.max(0, Math.min(12, Math.round(px)));
+  if(px === 0) return spr.mut;
+  let m = blurSprCache.get(spr);
+  if(!m){ m = new Map(); blurSprCache.set(spr, m); }
+  let c = m.get(px);
+  if(!c){
+    /* 模糊精灵按「与输出同像素密度」栅格即可：模糊本身已抹掉高频细节，更高栅格只是浪费显存
+       （4K 下若沿用 SPR_SS 栅格，每行最多 4 个档位，整曲可多占数百 MB）。 */
+    c = document.createElement('canvas');
+    c.width = Math.ceil(spr.w*OUT_SCALE); c.height = Math.ceil(spr.h*OUT_SCALE);
+    const g = c.getContext('2d');
+    /* BLUR_LV 的数值是「2× 栅格下的像素半径」，即设计空间半径 = px/2；
+       本画布 1 设计单位 = OUT_SCALE 像素 → 半径 = (px/2)*OUT_SCALE。 */
+    g.filter = 'blur(' + (px*OUT_SCALE/2) + 'px)';
+    g.drawImage(spr.mut, 0, 0, c.width, c.height);
+    m.set(px, c);
+  }
+  return c;
+}
+/* 连续模糊量 b(px) → 相邻两档缓存精灵 + 混合系数（档间平滑过渡，不跳变） */
+function blurPair(spr, b){
+  /* 混合必须全程连续：任何「提前截断」(b≤0.25 早退 / f≥0.985 丢第二只精灵)
+     都会在截断帧产生一次可见跳变 —— 每行 bl 每次收敛到目标都会踩一遍，
+     表现为歌词单帧「闪烁」。缓动到 0 时 f→0 自然退化为纯 mut，无需特判。 */
+  for(let k=0;k<BLUR_LV.length-1;k++){
+    if(b <= BLUR_LV[k+1]){
+      const f = (b - BLUR_LV[k]) / (BLUR_LV[k+1] - BLUR_LV[k]);
+      return [getBlurSpr(spr, BLUR_LV[k]), getBlurSpr(spr, BLUR_LV[k+1]), f];
+    }
+  }
+  return [getBlurSpr(spr, 12), null, 0];
+}
+function drawBlurred(spr, b, dx, dy, dw, dh, alpha){
+  /* 档间过渡必须「插值」而非「叠加」：
+     旧实现画 A(alpha) 再叠 B(alpha*f)，有效不透明度 = α(1+f)。bl 缓动跨过
+     档位边界(3/6/9/12)时 f 由 1 突变为 0 → 总亮度在同一帧翻倍/腰斩，
+     而换行时下游各行的 bl 目标同时 -1 档 → 多行同帧跨界 = 可见的「整体闪烁」。
+     改为 A*(1-f) + B*f：有效不透明度恒 ≈α，任意 b 与档位边界都连续。 */
+  const pa = blurPair(spr, b);
+  const B = pa[1], f = pa[2];
+  if(!B || f <= 0){ ctx.globalAlpha = alpha; ctx.drawImage(pa[0], dx, dy, dw, dh); return; }
+  if(f >= 1){ ctx.globalAlpha = alpha; ctx.drawImage(B, dx, dy, dw, dh); return; }
+  ctx.globalAlpha = alpha * (1 - f);
+  ctx.drawImage(pa[0], dx, dy, dw, dh);
+  ctx.globalAlpha = alpha * f;
+  ctx.drawImage(B, dx, dy, dw, dh);
+}
+
+/* 歌词视口几何：绘制与命中测试同源（缩放/窄屏不会错位） */
+const LY = { x:980, y:140, w:844, h:844, LH:102 };
+const lyricGeom = () => LY;
+const lyricFocusY = () => LY.y + LY.h*0.242;         // 当前行落点：上方留两行（当前为第 3 行）
+let lyricHover = -1;                                  // 指针悬停行
+let lyricDrag  = null;                                // {y0, s0, moved}
+function lyricIndexAt(y){                             // 画布 y → 歌词行号（可超界，调用方 clamp）
+  /* 行 i 的画布纵坐标：y_i = LY.y + i*LH - scrollY → 反解 i */
+  return Math.round((y - LY.y + scrollY) / LY.LH);
+}
+function lyricHit(x, y){
+  return lyrics.length > 0 && x >= LY.x-24 && x <= LY.x+LY.w+24 && y >= LY.y-40 && y <= LY.y+LY.h+40;
+}
+function seekToLine(i){
+  if(i < 0 || i >= lyrics.length) return;
+  audio.currentTime = Math.max(0, (lyrics[i].start || 0) - offset + 0.02);
+  scrollY = i*LY.LH - (lyricFocusY() - LY.y);        // 立即贴位，避免回落抖动
+}
+
+function drawLyrics(now, dt){
+  const vx = LY.x, vy = LY.y, vw = LY.w, vh = LY.h, LH = LY.LH;
+  const t = Math.max(0, (HL.on ? HL.vT : audio.currentTime) + offset);
+  const idx = (!hasStarted && !playing) ? 0 : currentIdx(t);
+  /* anchor：已唱/未唱分界。idx=-1 有两种情形——开播前（anchor=0，全部未唱）与
+     末行展示期满后的「曲终」（anchor=末行之后，全部按已唱渲染，不跟随片尾高亮） */
+  const lastL = lyrics[lyrics.length-1];
+  const sungAll = idx < 0 && lastL && lastL.end != null && t >= lastL.end + 0.2;
+  const anchor = sungAll ? lyrics.length : Math.max(0, idx);
+  const off = lyricFocusY() - LY.y;
+  const target = (idx<0 ? (sungAll ? lyrics.length-1 : 0) : idx)*LH - off;
+  if(!lyricDrag) scrollY += (target - scrollY) * Math.min(1, dt*5.5);   // 缓动跟随
+  for(let i=0;i<lyrics.length;i++){
+    const tg = i===idx ? 1 : 0;
+    /* Apple Music 式节奏：聚焦 ~0.33s 干脆，失焦 ~0.7s 绵长（放大与提亮同步缓退） */
+    act[i] += (tg - act[i]) * Math.min(1, dt * (tg > act[i] ? 9 : 4.2));
+    /* 连续模糊量：当前行 → 0（对焦），已唱行清晰，未唱行按距离分档（Apple Music 式）。
+       当前行用 τ≈0.08s 快速缓动归零（对焦动效本体）——不再做 9→3.2 硬钳：
+       逐帧硬跳变会经视频编码放大成相邻歌词行的单帧闪烁 */
+    const bt = i===idx ? 0 : (i < anchor ? 0 : blurLvOf(Math.abs(i - anchor) || 1));
+    bl[i] = (bl[i]===undefined ? bt : bl[i]) + (bt - (bl[i]===undefined ? bt : bl[i])) * Math.min(1, dt * (i===idx ? 12 : 5.5));
+  }
+  ctx.save();
+  rr(vx-48, vy-46, vw+80, vh+92, 12); ctx.clip();      // 左缘放宽：容纳当前行品牌色标记
+  drawWatermark();                                     // 背景水印：置于全部歌词内容之下
+  if(tap.on && lyrics.length){
+    ctx.font = '500 19px "Noto Sans SC",sans-serif';
+    ctx.fillStyle = rgba(PAL.accent,.80);
+    ctx.fillText(`● TAP ${Math.min(tap.i+1, lyrics.length)}/${lyrics.length} · Enter 打点`, vx, vy-16);
+  }
+  if(!lyrics.length || !sprites.length){
+    drawLyricsEmpty(now);
+  } else {
+    for(let i=0;i<lyrics.length;i++){
+      const yTop = vy + i*LH - scrollY;
+      if(yTop > vy+vh+LH || yTop+LH < vy-LH*1.4) continue;
+      if(tap.on && i === tap.i){            // 待打点行：金色标记
+        ctx.save(); ctx.fillStyle = 'rgba(218,93,119,.85)';         // 打点标记：绯玫红
+        ctx.fillRect(vx-13, yTop+12, 3, LH-24); ctx.restore();
+      }
+      const spr = sprites[i], a = act[i];
+      const dist = idx<0 ? (i+1) : Math.abs(i-idx);
+      // 当前行聚焦：行开始后 0.5s 内浅模糊 → 锐利（轻盈的对焦动效）
+      const enter = i===idx ? easeOutC((t - (lyrics[i].start || 0)) / 0.5) : (i<anchor ? 1 : 0);
+      const fs = 48 + 17*a;                           // 当前行 65 / 其余 48：更突出的强调（≈1.35x）
+      let sc = fs/SPR_FS;
+      { const fit = (vw - 12) / Math.max(1, spr.w - SPR_PAD*2);   // 长行钳制：放大后文字仍收在视口内
+        if(sc > fit) sc = fit; }
+      /* 层级（字重 + 明暗 + 距离模糊三重区分，Apple Music 特质保留）：
+           已唱（上方）  .40   700 字重 · 清晰
+           当前行        1.0   未唱部分 400/.26 · 已唱部分 700/.95 · 对焦清晰
+           未唱（下方）  .22 → .09   400 字重 · 渐进模糊（1行3px → 4行12px） */
+      let base;
+      if(i < anchor)       base = 0.34;                       // 已唱：墨色变淡
+      else if(i === idx)   base = 1.00;
+      else                 base = 0.24 + 0.36 * Math.exp(-(dist-1)/1.7);   // 连续衰减 .60/.44/.35/.30→.24，无档位跳变
+      if(lyricDrag) base = Math.max(base, i===idx ? 1 : 0.55);   // 拖拽预览：整体提亮
+      /* 行切换瞬间 base 阶跃(邻行 0.44→0.60 / 当前行 →1.0)是「下方歌词闪一次」的根源，
+         逐行缓动消散(τ≈0.11s)；当前行自身的提亮仍由 act 快速缓动承担，对焦不拖沓 */
+      bs[i] = (bs[i] == null) ? base : bs[i] + (base - bs[i]) * Math.min(1, dt*9);
+      if(lyricDrag) bs[i] = base;
+      // 视口上下边缘柔和淡出（80px 过渡带）
+      const edgeA = Math.min(
+        easeOutC((yTop - (vy-72)) / 120),
+        easeOutC(((vy+vh+42) - (yTop+LH)) / 120));
+      const alpha = (bs[i] + (1-bs[i])*a) * edgeA;
+      const dw = spr.w*sc, dh = spr.h*sc;
+      const cyL = yTop + LH/2;
+      /* 当前行微右移（层次感）：写成 4*a，不要写 (i===idx ? 4*a : 0)。
+         后者在「当前行 → 已唱」的那一帧把 4a 整项砍成 0，dx 单帧左移约 4px，
+         等于整行文字单帧位移 —— 经编码放大后同样是可见闪烁。
+         a = act[i] 对非当前行本就收敛到 0，直接相乘即可，全程连续。 */
+      const dx = vx - SPR_PAD*sc + 4*a;
+      const dy = cyL - dh/2;
+      if(!karaokeOn){
+        // 关闭卡拉OK：整行按明暗中值渲染（已唱用 700 清晰，未唱用 400 + 距离模糊）
+        if(i < anchor){ ctx.globalAlpha = alpha; ctx.drawImage(spr.ink, dx, dy, dw, dh); }
+        else drawBlurred(spr, bl[i], dx, dy, dw, dh, alpha);
+      } else if(i >= anchor && i !== idx){
+        // 未唱：400 字重 + Apple Music 式渐进模糊（离当前行越远越朦胧）
+        drawBlurred(spr, bl[i], dx, dy, dw, dh, alpha);
+      } else if(i < anchor){
+        // 已唱：整行 700 字重，中等亮度 —— 与未唱形成「字重 + 明暗」双重区分
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(spr.ink, dx, dy, dw, dh);
+      } else {
+        // 当前行：400 字重薄底（未唱部分）→ 700 字重白色随演唱进度逐字点亮
+        const kf = karaokeFrac(lyrics[i], t);
+        const fw = karaokeWidth(spr, kf);
+        /* 未唱薄底：跟随 bl 连续模糊 —— 对焦时 3px→0 平滑锐化（Apple Music 动效） */
+        drawBlurred(spr, Math.max(bl[i], (1-enter)*3), dx, dy, dw, dh, alpha*0.32);
+        drawLyricMarker(yTop + LH/2, a, now);           // 当前行标记（品牌色点睛，方案=标记形状）
+        if(fw > 0.5){
+          /* 柔和渐变填充：ink 经横向渐变蒙版点亮 —— 已唱 .95 → 约 48px 平滑过渡 → 0，
+             取代旧「9px 半透明 + 22px 淡尾」三段硬台阶（两层色阶的廉价感来源） */
+          const g = karaokeScratch(spr);
+          g.drawImage(spr.ink, 0, 0, spr.w, spr.h);
+          g.globalCompositeOperation = 'destination-in';
+          const x0 = SPR_PAD + fw - 14, x1 = SPR_PAD + fw + 34;
+          const grad = g.createLinearGradient(x0, 0, x1, 0);
+          grad.addColorStop(0,   'rgba(0,0,0,0.95)');
+          grad.addColorStop(0.45, 'rgba(0,0,0,0.52)');
+          grad.addColorStop(0.8,  'rgba(0,0,0,0.16)');
+          grad.addColorStop(1,   'rgba(0,0,0,0)');
+          g.fillStyle = grad;
+          g.fillRect(0, 0, Math.min(x1, spr.w), spr.h);
+          g.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(kScratch, dx, dy, dw, dh);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.globalAlpha = 1;
+    // 拖拽 / 悬停时的定位指示：焦点线 + 时间气泡
+    if(lyricDrag || lyricHover >= 0){
+      const fi = lyricDrag
+        ? clampInt(Math.round((lyricFocusY() - LY.y + scrollY) / LY.LH), 0, lyrics.length-1)
+        : lyricHover;
+      if(fi >= 0 && fi < lyrics.length){
+        const fy = lyricFocusY();
+        ctx.save();
+        ctx.strokeStyle = rgba(PAL.accent, .30); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(vx-16, fy+LH/2); ctx.lineTo(vx+vw-40, fy+LH/2); ctx.stroke();
+        ctx.font = '500 16px "Noto Sans SC",sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,.62)';
+        ctx.textAlign = 'right';
+        ctx.fillText(fmt(lyrics[fi].start || 0), vx+vw, fy+LH/2+6);
+        ctx.textAlign = 'left';
+        ctx.restore();
+      }
+    }
+  }
+  ctx.restore();
+  if(window.__lyrDbg) try{ window.__lyrDbg({ frame: HL.on ? HL.frame : -1, t,
+    idx, anchor, target, scrollY,
+    bl: bl.slice(0, 8), act: act.slice(0, 4) }); }catch(e){}
+}
+const clampInt = (v,a,b) => v<a?a:(v>b?b:v);
+/* 空状态：无歌词时的得体处理（三道渐弱弧 + 一句留白文案） */
+function drawLyricsEmpty(now){
+  const cx = LY.x + LY.w*0.42, cy = LY.y + LY.h*0.34;
+  ctx.save();
+  for(let k=0;k<3;k++){
+    const r = 26 + k*22;
+    const a = 0.16 - k*0.045;
+    const ph = now/2600 + k*0.5;
+    ctx.strokeStyle = 'rgba(30,40,54,' + (a*0.9).toFixed(3) + ')';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(cx - 46, cy, r, -0.62 + Math.sin(ph)*0.05, 0.62 + Math.sin(ph)*0.05);
+    ctx.stroke();
+  }
+  ctx.textAlign = 'left';
+  ctx.font = '400 28px "HarmonyOS Sans SC",sans-serif';
+  ctx.fillStyle = 'rgba(30,40,54,.52)';
+  drawSpaced('此刻，只有旋律', cx - 4, cy + 12, 5);
+  ctx.font = '400 17px "HarmonyOS Sans SC",sans-serif';
+  ctx.fillStyle = 'rgba(30,40,54,.28)';
+  ctx.fillText('暂无歌词 · 可粘贴 LRC，或进入打点模式手动标记', cx - 4, cy + 46);
+  ctx.restore();
+}
+
+/* ---------------- 唯一进度数据源 ----------------
+ * 画面进度条与顶部播放条共用此函数，保证：
+ *   进度位置 / 当前时间 / 总时长 / 刻度 四者严格同源于 audio.currentTime
+ * 播放（含导出录制）中抑制偶发回退；用户 seek 由 seeked 事件解锁。
+ */
+let progLast = 0;
+function progressNow(){
+  if(!duration || !isFinite(duration) || duration <= 0) return { t:0, frac:0, ok:false };
+  let t = HL.on ? HL.vT : audio.currentTime;
+  if(!isFinite(t)) t = 0;
+  t = Math.max(0, Math.min(duration, t));
+  if(audio.ended) t = duration;
+  if(playing && !seeking && t < progLast - 0.35 && t > 1) t = progLast;   // 防抖动回退
+  progLast = t;
+  return { t, frac: t/duration, ok:true };
+}
+audio.addEventListener('seeked', ()=>{ progLast = audio.currentTime || 0; });
+audio.addEventListener('loadstart', ()=>{ progLast = 0; });
+audio.addEventListener('ended', ()=>{ progLast = duration; });
+
+/* 底部控制区：细线进度（绯玫红为页面唯一强点缀）+ 时间 + 极简图标 + 音量 + 日期角标 */
+function drawPlayerBar(now){
+  const { t, frac, ok } = progressNow();
+  const { bx, bw, by } = barGeom();
+  /* 底部通栏页脚基线（杂志基线）：发丝线 + 克制微型波形 + 玫红进度 + 播放头。
+     「正在播放」完全由进度/时间/歌词表达，无任何播放器按钮 */
+  ctx.lineCap = 'butt'; ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(30,40,54,.12)';
+  ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+bw,by); ctx.stroke();
+  {
+    const WN = Math.max(96, Math.round(bw/12)), wsp = bw/WN;
+    for(let i=0;i<WN;i++){
+      const det = 0.30 + 0.70*Math.abs((Math.sin(i*12.9898)*43758.5453) % 1);
+      const amp = (1.1 + det*4.6) * (0.72 + haloLv[i%HALO_N]*1.5);
+      const wx2 = bx + (i+0.5)*wsp;
+      ctx.strokeStyle = wx2 <= bx + bw*frac ? 'rgba(218,93,119,.46)' : 'rgba(30,40,54,.13)';
+      ctx.beginPath(); ctx.moveTo(wx2, by-amp); ctx.lineTo(wx2, by+amp); ctx.stroke();
+    }
+  }
+  const hx = bx + bw*frac;
+  ctx.strokeStyle = 'rgba(218,93,119,.92)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(hx,by); ctx.stroke();
+  ctx.fillStyle = 'rgba(218,93,119,1)';
+  ctx.beginPath(); ctx.arc(hx, by, 3.6, 0, 6.284); ctx.fill();
+  ctx.lineCap = 'butt';
+  /* 时间：基线下方两端，等宽数字（辅助层级） */
+  ctx.font = '500 13px "HarmonyOS Sans SC",sans-serif';
+  ctx.fillStyle = 'rgba(30,40,54,.55)';
+  ctx.textAlign = 'left';  ctx.fillText(ok ? fmt(t) : '0:00', bx, by+26);
+  ctx.textAlign = 'right'; ctx.fillText(ok ? fmt(duration) : '--:--', bx+bw, by+26);
+  ctx.textAlign = 'left';
+  drawDateTag();
+}
+/* 页脚 folio：左下页码·档案号，右下日期 —— 沿页面边缘的微型排版信息 */
+const FOOT_DOT_PAD = {'.': 1.3};    // 句点两侧各补 1.3px，避免与相邻数字视觉粘连
+function drawDateTag(){
+  const d = ($('footerRight').value.trim() || '').replace(/-/g, '.');
+  const fl = $('footerLeft').value.trim() || 'SONG ARCHIVE';
+  ctx.font = '500 11.5px "HarmonyOS Sans SC",sans-serif';
+  ctx.fillStyle = 'rgba(30,40,54,.36)';
+  ctx.textAlign = 'left';
+  drawSpaced(fl, 96, 1062, 3);                       // 左下角档案号（由 footerLeft 驱动）
+  if(d){
+    ctx.textAlign = 'right';
+    drawSpaced(d, 1824, 1062, 3, 'right', FOOT_DOT_PAD);
+  }
+  ctx.textAlign = 'left';
+}
+
+/* ==================================================================
+ *  模块：自定义贴纸层（可编辑 + 持久化）
+ *  坐标归一化 (0~1)，DOM 覆盖层只画边框与手柄（避免与 canvas 内容重影），
+ *  内容统一由 canvas 绘制 → 与导出画面完全一致。
+ * ================================================================== */
+const ST_KEY = 'scStickers:v1';
+let stickers = [], stSel = null, stEdit = false, stSeq = 1;
+const stImgs = {};
+const stLayer = $('stickerLayer');
+const clampST = v => Math.min(.98, Math.max(.02, v));
+
+function loadStickers(){
+  try{ stickers = JSON.parse(localStorage.getItem(ST_KEY) || '[]'); }catch(e){ stickers = []; }
+  stickers = stickers.filter(s => s && typeof s.x === 'number' && typeof s.y === 'number');
+  stickers.forEach(s => { s.s = s.s || 1; s.rot = s.rot || 0; s.z = s.z || 0; });
+  stSeq = stickers.reduce((m,s)=>Math.max(m, s.id||0), 0) + 1;
+  stickers.forEach(s => { if(s.type === 'img' && s.src) loadStickerImg(s); });
+}
+function saveStickers(){
+  try{ localStorage.setItem(ST_KEY, JSON.stringify(stickers)); }catch(e){}
+}
+function loadStickerImg(s){
+  if(stImgs[s.id]) return;
+  const im = new Image();
+  im.onload = ()=>{ stImgs[s.id] = im; if(stEdit) renderStickers(); };
+  im.src = s.src;
+}
+function nextZ(){ return stickers.length ? Math.max.apply(null, stickers.map(s=>s.z||0)) + 1 : 1; }
+function addSticker(ch){
+  const s = { id: stSeq++, type:'text', text:ch, x:.5, y:.5, s:1, rot:0, z: nextZ() };
+  stickers.push(s); stSel = s.id; saveStickers(); renderStickers();
+}
+function addImageSticker(dataUrl){
+  const s = { id: stSeq++, type:'img', src:dataUrl, x:.5, y:.5, s:1, rot:0, z: nextZ() };
+  stickers.push(s); loadStickerImg(s); stSel = s.id; saveStickers(); renderStickers();
+}
+function removeSticker(id){
+  stickers = stickers.filter(s => s.id !== id);
+  if(stSel === id) stSel = null;
+  delete stImgs[id];
+  saveStickers(); renderStickers();
+}
+function stReorder(id, dir){
+  const arr = stickers.slice().sort((a,b)=>(a.z||0)-(b.z||0));
+  const i = arr.findIndex(s => s.id === id), j = i + dir;
+  if(i < 0 || j < 0 || j >= arr.length) return;
+  const zi = arr[i].z, zj = arr[j].z;
+  arr[i].z = zj; arr[j].z = zi;
+  saveStickers(); renderStickers();
+}
+function stInfo(){
+  const n = stickers.length, cur = stickers.find(s=>s.id===stSel);
+  $('stInfo').textContent = cur
+    ? `已选中 ${cur.type==='img' ? '图片' : '「'+cur.text+'」'} · 缩放 ${cur.s.toFixed(2)}× · 旋转 ${Math.round(cur.rot*57.3)}°`
+    : (n ? `共 ${n} 个贴纸 · 未选中` : '暂无贴纸');
+}
+function renderStickers(){
+  stLayer.innerHTML = '';
+  const k = stLayer.clientWidth / W;      // 显示尺寸 / 画布尺寸
+  stickers.slice().sort((a,b)=>(a.z||0)-(b.z||0)).forEach(s => {
+    const d = document.createElement('div');
+    d.className = 'st-item' + (s.id === stSel ? ' sel' : '');
+    d.dataset.id = s.id;
+    d.style.left = (s.x*100)+'%';
+    d.style.top  = (s.y*100)+'%';
+    d.style.transform = `translate(-50%,-50%) rotate(${s.rot}rad)`;
+    if(s.type === 'img'){
+      d.style.width = (240*s.s*k)+'px';
+      if(stImgs[s.id]) d.innerHTML = `<img src="${s.src}" style="width:100%">`;
+    } else {
+      d.style.fontSize = (96*s.s*k)+'px';
+      d.textContent = s.text;
+    }
+    const mk = (cls, txt) => {
+      const h = document.createElement('div');
+      h.className = 'st-h ' + cls; h.textContent = txt;
+      h.dataset.act = cls; h.dataset.id = s.id;
+      d.appendChild(h);
+    };
+    mk('del','×'); mk('rt','↻'); mk('sc','⤡');
+    stLayer.appendChild(d);
+  });
+  stInfo();
+}
+function applyStickerDom(s){
+  const d = stLayer.querySelector('.st-item[data-id="'+s.id+'"]');
+  if(!d) return;
+  const k = stLayer.clientWidth / W;
+  d.style.left = (s.x*100)+'%';
+  d.style.top  = (s.y*100)+'%';
+  d.style.transform = `translate(-50%,-50%) rotate(${s.rot}rad)`;
+  if(s.type === 'img') d.style.width = (240*s.s*k)+'px';
+  else d.style.fontSize = (96*s.s*k)+'px';
+}
+/* 指针交互：移动 / 缩放 / 旋转（移动端同样适用） */
+let stDrag = null;
+stLayer.addEventListener('pointerdown', e => {
+  const item = e.target.closest('.st-item'); if(!item) return;
+  const id = +item.dataset.id;
+  const s = stickers.find(k => k.id === id); if(!s) return;
+  const h = e.target.closest('.st-h');
+  if(h && h.dataset.act === 'del'){ removeSticker(id); return; }
+  stSel = id;
+  stLayer.querySelectorAll('.st-item').forEach(el => el.classList.toggle('sel', +el.dataset.id === id));
+  stInfo();
+  try{ stLayer.setPointerCapture(e.pointerId); }catch(_){}
+  const r = stLayer.getBoundingClientRect();
+  stDrag = {
+    id, mode: h ? (h.dataset.act === 'rt' ? 'rot' : 'scale') : 'move',
+    px: e.clientX, py: e.clientY,
+    sx: s.x, sy: s.y, ss: s.s, sr: s.rot,
+    ox: r.left + s.x*r.width, oy: r.top + s.y*r.height
+  };
+  e.preventDefault();
+});
+stLayer.addEventListener('pointermove', e => {
+  if(!stDrag) return;
+  const s = stickers.find(k => k.id === stDrag.id); if(!s) return;
+  const r = stLayer.getBoundingClientRect();
+  if(stDrag.mode === 'move'){
+    s.x = clampST(stDrag.sx + (e.clientX - stDrag.px)/r.width);
+    s.y = clampST(stDrag.sy + (e.clientY - stDrag.py)/r.height);
+  } else if(stDrag.mode === 'scale'){
+    const d0 = Math.hypot(stDrag.px - stDrag.ox, stDrag.py - stDrag.oy) || 1;
+    const d1 = Math.hypot(e.clientX - stDrag.ox, e.clientY - stDrag.oy);
+    s.s = Math.min(3, Math.max(.3, stDrag.ss * (d1/d0)));
+  } else {
+    const a0 = Math.atan2(stDrag.py - stDrag.oy, stDrag.px - stDrag.ox);
+    const a1 = Math.atan2(e.clientY - stDrag.oy, e.clientX - stDrag.ox);
+    s.rot = stDrag.sr + (a1 - a0);
+  }
+  applyStickerDom(s);
+});
+window.addEventListener('pointerup', () => { if(stDrag){ stDrag = null; saveStickers(); stInfo(); } });
+window.addEventListener('resize', () => { if(stEdit) renderStickers(); });
+
+/* 画面内的贴纸绘制（导出成片同样包含） */
+function drawStickers(){
+  if(!stickers.length) return;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  stickers.slice().sort((a,b)=>(a.z||0)-(b.z||0)).forEach(s => {
+    ctx.save();
+    ctx.translate(s.x*W, s.y*H);
+    ctx.rotate(s.rot || 0);
+    ctx.scale(s.s || 1, s.s || 1);
+    if(s.type === 'img'){
+      const im = stImgs[s.id];
+      if(im){
+        const bw = 240, bh = 240 * im.height / im.width;
+        ctx.drawImage(im, -bw/2, -bh/2, bw, bh);
+      }
+    } else {
+      ctx.font = '900 96px "Noto Sans SC",sans-serif';
+      ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 18*OUT_SCALE;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(s.text, 0, 0);
+    }
+    ctx.restore();
+  });
+  ctx.restore();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+
+/* ---------------- 主循环 ---------------- */
+let lastT = performance.now(), tlKey = '';
+function loop(now){
+  const dt = Math.min(.05, (now-lastT)/1000); lastT = now;
+  const k = lyrics.length + '|' + duration.toFixed(2) + '|' + autoSpeed + '|' + lrcMode;
+  if(!tap.on && k !== tlKey){ tlKey = k; buildTimeline(); }
+  ctx.setTransform(OUT_SCALE,0,0,OUT_SCALE,0,0);
+  ctx.clearRect(0,0,W,H);
+  updateHalo(dt);
+  drawBackground(now, dt);
+  if(SHOW_ART) drawArtLayer();
+  drawCover(now);
+  drawInfo(Math.max(0, audio.currentTime + offset));
+  drawLyrics(now, dt);
+  drawPlayerBar(now);
+  drawStickers();
+  if(exporting){
+    $('exportStatus').textContent = `● 录制中 ${fmt(audio.currentTime)} / ${fmt(duration)} —— 请勿切换标签页`;
+  }
+  updatePlaybar();
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- 画布点击 / 拖动（进度条定位） ---------------- */
+function _cvPt(e){
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX-r.left)*W/r.width, y: (e.clientY-r.top)*H/r.height };
+}
+function barHit(x, y){                       // 命中区带内边距，窄屏下也易点中
+  const b = barGeom();
+  return !!duration && x >= b.bx-20 && x <= b.bx+b.bw+20 && y >= b.by-22 && y <= b.by+28;
+}
+function seekByX(x){
+  const b = barGeom();
+  audio.currentTime = Math.min(1, Math.max(0, (x - b.bx) / b.bw)) * duration;
+}
+let barDrag = false;
+cv.addEventListener('pointerdown', e => {
+  if(stEdit) return;                                     // 贴纸编辑态交还给贴纸层
+  const p = _cvPt(e);
+  if(barHit(p.x, p.y)){                                  // ① 进度条：拖动定位
+    barDrag = true; seekByX(p.x);
+    try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+    e.preventDefault();
+    return;
+  }
+  if(lyricHit(p.x, p.y) && lyrics.length){               // ② 歌词区：进入拖拽预览
+    lyricDrag = { y0:p.y, s0:scrollY, moved:false };
+    try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+    e.preventDefault();
+  }
+});
+cv.addEventListener('pointermove', e => {
+  const p = _cvPt(e);
+  if(barDrag){ seekByX(p.x); return; }                   // 拖动跳转
+  if(lyricDrag){
+    const dy = p.y - lyricDrag.y0;
+    if(Math.abs(dy) > 3) lyricDrag.moved = true;
+    const off = lyricFocusY() - LY.y;
+    const lo = -0.45*LY.LH - off, hi = (lyrics.length-1+0.45)*LY.LH - off;
+    scrollY = Math.max(Math.min(lo, hi), Math.min(Math.max(lo, hi), lyricDrag.s0 - dy));
+    return;
+  }
+  lyricHover = lyricHit(p.x, p.y)
+    ? clampInt(lyricIndexAt(p.y), 0, Math.max(0, lyrics.length-1)) : -1;
+});
+const _barUp = e => {
+  if(barDrag){
+    barDrag = false;
+    try{ cv.releasePointerCapture(e.pointerId); }catch(_){}
+  }
+  if(lyricDrag){
+    const p = _cvPt(e);
+    if(!lyricDrag.moved){
+      const i = clampInt(lyricIndexAt(p.y), 0, lyrics.length-1);   // 单击 → 跳到该行
+      if(lyrics.length) seekToLine(i);
+    } else {
+      const i = clampInt(Math.round((lyricFocusY() - LY.y + scrollY) / LY.LH), 0, lyrics.length-1);
+      seekToLine(i);                                              // 拖拽 → 跳到焦点行
+    }
+    lyricDrag = null;
+    try{ cv.releasePointerCapture(e.pointerId); }catch(_){}
+  }
+};
+cv.addEventListener('pointerleave', () => { lyricHover = -1; });
+cv.addEventListener('pointerup', _barUp);
+cv.addEventListener('pointercancel', _barUp);
+
+/* ---------------- 导出 ---------------- */
+function pickMime(){
+  const cands = [
+    ['video/mp4;codecs="avc1.64002A,mp4a.40.2"', true],
+    ['video/mp4;codecs=avc1.64002A', true],
+    ['video/mp4', true],
+    ['video/webm;codecs=vp9,opus', false],
+    ['video/webm', false],
+  ];
+  for(const [m,isMp4] of cands) if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return {m,isMp4};
+  return null;
+}
+async function startExport(){
+  if(!audio.src){ alert('请先上传音源'); openCard('sec-media'); return; }
+  if(tap.on) tapExit();                     // 打点标记不进成片
+  if(stEdit){                               // 贴纸手柄（DOM 覆盖层）不进成片
+    stEdit = false;
+    $('btnSticker').textContent = '贴纸层：关';
+    stLayer.hidden = true; $('stickerPanel').hidden = true;
+  }
+  const pick = pickMime();
+  if(!pick){ alert('当前浏览器不支持 MediaRecorder，请使用 Chrome / Edge'); return; }
+  recMime = pick.m; recIsMp4 = pick.isMp4;
+  ensureAudioGraph();
+  await actx.resume();
+  monitorGain.gain.value = $('muteMonitor').checked ? 0 : parseFloat($('volume').value);
+  const vStream = cv.captureStream(60);
+  const stream = new MediaStream([...vStream.getVideoTracks(), ...recDest.stream.getAudioTracks()]);
+  chunks = [];
+  try{
+    rec = new MediaRecorder(stream, { mimeType: recMime, videoBitsPerSecond: 24_000_000, audioBitsPerSecond: 256_000 });
+  }catch(err){ alert('创建录制器失败：'+err.message); return; }
+  rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = saveRecording;
+  audio.pause(); audio.currentTime = 0; buildTimeline();
+  exporting = true;
+  $('btnExport').disabled = true; $('btnStop').disabled = false; $('btnExportTop').disabled = true;
+  rec.start(1000);
+  try{ await audio.play(); }catch(e){ stopExport(); }
+  const onEnded = () => { audio.removeEventListener('ended', onEnded); if(exporting) setTimeout(stopExport, 500); };
+  audio.addEventListener('ended', onEnded);
+}
+function stopExport(){
+  if(!exporting) return;
+  exporting = false;
+  audio.pause();
+  if(rec && rec.state !== 'inactive') rec.stop();
+  $('btnExport').disabled = false; $('btnStop').disabled = true; $('btnExportTop').disabled = false;
+  $('exportStatus').textContent = '正在封装文件 …';
+}
+function saveRecording(){
+  const blob = new Blob(chunks, { type: recMime.split(';')[0] });
+  const safe = ($('songTitle').value.trim() || 'songcut-player').replace(/[\\/:*?"<>|]/g,'_');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${safe}-1080p60.${recIsMp4?'mp4':'webm'}`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  $('exportStatus').textContent = recIsMp4
+    ? `✔ 导出完成：${a.download}（${(blob.size/1048576).toFixed(1)} MB）`
+    : `✔ 导出完成：${a.download}（${(blob.size/1048576).toFixed(1)} MB）· WebM，请用 ffmpeg 转 MP4`;
+}
+$('btnExport').addEventListener('click', startExport);
+$('btnStop').addEventListener('click', stopExport);
+
+/* ---------------- 启动 ---------------- */
+/* ---- 画面装饰开关 ---- */
+$('karaokeOn').addEventListener('change', e => { karaokeOn = e.target.checked; });
+
+/* 装饰立绘：上传 / 移除（离线渲染经 job.artImage 注入，两路互不干扰） */
+$('btnArtImage').addEventListener('click', () => $('artImageFile').click());
+$('artImageFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if(!f) return;
+  const im = new Image();
+  im.onload = () => { setArtImage(im); $('btnArtImage').textContent = '立绘图层：已载入'; $('btnArtImageClear').hidden = false; };
+  im.src = URL.createObjectURL(f);
+  e.target.value = '';
+});
+$('btnArtImageClear').addEventListener('click', () => {
+  artImg = null; artCanvas = null;
+  $('btnArtImage').textContent = '立绘图层：未载入'; $('btnArtImageClear').hidden = true;
+});
+$('haloOn').addEventListener('change', e => { haloOn = e.target.checked; });
+$('btnSticker').addEventListener('click', () => {
+  stEdit = !stEdit;
+  $('btnSticker').textContent = '贴纸层：' + (stEdit ? '开' : '关');
+  $('stickerLayer').hidden = !stEdit;
+  $('stickerPanel').hidden = !stEdit;
+  if(stEdit) renderStickers();
+});
+$('stickerPanel').addEventListener('click', e => {
+  const p = e.target.closest('.st-pick');
+  if(p) addSticker(p.dataset.ch);
+});
+$('btnStickerImg').addEventListener('click', () => $('stickerImgFile').click());
+$('stickerImgFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if(!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {                       // 压缩后再存，避免撑爆 localStorage
+      const max = 400, r = Math.min(1, max/Math.max(im.width, im.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.width*r); c.height = Math.round(im.height*r);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      addImageSticker(c.toDataURL('image/png'));
+    };
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+  e.target.value = '';
+});
+$('stUp').addEventListener('click', () => { if(stSel != null) stReorder(stSel, 1); });
+$('stDown').addEventListener('click', () => { if(stSel != null) stReorder(stSel, -1); });
+$('stDel').addEventListener('click', () => { if(stSel != null) removeSticker(stSel); });
+$('stClear').addEventListener('click', () => {
+  if(!stickers.length){ alert('当前没有贴纸'); return; }
+  if(!confirm('清除全部 ' + stickers.length + ' 个贴纸？')) return;
+  stickers = []; stSel = null; saveStickers(); renderStickers();
+});
+
+loadStickers();
+$('lyricsText').value = SAMPLE;
+parseLyrics(SAMPLE);
+renderCacheBar();
+(async () => {
+  try{
+    await Promise.all([
+      document.fonts.load('900 52px "Noto Sans SC"'),
+      document.fonts.load('900 66px "Noto Sans SC"'),
+      document.fonts.load('500 30px "Noto Sans SC"'),
+      document.fonts.load('italic 900 150px "Playfair Display"'),
+    ]);
+  }catch(e){}
+  /* 字体就绪后重建歌词精灵（预览页鸿蒙字体为懒加载，避免精灵被回退字体烤死） */
+  if(document.fonts && document.fonts.ready){
+    /* 离线渲染(HL.on)由 __setup 显式等待字体后建精灵；此处若在渲染中途再重建，
+       字体栅格化差异会造成整幅歌词单帧闪烁 —— 离线模式必须跳过 */
+    document.fonts.ready.then(()=>{ if(lyrics.length && !(window.HL && HL.on)) buildSprites(); });
+  }
+  buildSprites();
+  HL.ready = true;
+  if(!HL.on) requestAnimationFrame(loop);
+})();
+/* ==================================================================
+ *  离线逐帧渲染模块（?render=1）
+ *  策略：帧号驱动虚拟时钟 → 逐帧绘制 canvas → WebCodecs VideoEncoder
+ *  （H.264 硬编）→ mp4-muxer 封装 MP4。非实时、确定性，零掉帧零闪烁，
+ *  动效与实时预览完全一致。频谱光环由解码 PCM 预计算的频谱表驱动。
+ * ================================================================== */
+(function(){
+  if(!HL.on) return;
+
+  /* ---------- 2048 点 FFT：预计算每帧 128 bin 频谱（模拟 analyser 线性 bin） ---------- */
+  function computeHaloTable(buf, fps){
+    const sr = buf.sampleRate, N = 2048;
+    const mono = new Float32Array(buf.length);
+    for(let ch=0; ch<buf.numberOfChannels; ch++){
+      const d = buf.getChannelData(ch);
+      for(let i=0;i<buf.length;i++) mono[i] += d[i]/buf.numberOfChannels;
+    }
+    const win = new Float32Array(N);
+    for(let i=0;i<N;i++) win[i] = .5 - .5*Math.cos(2*Math.PI*i/N);
+    // analyser(fftSize=256) 的线性 bin：bin k ≈ k*sr/256 Hz，半宽 1 个 bin
+    const hzPerBin = sr/N, aw = sr/256;
+    const ranges = [];
+    for(let k=1; k<128; k++){
+      const f = k*aw, half = aw/2;
+      let lo = Math.max(1, Math.floor((f-half)/hzPerBin)), hi = Math.min(N/2-1, Math.ceil((f+half)/hzPerBin));
+      if(hi<=lo) hi = lo+1;
+      ranges.push([lo,hi]);
+    }
+    const nFrames = Math.ceil(buf.length/(sr/fps));
+    const table = new Uint8Array(nFrames*128);
+    const re = new Float32Array(N), im = new Float32Array(N);
+    const fft = () => {
+      for(let i=1,j=0;i<N;i++){
+        let bit = N>>1;
+        for(; j&bit; bit>>=1) j ^= bit;
+        j ^= bit;
+        if(i<j){ let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; }
+      }
+      for(let len=2; len<=N; len<<=1){
+        const ang = -2*Math.PI/len, wr = Math.cos(ang), wi = Math.sin(ang);
+        for(let i=0;i<N;i+=len){
+          let cr=1, ci=0;
+          for(let k=0;k<len/2;k++){
+            const p=i+k, q=i+k+len/2;
+            const vr=re[q]*cr-im[q]*ci, vi=re[q]*ci+im[q]*cr;
+            re[q]=re[p]-vr; im[q]=im[p]-vi; re[p]+=vr; im[p]+=vi;
+            const nc = cr*wr-ci*wi; ci = cr*wi+ci*wr; cr = nc;
+          }
+        }
+      }
+    };
+    for(let f=0; f<nFrames; f++){
+      const off = Math.floor(f*sr/fps);
+      for(let i=0;i<N;i++){
+        const s = (off+i < mono.length) ? mono[off+i] : 0;
+        re[i] = s*win[i]; im[i] = 0;
+      }
+      fft();
+      const row = f*128;
+      table[row] = 0;                                  // DC 置零
+      for(let k=1;k<128;k++){
+        const [lo,hi] = ranges[k-1];
+        let m = 0;
+        for(let b=lo;b<=hi;b++){ const mg = Math.hypot(re[b], im[b]); if(mg>m) m = mg; }
+        const db = 20*Math.log10(m/N + 1e-9);
+        let v = (db + 76)/56;                          // -76..-20 dB → 0..1
+        v = Math.max(0, Math.min(1, v));
+        table[row+k] = Math.round(Math.pow(v, 1.3)*255);
+      }
+    }
+    return table;
+  }
+
+  window.__setup = async (meta) => {
+    try{
+      HL.phase = 'setup';
+      if(meta.title != null) $('songTitle').value = meta.title;
+      if(meta.artist != null) $('artist').value = meta.artist;
+      if(meta.trackLabel != null) $('trackLabel').value = meta.trackLabel;
+      if(meta.romaji != null) $('romajiText').value = meta.romaji;
+      if(meta.vocal != null && $('vocalText')) $('vocalText').value = meta.vocal;
+      if(meta.producer != null && $('producerText')) $('producerText').value = meta.producer;
+      if(meta.tags != null) $('tagsText').value = meta.tags;
+      if(meta.note != null) $('noteText').value = meta.note;
+      if(meta.footerLeft != null) $('footerLeft').value = meta.footerLeft;
+      if(meta.footerRight != null) $('footerRight').value = meta.footerRight;
+      if(meta.bitrate != null) HL.bitrate = Number(meta.bitrate) || null;   // 成片视频码率(bps)，缺省 18 Mbps
+      if(meta.lrc != null){ $('lyricsText').value = meta.lrc; parseLyrics(meta.lrc); }
+      if(meta.cover){
+        const im = new Image();
+        await new Promise((res,rej)=>{ im.onload=res; im.onerror=()=>rej(new Error('封面图解码失败')); im.src = meta.cover; });
+        coverImg = im; cropSrc = null; maskedCover = null;
+        // 【关键】封面取色 → 渐变背景/强调色。缺这步 PAL 恒为默认值，背景与封面无关。
+        extractPalette(im);
+        console.log('[setup] palette fromCover=' + PAL.fromCover +
+                    ' top=' + PAL.top.join(',') + ' bottom=' + PAL.bottom.join(',') +
+                    ' accent=' + PAL.accent.join(','));
+      } else {
+        console.log('[setup] 无封面 → 使用默认配色（背景与封面无关）');
+      }
+      if(meta.scheme != null && typeof setTitleScheme === 'function'){
+        setTitleScheme(meta.scheme);
+        console.log('[setup] titleScheme=' + titleScheme);
+      }
+      if(meta.mark != null && String(meta.mark) !== ''){ BRAND_MARK = String(meta.mark); }
+      if(meta.badge != null){ $('badgeText').value = String(meta.badge); }
+      if(meta.artImage){
+        const im2 = new Image();
+        await new Promise((res,rej)=>{ im2.onload=res; im2.onerror=()=>rej(new Error('装饰立绘解码失败')); im2.src = meta.artImage; });
+        setArtImage(im2);
+      }
+      if(meta.sticker){
+        // 贴纸以 dataURL 注入：file:// 图会污染 canvas，VideoFrame 拒绝 tainted 源
+        const im3 = new Image();
+        await new Promise((res,rej)=>{ im3.onload=res; im3.onerror=()=>rej(new Error('小鸟贴图解码失败')); im3.src = meta.sticker; });
+        if(typeof STICKER !== 'undefined'){ STICKER.img = im3; STICKER.ok = true; }
+      }
+      if(meta.watermark){
+        // 歌词区右侧背景水印：同样 dataURL 注入防 canvas 污染
+        const im4 = new Image();
+        await new Promise((res,rej)=>{ im4.onload=res; im4.onerror=()=>rej(new Error('水印立绘解码失败')); im4.src = meta.watermark; });
+        if(typeof WM !== 'undefined'){ WM.img = im4; WM.ok = true; wmSpr = null; }
+      }
+      // 右上角贴纸：等待加载完成（离线渲染确定性；最多等 3s）
+      await new Promise(r => {
+        if(typeof STICKER !== 'undefined' && STICKER.ok) return r();
+        const t0 = Date.now();
+        const iv = setInterval(() => {
+          if((typeof STICKER !== 'undefined' && STICKER.ok) || Date.now()-t0 > 3000){ clearInterval(iv); r(); }
+        }, 40);
+      });
+      // 音频：从 <input type=file> 读取并解码（时长 + 频谱表）
+      const f = $('mediaFile').files[0];
+      if(!f) throw new Error('未找到音频文件');
+      const ab = await f.arrayBuffer();
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ac = new AC();
+      const buf = await ac.decodeAudioData(ab);
+      HL.dur = buf.duration; duration = buf.duration;
+      hasStarted = true; playing = true;   /* 离线渲染 = 播放态：控制图标显示暂停符 */
+      HL.haloTable = computeHaloTable(buf, HL.fps);
+      if(!freqData) freqData = new Uint8Array(128);   // 离线模式无 ensureAudioGraph
+      HL.total = Math.ceil(HL.dur * HL.fps);
+      // 字体：用实际文本显式加载所需子集（本地 woff2）
+      const sample = (meta.title||'') + (meta.artist||'') + (meta.lrc||'') + '正在播放歌詞0123456789';   /* 全量歌词：确保所有字符的字体子集都被下载 */
+      await Promise.all([
+        document.fonts.load('600 76px "HarmonyOS Sans SC"', sample),
+        document.fonts.load('700 52px "HarmonyOS Sans SC"', sample),
+        document.fonts.load('500 40px "HarmonyOS Sans SC"', sample),
+        document.fonts.load('400 22px "HarmonyOS Sans SC"', sample),
+      ]);
+      buildTimeline();
+      buildSprites();
+      scrollY = 0; act = lyrics.map(()=>0); bl = lyrics.map(()=>9); bs = lyrics.map(()=>null);
+      HL.phase = 'ready';
+      return { ok:true, dur: HL.dur, total: HL.total, lyrics: lyrics.length };
+    }catch(e){
+      HL.err = String(e && e.message || e); HL.phase = 'error';
+      return { ok:false, error: HL.err };
+    }
+  };
+
+  function renderFrame(i){
+    HL.vT = i/HL.fps; HL.frame = i;
+    const now = i*1000/HL.fps, dt = 1/HL.fps;
+    /* 设计坐标(1920×1080) → 输出分辨率：?res=2 时画布为 3840×2160，
+       整体缩放一次即可，全部绘制代码仍按设计坐标书写。 */
+    ctx.setTransform(OUT_SCALE,0,0,OUT_SCALE,0,0);
+    ctx.clearRect(0,0,W,H);
+    drawBackground(now, dt);
+    drawCover(now);
+    drawInfo(Math.max(0, (HL.on ? HL.vT : audio.currentTime) + offset));
+    drawLyrics(now, dt);
+    drawPlayerBar(now);
+    drawStickers();
+  }
+
+  /* ---------- 让步（MessageChannel 不受后台节流，setTimeout 在 headless 会被钳到 1s） ---------- */
+  const HLchan = new MessageChannel();
+  let HLpending = null;
+  HLchan.port1.onmessage = () => { const r = HLpending; HLpending = null; if(r) r(); };
+  const hlYield = () => new Promise(r => { HLpending = r; HLchan.port2.postMessage(0); });
+
+  /* ---------- 编码器选型：实测软编 274fps 远快于默认硬编路径，软编优先 ---------- */
+  async function pickEncoder(){
+    const OW = W*OUT_SCALE, OH = H*OUT_SCALE;
+    const BR = HL.bitrate || 18_000_000;      // 缺省 18 Mbps（B站真 4K 不被二压的安全区间 16~18.5 Mbps）
+    /* 级别必须随分辨率上抬：High@4.2(avc1.64002A) 上限 2048×1080@60，
+       3840×2160@60 需要 High@5.2(avc1.640034)，否则严格解码器/平台端会拒收。 */
+    const LVL = OUT_SCALE >= 2 ? '34' : '2a';
+    const tcv = document.createElement('canvas'); tcv.width = 320; tcv.height = 180;
+    const tg = tcv.getContext('2d'); tg.fillStyle = '#345'; tg.fillRect(0,0,320,180);
+    const cands = [
+      { codec:'avc1.6400'+LVL, width:OW, height:OH, bitrate:BR, framerate:60, latencyMode:'quality', hardwareAcceleration:'prefer-software' },
+      { codec:'avc1.6400'+LVL, width:OW, height:OH, bitrate:BR, framerate:60, latencyMode:'quality' },
+      { codec:'avc1.42c0'+LVL, width:OW, height:OH, bitrate:BR, framerate:60, latencyMode:'quality', hardwareAcceleration:'prefer-software' },
+    ];
+    for(const cfg of cands){
+      try{
+        const sup = await VideoEncoder.isConfigSupported(cfg);
+        if(!sup || !sup.supported) continue;
+        let n = 0, failed = false;
+        const enc = new VideoEncoder({ output: ()=>n++, error: ()=>{ failed = true; } });
+        enc.configure(cfg);
+        for(let i=0;i<6;i++){
+          const vf = new VideoFrame(tcv, { timestamp: i*41667, duration: 41667 });
+          enc.encode(vf, { keyFrame: i===0 }); vf.close();
+        }
+        const t0 = Date.now();
+        while(n < 6 && !failed && Date.now()-t0 < 5000) await new Promise(r=>setTimeout(r, 20));
+        enc.close();
+        if(n >= 6) return cfg;
+      }catch(e){ /* 试下一个候选 */ }
+    }
+    throw new Error('无可用 H.264 编码器（默认/软编均失败）');
+  }
+
+  window.__frame = (i) => renderFrame(i);   // 调试探针：单帧渲染（闪烁取证/逐帧比对）
+  window.__render = async (uploadUrl) => {
+    try{
+      HL.phase = 'encode';
+      const muxer = new Mp4Muxer.Muxer({
+        target: new Mp4Muxer.ArrayBufferTarget(),
+        video: { codec:'avc', width: W*OUT_SCALE, height: H*OUT_SCALE, frameRate: HL.fps },
+        fastStart: 'in-memory',
+      });
+      const config = await pickEncoder();
+      HL.encCfg = config.codec + '/' + (config.hardwareAcceleration || 'default');
+      const enc = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        error: e => { HL.err = String(e); },
+      });
+      enc.configure(config);
+      for(let i=0; i<HL.total; i++){
+        if(HL.err) throw new Error('编码器错误：'+HL.err);
+        renderFrame(i);
+        const vf = new VideoFrame(cv, { timestamp: Math.round(i*1e6/HL.fps), duration: Math.round(1e6/HL.fps) });
+        enc.encode(vf, { keyFrame: i % 300 === 0 });   // 5s 间隔：降低关键帧重量化带来的周期性整帧微闪
+        vf.close();
+        HL.q = enc.encodeQueueSize;
+        while(enc.encodeQueueSize > 6) await hlYield();
+        if(i % 60 === 0){ HL.prog = i; await hlYield(); }
+      }
+      HL.prog = HL.total; HL.phase = 'flush';
+      await enc.flush(); enc.close();
+      muxer.finalize();
+      HL.phase = 'upload';
+      const blob = new Blob([muxer.target.buffer], { type:'video/mp4' });
+      const resp = await fetch(uploadUrl, { method:'POST', body: blob });
+      if(!resp.ok) throw new Error('成片上传失败 HTTP '+resp.status);
+      HL.phase = 'done';
+      return { ok:true, size: blob.size, frames: HL.total, dur: HL.dur };
+    }catch(e){
+      HL.err = String(e && e.message || e); HL.phase = 'error';
+      return { ok:false, error: HL.err };
+    }
+  };
+  HL.phase = 'wait-setup';
+})();
+</script>
+</body>
+</html>

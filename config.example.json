@@ -1,0 +1,55 @@
+{
+  "_comment": "复制为 config.json 后按需填写。凡未填项一律走代码内置的通用默认值，管线会以降级方式继续运行。",
+
+  "workdir": "",
+  "recording_root": "/path/to/recordings/<room>-<name>",
+  "srt_dir": "/path/to/upstream/SRT",
+  "llm_config": "",
+  "song_library_json": "",
+
+  "songlist": {
+    "url": "",
+    "sheet_index": 3,
+    "ttl_hours": 12
+  },
+
+  "streamer": {
+    "name": "",
+    "archive_prefix": "SONG ARCHIVE",
+    "badge": "MUSIC ARCHIVE",
+    "mark": "SC",
+    "art_image": ""
+  },
+
+  "assets": {
+    "sticker": "",
+    "watermark": ""
+  },
+
+  "runtime": {
+    "node": "",
+    "node_modules_path": "",
+    "ffmpeg": "",
+    "ffprobe": ""
+  },
+
+  "credentials": {
+    "netease_cookie_file": "~/.songcut/netease_cookie.txt",
+    "glm_credentials_file": "~/.songcut/glm_credentials.json"
+  },
+
+  "llm": {
+    "api_host": "https://generativelanguage.googleapis.com/v1beta/models",
+    "model": "gemini-2.5-flash",
+    "api_key": "",
+    "proxy": ""
+  },
+
+  "transcript": {
+    "hist_srt_dir": "",
+    "fallback_script": "",
+    "fallback_skill_dir": "",
+    "fallback_python": "",
+    "fallback_engine": "FunASR/SenseVoiceSmall+VAD+PUNC"
+  }
+}

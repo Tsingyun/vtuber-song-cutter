@@ -1,0 +1,17 @@
+# Python 依赖（歌切管线本体）
+# 安装：python -m pip install -r requirements.txt
+numpy>=1.26
+requests>=2.31
+Pillow>=10.0
+
+# ---------------------------------------------------------------------------
+# 非 Python 依赖（需自行安装，不在本文件管辖范围）：
+#   · ffmpeg / ffprobe —— 4K 高码率编码、混流、抽帧。建议 6.0+，需含 libx264。
+#                         安装后在 config.json 的 runtime.ffmpeg / runtime.ffprobe
+#                         填绝对路径，或确保其在 PATH 中。
+#   · Node.js 18+ —— 离屏渲染驱动器（renderer/）。
+#   · Playwright —— Node 侧依赖，用于无头浏览器逐帧渲染：
+#         npm i playwright && npx playwright install chromium
+#     若 Node 依赖装在项目外（如全局或自定义目录），请在 config.json 的
+#     runtime.node_modules_path 填入该 node_modules 目录。
+# ---------------------------------------------------------------------------
