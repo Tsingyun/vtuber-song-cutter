@@ -11,6 +11,10 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 TIMEOUT = (10, 30)
 
+# 歌词完整性：末行时间戳 / 歌曲时长 低于此值时，判定「疑似残缺」并触发重新拉取。
+# 流行歌的正常 outro 一般在 0.85~0.99；低于 0.80 基本可以断定尾部歌词掉了。
+LRC_SUSPECT_COVER = 0.80
+
 
 def _norm(t):
     return re.sub(r"[\s\u3000·・～~\-—_（）()【】\[\]!！?？]", "", str(t)).lower()
@@ -35,36 +39,46 @@ def _pick(results, title, artist_hint=""):
     return (best, score) if best and score >= 0.55 else (None, score)
 
 
-def _lrclib(title, artist_hint=""):
-    try:
-        p = {"track_name": title}
-        if artist_hint:
-            p["artist_name"] = artist_hint
-        r = requests.get("https://lrclib.net/api/search", params=p,
-                         headers={"User-Agent": UA}, timeout=TIMEOUT)
-        if r.status_code != 200:
-            r = requests.get("https://lrclib.net/api/search", params={"q": title},
+def lrclib_candidates(title, artist_hint=""):
+    """返回 LRCLIB 上所有带时间轴的候选 [{lrc, source, artist}]，按匹配度降序。
+    供上层做「多源择优」——旧的「取第一个有歌词的」会把翻唱/重制版当成原版。"""
+    out = []
+    for req in ({"track_name": title, "artist_name": artist_hint} if artist_hint else {"track_name": title},
+                {"q": title}):
+        try:
+            r = requests.get("https://lrclib.net/api/search", params=req,
                              headers={"User-Agent": UA}, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None, None, ""
-        items = r.json() or []
-        best = None
-        for it in items:
-            if it.get("syncedLyrics"):
-                if artist_hint and artist_hint not in (it.get("artistName") or "") and best:
-                    continue
-                best = best or it
-        if best is None:
-            for it in items:
-                if it.get("syncedLyrics"):
-                    best = it
-                    break
-        if best:
-            return (best["syncedLyrics"], "lrclib:%s" % (best.get("artistName") or ""),
-                    (best.get("artistName") or "").strip())
-    except Exception:
-        pass
-    return None, None, ""
+            if r.status_code == 200:
+                out = list(r.json() or [])
+                break
+        except Exception:
+            continue
+    res = []
+    for it in (out or []):
+        if not it.get("syncedLyrics"):
+            continue
+        nm = it.get("trackName") or ""
+        an = (it.get("artistName") or "").strip()
+        s = difflib.SequenceMatcher(None, _norm(title), _norm(nm)).ratio()
+        if _norm(title) and _norm(title) in _norm(nm):
+            s = max(s, 0.92)
+        if artist_hint:
+            s += 0.15 if difflib.SequenceMatcher(
+                None, _norm(artist_hint), _norm(an)).ratio() > 0.5 else 0.0
+        else:
+            s -= 0.05          # 无歌手提示时轻微惩罚，让网易云的权威元数据占优
+        res.append({"lrc": it["syncedLyrics"], "source": "lrclib:%s" % an,
+                    "artist": an, "score": s, "duration": it.get("duration")})
+    res.sort(key=lambda x: -x["score"])
+    return res
+
+
+def _lrclib(title, artist_hint=""):
+    c = lrclib_candidates(title, artist_hint)
+    if not c:
+        return None, None, ""
+    b = c[0]
+    return b["lrc"], b["source"], b["artist"]
 
 
 def _netease(title, artist_hint=""):
@@ -104,12 +118,37 @@ def _netease(title, artist_hint=""):
 
 
 def _t2s(text):
-    """繁体 → 简体（LRCLIB 上不少歌词是港台来源的繁体版本）。"""
+    """繁体 → 简体。歌词库上不少条目是港台来源的繁体版本，必须统一转简，
+    否则同一首歌会出现「進化成更好的人」这类繁体字形。
+    依赖见 requirements.txt：opencc-python-reimplemented（首选）或 zhconv。
+    两者都缺失时保留原文并向 _t2s_warned 登记一次，由上层提示安装。"""
+    global _T2S_OK
+    if not text:
+        return text
+    if _T2S_OK is None:
+        _T2S_OK = False
+        try:
+            from opencc import OpenCC
+            _t2s._cc = OpenCC("t2s")
+            _T2S_OK = True
+        except Exception:
+            try:
+                import zhconv
+                _t2s._zh = zhconv.convert
+                _T2S_OK = True
+            except Exception:
+                _t2s._cc = _t2s._zh = None
+    if not _T2S_OK:
+        return text
     try:
-        from opencc import OpenCC
-        return OpenCC("t2s").convert(text)
+        if getattr(_t2s, "_cc", None):
+            return _t2s._cc.convert(text)
+        return _t2s._zh(text, "zh-cn")
     except Exception:
         return text
+
+
+_T2S_OK = None      # None=未探测 True=已就绪 False=缺依赖
 
 
 def _artist_from_source(src):
@@ -123,8 +162,33 @@ def _artist_from_source(src):
     return m.group(1).strip() if m else ""
 
 
+# 创作/制作署名行（网易云 LRC 首部常见）。这些不是歌词，若混进时间轴会被当成歌词渲染。
+META_RE = re.compile(
+    r"^\s*(作词|作曲|编曲|制作人|监制|混音|母带|和声|和音|吉他|贝斯|鼓|钢琴|弦乐|录音|"
+    r"后期|统筹|策划|出品|发行|翻唱|原唱|演唱|词|曲|歌名|专辑|歌手|曲名|歌词)"
+    r"\s*[:：]|^\s*(?:\[\d{1,3}:\d{2}[.:]?\d{0,3}\])*\s*(?:作词|作曲|编曲|制作人)\s*[:：]")
+
+# 段落标记 / 无效占位
+JUNK_RE = re.compile(r"^\[(?:00:00\.00)\]\s*$|^\s*(?:~+|End|music|Music|--+|…)\s*$")
+
+
+def lrc_tail_sec(lrc):
+    """最后一个「有文本」歌词行的秒数；无则返回 0.0。
+    用于歌词完整性评估：末行越接近歌曲结束，说明 outro / 重复副歌没被漏掉。"""
+    last = 0.0
+    for line in (lrc or "").splitlines():
+        m = re.match(r"^\s*\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]\s*(\S.*)?$", line)
+        if not m or not (m.group(4) or "").strip():
+            continue
+        t = int(m.group(1)) * 60 + int(m.group(2))
+        if m.group(3):
+            t += float("0." + m.group(3))
+        last = max(last, t)
+    return last
+
+
 def clean_lrc(lrc, dur=None):
-    """清洗 LRC：去翻译重复段/无效行；超出歌曲时长的行剪掉；去掉 krc 词行。"""
+    """清洗 LRC：去元数据署名行/无效行/翻译重复段；超出歌曲时长的行剪掉。"""
     out = []
     for line in (lrc or "").splitlines():
         line = line.strip()
@@ -140,12 +204,17 @@ def clean_lrc(lrc, dur=None):
         if not txt:                       # 纯时间戳空行 → 保留一个作段落分隔
             out.append("")
             continue
-        # 时长校验：第一标签超时长则丢弃该行
+        if META_RE.search(txt) or JUNK_RE.match(txt):      # 署名/占位，非歌词
+            continue
+        # 时长校验：远超片段时长才丢弃。
+        # ⚠ 阈值必须宽松（dur*1.2+5）：歌切片段的结束点由波形/DTW 决定，常略早于
+        #   原曲 outro；若用 dur 硬剪，尾部歌词会被连带裁掉 ——「最后一段歌词不完整」
+        #   的第二个成因。宁可多留一行，不可漏一段。
         if dur:
             mm = re.match(r"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]", tags)
             if mm:
                 t = int(mm.group(1)) * 60 + int(mm.group(2)) + (float("0." + mm.group(3)) if mm.group(3) else 0)
-                if t > dur + 0.5:
+                if t > dur * 1.2 + 5:
                     continue
         out.append(tags + _t2s(txt))
     # 合并连续空行
@@ -173,36 +242,82 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None):
         try:
             d = json.load(io.open(cache_f, encoding="utf-8"))
             if d.get("lrc") or d.get("cover_path"):
-                if d.get("cover_path") and not os.path.exists(d["cover_path"]):
-                    d["cover_path"] = None
                 info = d.get("info", {})
-                if not info.get("artist"):
-                    info["artist"] = _artist_from_source(info.get("lyrics_source"))
-                return d.get("lrc"), d.get("cover_path"), info
+                # 缓存可能是旧逻辑写下的残缺版本 → 完整性复检；疑似残缺则弃用重拉。
+                # （达尔文 2026-09-30：缓存里存着 26 行的苡慧翻唱版，成了持续污染源）
+                stale = False
+                if d.get("lrc") and dur and dur > 1:
+                    cov = info.get("lyrics_coverage")
+                    if cov is None:
+                        cov = lrc_tail_sec(d["lrc"]) / dur
+                    stale = cov < LRC_SUSPECT_COVER
+                if not stale:
+                    if d.get("cover_path") and not os.path.exists(d["cover_path"]):
+                        d["cover_path"] = None
+                    if not info.get("artist"):
+                        info["artist"] = _artist_from_source(info.get("lyrics_source"))
+                    return d.get("lrc"), d.get("cover_path"), info
         except Exception:
             pass
 
-    lrc, lsrc, lartist = _lrclib(title, artist_hint)
-    cover_url = None
-    artist = ""
-    if not lrc:
-        lrc, cover_url, lsrc, artist = _netease(title, artist_hint)
-    else:
-        info["netease_skipped"] = True
-        # 封面仍从网易云拿（原唱歌手名也优先用网易云的规范写法）
-        _, cover_url, _nsrc, nartist = _netease(title, artist_hint)
-        artist = nartist or (lartist or "")
-    if artist:
-        info["artist"] = artist
+    # ---- 多源获取 + 歌词完整性择优 ----
+    # 教训：单一源「取第一个有歌词的」会把翻唱/重制短版当成原版。
+    #   达尔文（2026-09-30）：LRCLIB 只有苡慧《达尔文·2022》26 行/末行 183s，
+    #   而蔡健雅原版 34 行/末行 248s —— 尾部 outro「有过竞争…进化成更好的人」
+    #   整段丢失，且 LRCLIB 那份还是繁体。
+    # 这里 LRCLIB 与网易云都取，按 ①末行时间戳占歌曲时长的比例 ②行数 择优。
+    cands = []
+    try:
+        for c in lrclib_candidates(title, artist_hint)[:4]:
+            cands.append({"lrc": c["lrc"], "source": c["source"],
+                          "artist": c["artist"], "cover_url": None})
+    except Exception:
+        pass
+    cover_url, nartist = None, ""
+    try:
+        nl, ncover, nsrc, nart = _netease(title, artist_hint)
+        cover_url, nartist = ncover, (nart or "")
+        if nl:
+            cands.append({"lrc": nl, "source": nsrc, "artist": nart,
+                          "cover_url": ncover})
+    except Exception:
+        pass
 
-    if lrc:
-        lrc = clean_lrc(lrc, dur)
-        if not re.search(r"\[\d{1,3}:\d{2}", lrc):     # 清洗后没有有效时间轴 → 视为失败
-            lrc = None
-    if lrc:
-        info["lyrics_source"] = lsrc
+    scored = []
+    for c in cands:
+        body = clean_lrc(c["lrc"], dur)
+        if not re.search(r"\[\d{1,3}:\d{2}", body):     # 清洗后无有效时间轴 → 淘汰
+            continue
+        lines = len([x for x in body.splitlines() if x.strip()])
+        tail = lrc_tail_sec(body)
+        cov = (tail / dur) if (dur and dur > 1) else (tail / 240.0)
+        scored.append({"cov": cov, "lines": lines, "tail": tail, "body": body,
+                       "source": c["source"], "artist": c["artist"],
+                       "cover_url": c["cover_url"]})
+    scored.sort(key=lambda x: (round(x["cov"], 3), x["lines"]), reverse=True)
+
+    lrc, artist = None, ""
+    if scored:
+        b = scored[0]
+        lrc = b["body"]
+        info["lyrics_source"] = b["source"]
+        info["lyrics_lines"] = b["lines"]
+        info["lyrics_tail_sec"] = round(b["tail"], 2)
+        info["lyrics_coverage"] = round(b["cov"], 3)
+        info["lyrics_rejected"] = [{"source": s["source"], "lines": s["lines"],
+                                    "tail_sec": round(s["tail"], 2),
+                                    "coverage": round(s["cov"], 3)}
+                                   for s in scored[1:]]
+        artist = b["artist"] or ""
     else:
         info["lyrics_source"] = "none"
+
+    cover_url = cover_url or next((s["cover_url"] for s in scored if s["cover_url"]), None)
+    artist = (nartist or "").strip() or artist       # 网易云的歌手写法优先（权威元数据）
+    if artist:
+        info["artist"] = artist
+    if _T2S_OK is False:
+        info["warn_t2s"] = "繁简转换依赖缺失（pip install opencc-python-reimplemented），歌词可能保留繁体"
 
     cover_path = None
     if cover_url:

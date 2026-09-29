@@ -84,6 +84,7 @@ const has = n => process.argv.includes('--' + n);
         ['High@5.2 软编', { codec: 'avc1.6400' + LVL, width: OW, height: OH, bitrate: 18e6, framerate: 60, latencyMode: 'quality', hardwareAcceleration: 'prefer-software' }],
         ['High@5.2 默认', { codec: 'avc1.6400' + LVL, width: OW, height: OH, bitrate: 18e6, framerate: 60, latencyMode: 'quality' }],
         ['High@5.2 硬编', { codec: 'avc1.6400' + LVL, width: OW, height: OH, bitrate: 18e6, framerate: 60, latencyMode: 'quality', hardwareAcceleration: 'prefer-hardware' }],
+        ['High@5.2 硬编 p7-like', { codec: 'avc1.6400' + LVL, width: OW, height: OH, bitrate: 18e6, framerate: 60, hardwareAcceleration: 'prefer-hardware' }],
       ];
       const res = [];
       for (const [name, cfg] of cands) {

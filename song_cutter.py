@@ -724,9 +724,18 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         cache_dir=os.path.join(workdir, "_media_cache"))
     artist = (linfo.get("artist") or "").strip()
     tags = seg.get("tags") or "翻唱, 现场版"
+    # 歌词完整性：末行时间戳 / 本片段时长的覆盖率。低于 80% 基本可断定尾部歌词掉了
+    # （重复副歌、outro 是重灾区），显式告警以便人工复核，避免默默渲染残缺歌词。
+    _cov = linfo.get("lyrics_coverage")
     log("  歌词: %s（%d 行）| 原唱: %s | 封面: %s" % (
         linfo.get("lyrics_source"), len((lrc or "").splitlines()),
         artist or "未知", linfo.get("cover_source")))
+    if lrc and _cov is not None and (ce - cs) > 1:
+        _flag = " ⚠ 疑似残缺，请复核是否漏 outro/重复副歌" if _cov < 0.80 else ""
+        log("  歌词完整性: 末行 %.1fs / 片段 %.1fs = %.0f%%%s" % (
+            linfo.get("lyrics_tail_sec", 0.0), ce - cs, _cov * 100, _flag))
+    if linfo.get("warn_t2s"):
+        log("  ⚠ %s" % linfo["warn_t2s"])
 
     # 2.5 原曲分析（默认执行）：全曲 DTW 速度比 + 局部互相关校正锚点。
     #     产出 ①精确伴奏结束点（尾部切点 = 乐句结束 + 余韵）②歌词时间轴。
