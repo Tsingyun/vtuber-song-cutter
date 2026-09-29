@@ -933,6 +933,22 @@ def main():
     OUT_ENCODER, OUT_PRESET = args.encoder, args.preset
     PERF_NO = args.perf_no
 
+    # ---- 前置检查：配置缺失时给出可照做的提示，而不是在深处抛底层异常 ----
+    need = []
+    if not SRT_DIR:
+        need.append(("srt_dir", "上游转写 SRT 所在目录"))
+    if not REC_ROOT:
+        need.append(("recording_root", "录播归档根目录（其下按日期建子目录）"))
+    if need:
+        print("配置不完整，无法开始：")
+        for k, desc in need:
+            print("  · %-16s %s" % (k, desc))
+        print("")
+        print("请复制 config.example.json 为 config.json 并填写上述项；")
+        print("或用环境变量 SONGCUT_CONFIG 指向你的配置文件。")
+        print(CFG.describe())
+        return 2
+
     os.makedirs(args.workdir, exist_ok=True)
     open_log(args.workdir, args.date)
     log("=== 歌切任务开始：%s ===" % args.date)
@@ -954,10 +970,17 @@ def main():
 
     # 1. 找 SRT（当天可能多场，逐场处理）
     ymd = args.date.replace("-", "")
-    srts = [os.path.join(SRT_DIR, f) for f in os.listdir(SRT_DIR)
-            if f.startswith(ymd) and f.lower().endswith(".srt")]
+    srts = []
+    if SRT_DIR and os.path.isdir(SRT_DIR):
+        srts = [os.path.join(SRT_DIR, f) for f in os.listdir(SRT_DIR)
+                if f.startswith(ymd) and f.lower().endswith(".srt")]
     if not srts:
-        raise FileNotFoundError("找不到当天 SRT：" + ymd)
+        raise SystemExit(
+            "找不到当天转写：%s\n"
+            "  期望目录：%s\n"
+            "  请确认 config.json 的 srt_dir 指向转写产物目录，"
+            "且该目录下存在 %s*.srt（与视频 0 点对齐的整场时间轴）。"
+            % (ymd, SRT_DIR or "（未配置）", ymd))
     srts.sort()
     log("找到 SRT %d 份：%s" % (len(srts), "；".join(os.path.basename(s) for s in srts)))
 
@@ -1060,7 +1083,8 @@ def main():
     n_ok = sum(1 for s in manifest["songs"] if s["specs_ok"])
     log("=== 完成：共 %d 首，规格达标 %d 首；manifest → %s ===" % (
         len(manifest["songs"]), n_ok, mf))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
