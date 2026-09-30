@@ -79,7 +79,9 @@ OUT_BITRATE = 18_000_000
 OUT_AUDIO_BR = "320k"
 # 编码器：4K 必须走 ffmpeg（Chromium 软件 H.264 码率控制饱和，实测 18 Mbps 目标只能出 4.24 Mbps）
 OUT_ENCODER = "ffmpeg"
-OUT_PRESET = "fast"                # libx264 preset：4K 下 1.33× 实时，渲染侧仅 0.21×，余量充足
+OUT_PRESET = "fast"                # libx264 preset（仅 vcodec=libx264 时生效）
+OUT_VCODEC = "h264_nvenc"          # H.264 编码器：NVENC 硬编（实测与 x264 fast 同画质、快 3.3×）
+OUT_PAGES = 2                      # 并行渲染实例数（端到端实测：P=3 与编码进程互拖仅 13 fps，P=2 两阶段 9.2 min 最优）
 # 码率验收下限（kbps）：低于此值视为未达标（用户要求「至少 4000」防二压模糊）。
 # 4K 目标 18 Mbps，留足余量；res=1 同口径校验。
 MIN_VIDEO_KBPS = 4000
@@ -836,7 +838,9 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "res": OUT_RES,                   # 1=1920×1080，2=3840×2160
         "bitrate": OUT_BITRATE,           # 成片视频码率(bps)
         "encoder": OUT_ENCODER,           # ffmpeg（默认，4K）/ webcodecs（回退）
-        "preset": OUT_PRESET,             # libx264 preset（仅 ffmpeg 通路）
+        "preset": OUT_PRESET,             # libx264 preset（仅 ffmpeg 通路 + vcodec=libx264）
+        "vcodec": OUT_VCODEC,             # h264_nvenc（默认，硬编）/ libx264（CPU 回退）
+        "pages": OUT_PAGES,               # 并行渲染实例数（默认 3）
         "out": render_tmp,
     }
     t0 = time.time()
@@ -930,16 +934,23 @@ def main():
                     help="视频编码通路：ffmpeg=画布 JPEG 流交给 libx264（默认，4K 必需）；"
                          "webcodecs=页面内编码（Chromium 码率控制饱和，仅适合 1080P 回退）")
     ap.add_argument("--preset", default="fast",
-                    help="libx264 preset（仅 --encoder ffmpeg 生效，默认 fast）")
+                    help="libx264 preset（仅 --encoder ffmpeg + --vcodec libx264 生效，默认 fast）")
+    ap.add_argument("--vcodec", default="h264_nvenc", choices=("h264_nvenc", "libx264"),
+                    help="H.264 编码器：h264_nvenc=NVENC 硬编（默认，实测 4K60 比 x264 fast 快 3.3×，"
+                         "PSNR/SSIM 与 x264 持平）；libx264=CPU 软编回退")
+    ap.add_argument("--pages", type=int, default=2,
+                    help="并行渲染实例数（默认 2。端到端实测 P=2 两阶段最优：≥2 走先渲染落盘再并行编码，"
+                         "P=3 起与编码进程互拖反而变慢；只求稳可设 1）")
     ap.add_argument("--raw-cut", action="store_true", help="旧档：直接切源视频画面（不做播放器渲染）")
     ap.add_argument("--scheme", type=int, default=None,
                     help="手动指定标题装饰方案 0~4（流光渐变/描边镂空/霓虹柔光/色块高亮/双色错位），"
                          "缺省则由歌曲意境自动匹配")
     args = ap.parse_args()
 
-    global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET
+    global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, OUT_VCODEC, OUT_PAGES
     OUT_RES, OUT_BITRATE = args.res, args.bitrate
     OUT_ENCODER, OUT_PRESET = args.encoder, args.preset
+    OUT_VCODEC, OUT_PAGES = args.vcodec, args.pages
     PERF_NO = args.perf_no
 
     # ---- 前置检查：配置缺失时给出可照做的提示，而不是在深处抛底层异常 ----
