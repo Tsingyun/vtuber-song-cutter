@@ -47,6 +47,11 @@ from songcut import ctc_align                         # noqa: E402  CTC 强制�
 from songcut import wave_refine                       # noqa: E402  波形边界精修
 from songcut import decor_pick                        # noqa: E402  标题装饰方案自动匹配
 from songcut import timeline_sync                     # noqa: E402  切入点检测 + 时间轴同步
+try:
+    from songcut import qc as QC                       # noqa: E402  成片自检（PASS/WARN/BLOCK 判定化）
+except Exception as _qc_e:                             # numpy 缺失等 → 自检降级，不阻断主流程
+    QC = None
+    _QC_IMPORT_ERR = str(_qc_e)
 
 SRT_DIR = CFG.expand(CFG.get("srt_dir") or "")
 SUM_CFG = CFG.expand(CFG.get("llm_config") or "")
@@ -724,6 +729,7 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     lrc, cover_path, linfo = lyrics_fetch.fetch_lyrics_and_cover(
         seg["title_guess"], dur=ce - cs,
         cache_dir=os.path.join(workdir, "_media_cache"))
+    src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
     artist = (linfo.get("artist") or "").strip()
     tags = seg.get("tags") or "翻唱, 现场版"
     # 歌词完整性：末行时间戳 / 本片段时长的覆盖率。低于 80% 基本可断定尾部歌词掉了
@@ -801,6 +807,16 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         if lrc and head_pad > 0:
             lrc = _shift_lrc(lrc, head_pad)   # 片头补静音 → 歌词整体后移，保持同步
 
+    # 3.85 歌词快照落盘：src=抓取原文（QC 参照），final=时间轴对齐后（渲染实际使用）
+    lrc_snap = os.path.splitext(out_mp4)[0] + ".lrc"
+    src_snap = os.path.splitext(out_mp4)[0] + ".src.lrc"
+    try:
+        io.open(src_snap, "w", encoding="utf-8", newline="").write(src_lrc)
+        io.open(lrc_snap, "w", encoding="utf-8", newline="").write(lrc or "")
+    except OSError as e:
+        log("  ⚠ 歌词快照落盘失败（QC 将无法比对文本）：%s" % e)
+        lrc_snap = src_snap = None
+
     # 3.8 标题装饰方案自动匹配（音频节奏 + 歌词意象 + 封面色调，四维权衡；--scheme 可手动覆盖）
     dec = decor_pick.pick(seg["title_guess"], artist, lrc or "", cover_path, out_mp3,
                           force=scheme_override)
@@ -863,7 +879,8 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     if sync.get("ok"):
         tl_brief = {k: sync[k] for k in ("slope", "onset_abs", "song_end_abs", "song_len",
                                          "rms", "med", "n", "sim", "corrected", "head")}
-    return {"cut_start": cs, "cut_end": ce, "head_pad": round(head_pad, 3),
+    return {"lrc_path": lrc_snap, "lrc_src_path": src_snap,
+            "cut_start": cs, "cut_end": ce, "head_pad": round(head_pad, 3),
             "onset": round(onset_abs, 3) if onset_abs else None,
             "entry_shift": round(cs - ref["cut_start"], 3),
             "timeline_source": tl_src, "timeline": tl_brief,
@@ -924,6 +941,11 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="只识别不切割")
     ap.add_argument("--refresh-kdocs", action="store_true", help="强制重拉在线歌单表（默认 12h 缓存）")
     ap.add_argument("--keep-mp3", action="store_true", help="保留 MP3（默认成品验证通过后自动删除）")
+    ap.add_argument("--no-qc", action="store_true", help="跳过成片自检（默认每首都跑，约 15~20s）")
+    ap.add_argument("--qc-strict", action="store_true",
+                    help="自检不通过则以退出码 3 结束（供自动化流程判定是否继续）")
+    ap.add_argument("--qc-deep", action="store_true",
+                    help="自检启用深度项（V06 全片帧节奏扫描，约 +60s/首）")
     ap.add_argument("--res", type=int, default=2, choices=(1, 2),
                     help="输出倍率：2=3840×2160（默认，4K60），1=1920×1080")
     ap.add_argument("--bitrate", type=int, default=18_000_000,
@@ -1016,6 +1038,7 @@ def main():
     log("视频源：%s（%sx%s @%s，时长 %.0fs）" % (
         os.path.basename(src), v["width"], v["height"], v.get("avg_frame_rate"), vdur))
 
+    qc_fail = 0          # 自检未通过计数（--qc-strict 时决定退出码）
     manifest = {"date": args.date, "source": src, "source_specs":
                 {"width": v["width"], "height": v["height"], "fps": v.get("avg_frame_rate"),
                  "duration": round(vdur, 2)}, "songs": []}
@@ -1037,6 +1060,7 @@ def main():
         log("本场识别 %d 首（置信度≥%.2f）" % (len(songs), args.min_confidence))
 
         title_count = {}
+        qc_fail = 0
         for idx, seg in enumerate(songs, 1):
             title = seg["title_guess"]
             title_count[title] = title_count.get(title, 0) + 1
@@ -1076,7 +1100,7 @@ def main():
                 specs["video_bitrate_kbps"], specs["audio_codec"], specs["audio_bitrate_kbps"],
                 specs["duration"], specs["size_mb"],
                 "✓" if ok else "✗ 规格不符"))
-            manifest["songs"].append({
+            entry = {
                 "title": disp, "title_guess": seg["title_guess"],
                 "title_source": seg.get("title_source", "llm"),
                 "start": seg["start_hms"], "end": seg["end_hms"],
@@ -1085,7 +1109,30 @@ def main():
                 "renderer": ("raw-cut" if args.raw_cut
                              else ("player-4k60" if OUT_RES >= 2 else "player-1080p60")),
                 **ref_extra,
-            })
+            }
+            # ── 成片自检（判定化）：只解码成片，不重渲。失败项带帧号/时间码/行号 + 修复建议 ──
+            if QC and not getattr(args, "no_qc", False):
+                try:
+                    rep = QC.run_qc(out_mp4, entry=entry, ffmpeg=ffmpeg,
+                                    deep=getattr(args, "qc_deep", False))
+                    entry["qc"] = {"passed": rep["passed"], "elapsed_s": rep["elapsed_s"],
+                                   "n_block": len(rep["blockers"]), "n_warn": len(rep["warnings"]),
+                                   "blockers": [{"id": b["id"], "name": b["name"],
+                                                 "detail": b["detail"], "fix": b["fix"]}
+                                                for b in rep["blockers"]]}
+                    log("  自检：%s（%d BLOCK / %d WARN，%.0fs，未重渲）" % (
+                        "通过 ✓" if rep["passed"] else "不通过 ✗",
+                        len(rep["blockers"]), len(rep["warnings"]), rep["elapsed_s"]))
+                    for b in rep["blockers"]:
+                        log("    ✗ %s %s：%s" % (b["id"], b["name"], b["detail"][:150]))
+                        log("      修复：%s" % (b["fix"] or "")[:200])
+                    if not rep["passed"]:
+                        qc_fail += 1
+                except Exception as e:
+                    log("  ⚠ 自检运行失败（不影响出片）：%s" % str(e)[:160])
+            elif not QC:
+                log("  自检：不可用（songcut.qc 导入失败：%s）" % str(_QC_IMPORT_ERR)[:120])
+            manifest["songs"].append(entry)
 
     # 4. 清理：视频验证通过后删除 MP3 与临时文件（--keep-mp3 可保留）
     if not args.dry_run and manifest["songs"]:
@@ -1101,8 +1148,12 @@ def main():
     io.open(mf, "w", encoding="utf-8", newline="").write(
         json.dumps(manifest, ensure_ascii=False, indent=2))
     n_ok = sum(1 for s in manifest["songs"] if s["specs_ok"])
-    log("=== 完成：共 %d 首，规格达标 %d 首；manifest → %s ===" % (
-        len(manifest["songs"]), n_ok, mf))
+    n_qc = sum(1 for s in manifest["songs"] if (s.get("qc") or {}).get("passed"))
+    log("=== 完成：共 %d 首，规格达标 %d 首，自检通过 %d 首；manifest → %s ===" % (
+        len(manifest["songs"]), n_ok, n_qc, mf))
+    if getattr(args, "qc_strict", False) and qc_fail:
+        log("⚠ 严格模式：%d 首未通过自检，退出码 3" % qc_fail)
+        return 3
     return 0
 
 
