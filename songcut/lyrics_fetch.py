@@ -96,7 +96,7 @@ def _netease(title, artist_hint=""):
         songs = (r.json().get("result") or {}).get("songs") or []
         cand = [{"name": s.get("name"), "artist": (s.get("ar") or [{}])[0].get("name"),
                  "id": s.get("id"), "cover": (s.get("al") or {}).get("picUrl"),
-                 "dur": s.get("duration")} for s in songs]
+                 "dur": s.get("dt")} for s in songs]
         if not songs:      # 老接口兜底
             r = requests.post("http://music.163.com/api/search/pc",
                               data={"s": title, "type": 1, "limit": 8, "offset": 0},
@@ -105,7 +105,7 @@ def _netease(title, artist_hint=""):
             songs = (r.json().get("result") or {}).get("songs") or []
             cand = [{"name": s.get("name"), "artist": (s.get("artists") or [{}])[0].get("name"),
                      "id": s.get("id"), "cover": (s.get("album") or {}).get("picUrl"),
-                     "dur": s.get("duration")} for s in songs]
+                     "dur": s.get("dt")} for s in songs]
         hit, score = _pick(cand, title, artist_hint)
         if hit:
             dur_ms = hit.get("dur")
@@ -245,6 +245,26 @@ def lyric_body_text(lrc):
     return re.sub(r"[\s\u3000\u00b7\u30fb\uff5e~\-—_（）()【】\[\]!！?？,，.。'\u201c\u201d\u2018\u2019]", "", t)
 
 
+def _latin_ratio(x):
+    x = x or ""
+    return len(re.findall(r"[A-Za-z]", x)) / float(max(1, len(x)))
+
+
+def _grams_of(x, n=2):
+    """拉丁文本 → 词级 n-gram；中文/日文 → 字符 n-gram。
+
+    英文若用字符 2-gram，任意两段文字都会因 th/he/in/er 等常见字母对而高度重合
+    （实测：《Lover》歌词 vs《奇异博士》英文对白 重合率 0.83，纯属噪声）。
+    """
+    x = _norm(x or "")
+    if _latin_ratio(x) >= 0.5:
+        w = re.findall(r"[a-z0-9']+", x.lower())
+        if len(w) >= n:
+            return set(tuple(w[i:i + n]) for i in range(len(w) - n + 1))
+        return set(w)
+    return {x[i:i + n] for i in range(max(0, len(x) - n + 1))}
+
+
 def text_overlap_ratio(lrc, ref_text, n=2):
     """歌词正文与演唱转写的字符 n-gram 重合率。
 
@@ -257,12 +277,9 @@ def text_overlap_ratio(lrc, ref_text, n=2):
     返回 0~1：同版本通常 >0.20；错版本通常 <0.05。
     ref_text 为空则返回 None（表示「无参照，未执行」）。
     """
-    def grams(x):
-        x = _norm(x or "")
-        return {x[i:i + n] for i in range(max(0, len(x) - n + 1))}
     if not ref_text:
         return None
-    a, b = grams(lyric_body_text(lrc)), grams(ref_text)
+    a, b = _grams_of(lyric_body_text(lrc), n), _grams_of(ref_text, n)
     if not a or not b:
         return 0.0
     return len(a & b) / float(min(len(a), len(b)))

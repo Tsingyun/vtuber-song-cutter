@@ -138,6 +138,40 @@ cuts/2026-01-01/
 
 ---
 
+## 全自动模式（不依赖任何人工歌单表）
+
+```bash
+python auto_cut.py                    # 处理「昨天」的录播（定时任务的默认用法）
+python auto_cut.py --date 2026-10-02  # 指定日期
+python auto_cut.py --no-cut           # 只检测不出片
+python auto_cut.py --no-llm           # 跳过 LLM 找演唱窗口
+python auto_cut.py --asr              # 上游没有转写时自建转写（可省，默认会自动触发）
+```
+
+```
+录播目录 ──► 转写（上游 SRT / 自建 FunASR 分块） ──► LLM 分块找演唱窗口（只摘唱词，不猜歌名）
+        ──► 网易云歌词检索(type=1006) 定歌名 ──► 歌词回整场转写定位演唱区间
+        ──► 三重核验（字面重合率 / 唱到行数 / 原曲官方时长）──► song_cutter.py --no-kdocs 出片
+        ──► 报告：reports/auto/<日期>.json + LOG.md
+```
+
+| 环节 | 模块 | 关键判据 |
+|---|---|---|
+| 转写 | `songcut/asr_auto.py` | 固定 30s 分块（整段 VAD 会被连续 BGM 并成一句）；近静音块跳过 |
+| 定歌名 | `songcut/lyric_locate.py` | 唱词 → 网易云歌词检索；歌名**由检索给出**，不由 LLM 猜 |
+| 定区间 | 同上 | 逐句 2-gram 命中率 ≥0.45 串成最长段；唱到歌词行 ≥ max(5, 20%) |
+| 核验 | `lyrics_fetch` + 原曲时长 | 重合率 ≥0.18；出点 = 起点 + 原曲时长（防吞歌后闲聊/加唱） |
+| 出片 | `song_cutter.py --no-kdocs` | 沿用精切 / 歌词 / 渲染 / 自检全部既有链路 |
+
+报告字段：`recording`（是否有录播）、`singing.detected`（是否唱歌：true / 疑似 / false）、
+`songs[]`（歌名、区间、输出路径、自检结论）、`rejected[]`（被核验拦下的候选及原因）。
+
+> 设计由来：LLM 直接猜歌名有实测翻车史（把闲聊「小岁来了」当歌名、把歌词首句当歌名）；
+> 字符 2-gram 在英文上全是 th/he/in 噪声（实测《Lover》歌词 vs《奇异博士》英文对白重合率 0.83）。
+> 因此歌名交给歌词检索、区间交给歌词回定位、匹配度按语系分别用字符/词级 n-gram。
+
+---
+
 ## 目录结构
 
 ```
@@ -155,7 +189,11 @@ cuts/2026-01-01/
 │   ├── vocal_activity.py       人声活动分析（VAD）
 │   ├── decor_pick.py           标题装饰方案自动匹配
 │   ├── verify_sync.py          同步质量验收
+│   ├── asr_auto.py             自建转写：录播 → 整场 SRT（分块 FunASR，上游缺失时启用）
+│   ├── lyric_locate.py         歌词检索定歌名 + 歌词回整场转写定位演唱区间
 │   └── transcript_hub.py       转写源编排（盘点/定位/健康检查/降级）
+├── auto_cut.py                 每日全自动歌切驱动（不看歌单表，产出当日检测报告）
+├── reports/auto/               每日检测报告（<日期>.json + LOG.md）
 ├── renderer/
 │   ├── render_song.cjs         离线逐帧渲染驱动器
 │   ├── kdocs_fetch.cjs         在线歌单表抓取

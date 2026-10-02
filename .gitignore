@@ -37,3 +37,12 @@ package-lock.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 中间产物（波形切片/CTC 分段/临时 wav）
+_tmp/
+_tmp_ctcseg/
+_tmpwav/
+_tmpctc/
+
+# ---- 每日检测报告（含本机绝对路径，属于运行时产物）----
+reports/

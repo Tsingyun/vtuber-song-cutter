@@ -1005,6 +1005,8 @@ def main():
     ap.add_argument("--redetect", action="store_true", help="强制重跑 LLM 识别")
     ap.add_argument("--dry-run", action="store_true", help="只识别不切割")
     ap.add_argument("--refresh-kdocs", action="store_true", help="强制重拉在线歌单表（默认 12h 缓存）")
+    ap.add_argument("--no-kdocs", action="store_true",
+                    help="完全不读在线歌单表（全自动场景：歌名由转写 + 歌词联网核验自主判定）")
     ap.add_argument("--keep-mp3", action="store_true", help="保留 MP3（默认成品验证通过后自动删除）")
     ap.add_argument("--no-qc", action="store_true", help="跳过成片自检（默认每首都跑，约 15~20s）")
     ap.add_argument("--qc-strict", action="store_true",
@@ -1066,7 +1068,11 @@ def main():
     log("=== 歌切任务开始：%s ===" % args.date)
 
     # 0. 在线歌单表（第3表）—— 权威歌名数据源
-    kdocs = fetch_kdocs_songs(args.workdir, force=args.refresh_kdocs)
+    if getattr(args, "no_kdocs", False):
+        kdocs = None
+        log("已指定 --no-kdocs：不读在线歌单表，歌名完全由转写识别 + 歌词联网核验判定")
+    else:
+        kdocs = fetch_kdocs_songs(args.workdir, force=args.refresh_kdocs)
     expected_titles = kdocs_titles_for(kdocs, args.date) if kdocs else []
     if expected_titles:
         log("统计表当日歌单（%d 首）：%s" % (len(expected_titles), "、".join(expected_titles)))
