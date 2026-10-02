@@ -935,8 +935,17 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     if sync.get("ok"):
         tl_brief = {k: sync[k] for k in ("slope", "onset_abs", "song_end_abs", "song_len",
                                          "rms", "med", "n", "sim", "corrected", "head")}
+    _od = linfo.get("netease_duration_ms")
+    if _od:
+        _od = round(_od / 1000.0, 1)
+        _dev = (ce - cs) / _od
+        log("  原曲时长比对: 成片 %.1fs vs 原曲 %.1fs（%+.0f%%）" % (ce - cs, _od, (_dev - 1) * 100))
+        if _dev > 1.10 or _dev < 0.85:
+            log("  ⚠ 时长偏差超 10%%：疑似混入歌后闲聊/现场加唱，需人工核定 seg.cut_start_abs/cut_end_abs 后 --force 重渲")
     return {"lrc_path": lrc_snap, "lrc_src_path": src_snap,
             "cut_start": cs, "cut_end": ce, "head_pad": round(head_pad, 3),
+            "orig_duration_s": (round(linfo["netease_duration_ms"] / 1000.0, 1)
+                                if linfo.get("netease_duration_ms") else None),
             "onset": round(onset_abs, 3) if onset_abs else None,
             "entry_shift": round(cs - ref["cut_start"], 3),
             "timeline_source": tl_src, "timeline": tl_brief,

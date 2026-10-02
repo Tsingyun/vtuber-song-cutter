@@ -801,6 +801,25 @@ def run_qc(mp4, *, entry=None, lrc_text=None, ref_lrc_text=None, ffmpeg=None,
         want_dur = float(entry["cut_end"]) - float(entry["cut_start"]) + float(entry.get("head_pad", 0) or 0)
     head_pad = float(entry.get("head_pad", 0) or 0)
 
+    # D01: 成片时长 vs 原曲官方时长（manifest.orig_duration_s，来自网易云元数据）。
+    # 实况加唱/歌后闲聊混入都会表现为成片显著长于原曲 —— 本次《泡泡》4:34 vs 3:39 即此类。
+    _od = entry.get("orig_duration_s")
+    if _od:
+        try:
+            _od = float(_od)
+            _act = float(ctx["duration"])
+            _dev = _act / _od if _od > 0 else 0.0
+            _ok = 0.85 <= _dev <= 1.10
+            findings.append(Finding(
+                "D01", "边界", "成片时长与原曲一致",
+                PASS if _ok else WARN, _ok,
+                "成片 %.1fs vs 原曲 %.1fs（%+.0f%%）" % (_act, _od, (_dev - 1) * 100),
+                {"actual_s": round(_act, 2), "orig_s": _od, "ratio": round(_dev, 3)},
+                "偏差超 ±10%%/±15%%：疑似混入歌后闲聊或现场加唱；"
+                "用 seg.cut_start_abs/cut_end_abs 人工核定切点后 --force 重渲"))
+        except Exception:
+            pass
+
     x = None
     if has_audio:
         try:

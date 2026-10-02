@@ -87,6 +87,7 @@ def _lrclib(title, artist_hint=""):
 def _netease(title, artist_hint=""):
     """返回 (lrc, cover_url, source, artist)。搜索用 cloudsearch（旧 api/search/pc 已返回空）。"""
     lrc = cover = src = artist = None
+    dur_ms = None
     try:
         r = requests.post("https://music.163.com/api/cloudsearch/pc",
                           data={"s": title, "type": 1, "limit": 8},
@@ -94,7 +95,8 @@ def _netease(title, artist_hint=""):
                           timeout=TIMEOUT)
         songs = (r.json().get("result") or {}).get("songs") or []
         cand = [{"name": s.get("name"), "artist": (s.get("ar") or [{}])[0].get("name"),
-                 "id": s.get("id"), "cover": (s.get("al") or {}).get("picUrl")} for s in songs]
+                 "id": s.get("id"), "cover": (s.get("al") or {}).get("picUrl"),
+                 "dur": s.get("duration")} for s in songs]
         if not songs:      # 老接口兜底
             r = requests.post("http://music.163.com/api/search/pc",
                               data={"s": title, "type": 1, "limit": 8, "offset": 0},
@@ -102,9 +104,11 @@ def _netease(title, artist_hint=""):
                               timeout=TIMEOUT)
             songs = (r.json().get("result") or {}).get("songs") or []
             cand = [{"name": s.get("name"), "artist": (s.get("artists") or [{}])[0].get("name"),
-                     "id": s.get("id"), "cover": (s.get("album") or {}).get("picUrl")} for s in songs]
+                     "id": s.get("id"), "cover": (s.get("album") or {}).get("picUrl"),
+                     "dur": s.get("duration")} for s in songs]
         hit, score = _pick(cand, title, artist_hint)
         if hit:
+            dur_ms = hit.get("dur")
             if hit.get("cover"):
                 cover = hit["cover"] + "?param=1000y1000"
             rr = requests.get("http://music.163.com/api/song/lyric",
@@ -117,7 +121,7 @@ def _netease(title, artist_hint=""):
             artist = (hit.get("artist") or "").strip() or None
     except Exception:
         pass
-    return lrc, cover, src, artist
+    return lrc, cover, src, artist, dur_ms
 
 
 def _t2s(text):
@@ -332,8 +336,10 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
         pass
     cover_url, nartist = None, ""
     try:
-        nl, ncover, nsrc, nart = _netease(title, artist_hint)
+        nl, ncover, nsrc, nart, ndur = _netease(title, artist_hint)
         cover_url, nartist = ncover, (nart or "")
+        if ndur:
+            info["netease_duration_ms"] = ndur
         if nl:
             cands.append({"lrc": nl, "source": nsrc, "artist": nart,
                           "cover_url": ncover})
