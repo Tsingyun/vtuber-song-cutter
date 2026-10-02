@@ -97,6 +97,27 @@ def find_upstream_srt(date):
     return out
 
 
+def parse_block_json(raw):
+    """解析「演唱窗口」块回复：{"singing": bool, "segments":[{start,end,lines}]}。
+
+    注意：不能用 SC.extract_json —— 那是 song_cutter 的 {"songs":[…]} 专用解析器，
+    会把 {"singing":…,"segments":[…]} 整体丢弃（singing=false 时直接报「找不到合法 JSON」，
+    segments 非空时又把单个 segment 误当成 songs 项），导致本步骤永远拿不到结果。
+    """
+    t = re.sub(r"```+(?:json)?", "", (raw or "").strip())
+    dec = json.JSONDecoder(strict=False)
+    for i, ch in enumerate(t):
+        if ch != "{":
+            continue
+        try:
+            obj, _end = dec.raw_decode(t, i)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and ("segments" in obj or "singing" in obj):
+            return obj
+    return None
+
+
 def llm_windows(cfg, entries, block=BLOCK_SEC, overlap=BLOCK_OVERLAP, max_blocks=MAX_BLOCKS):
     """分块问 LLM：有没有唱歌段落？有则原样摘出歌词行。返回 [(start, end, [lines])]。"""
     if not entries:
@@ -112,7 +133,7 @@ def llm_windows(cfg, entries, block=BLOCK_SEC, overlap=BLOCK_OVERLAP, max_blocks
                              for a, _b, x in sub)
             try:
                 raw = SC.call_llm(cfg["summarize"], SYS_LYRIC, USER_LYRIC % body)
-                data = SC.extract_json(raw)
+                data = parse_block_json(raw)
             except Exception as e:
                 SC.log("    块 %d LLM 失败：%s" % (n, str(e)[:120]))
                 data = None
