@@ -71,6 +71,7 @@ _PLAYER_DIR = os.path.join(ROOT, "renderer", "player")
 _RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
 
 MIN_SEC, MAX_SEC = 40, 900          # 单首合理区间
+LRC_OVERRIDE = ""                   # --lrc-override：人工核定的歌词时间轴
 PAD_START, PAD_END = 1.5, 2.0       # 边界留白（秒）
 
 # ---- 成片输出规格（2026-09-29 起默认 4K60：1080P 下小字与歌词边缘不够锐利） ----
@@ -320,6 +321,32 @@ def load_song_library():
     except Exception as e:  # noqa
         log("警告：歌曲库加载失败（%s），识别将不接地歌单" % e)
         return ""
+
+
+_LIB_CACHE = None
+
+
+def lookup_library_artist(title):
+    """从统计站曲库查歌名的原唱歌手，作为歌词抓取的 artist_hint。
+
+    同名歌曲极多（如《泡泡》就有牛佳钰、娃娃 Waa Wei 两版），不带歌手提示时
+    LRCLIB / 网易云搜索会把「搜索排序第一」当成正确版本，导致成片配了不相干的歌词。
+    """
+    global _LIB_CACHE
+    if not SONG_LIB_JSON:
+        return ""
+    if _LIB_CACHE is None:
+        try:
+            _LIB_CACHE = json.load(io.open(SONG_LIB_JSON, encoding="utf-8"))
+        except Exception:
+            _LIB_CACHE = []
+    tn = norm_title(title)
+    if not tn:
+        return ""
+    for d in _LIB_CACHE or []:
+        if norm_title(d.get("song_name") or "") == tn:
+            return (d.get("artist") or "").strip()
+    return ""
 
 
 # ---------------- 在线歌单表（权威歌名数据源） ----------------
@@ -698,37 +725,56 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     base = out_basename(date, sanitize(disp))   # 【演唱者】歌名【YYYYMMDD歌切】
     out_mp4 = os.path.join(out_dir, base + ".mp4")
     out_mp3 = os.path.join(out_dir, base + ".mp3")
-
-    # 1. 波形精修（切点以音频波形为准：伴奏起点 / 尾音静音果断切分）
-    ref = wave_refine.refine_segment(ffmpeg, src, seg["start"], seg["end"],
-                                     tmp_dir=os.path.join(workdir, "_tmp"))
-    for nline in ref["notes"]:
-        log("  波形: " + nline)
-    cs, ce = ref["cut_start"], ref["cut_end"]
-    log("  切点精修: %.2f → %.2f（%.1fs；粗切点 %.2f→%.2f）" % (
-        cs, ce, ce - cs, seg["start"], seg["end"]))
-
-    # 1.5 切入点检测（默认执行）：说话段 → 静音谷 → 能量回升起点。
-    #     修复「粗切点偏晚吞掉渐强前奏」——wave_refine 只向回搜 12s 且切点
-    #     不低于粗起点，粗点落在歌中间时（寄明月实例偏晚 15s+）无能为力。
-    det = timeline_sync.detect_entry(ffmpeg, src, seg["start"], seg["end"],
-                                     tmp_dir=os.path.join(workdir, "_tmpwav"), log=log)
     onset_abs = None
-    if det.get("ok"):
-        onset_abs = det["onset"]
-        new_cs, moved, _note = timeline_sync.refine_head(cs, det)
-        log("  切入点检测: onset=%.3f 静音谷=%.2f~%.2f%s" % (
-            onset_abs, det["valley"][0], det["valley"][1],
-            ("，cut_start %.2f → %.2f" % (cs, new_cs)) if moved else "，与精修切点一致，维持"))
-        if moved:
-            cs = new_cs
+
+    # 1. 切点：优先人工核定（seg.cut_start_abs/cut_end_abs，诊断/复核后手工锁定），
+    #    否则波形精修（切点以音频波形为准：伴奏起点 / 尾音静音果断切分）。
+    #    BGM 不停的实况里自动终点会把歌后闲聊吞进来（泡泡实例 +20s），此时人工核定。
+    _ex_s, _ex_e = seg.get("cut_start_abs"), seg.get("cut_end_abs")
+    if _ex_s is not None and _ex_e is not None:
+        cs, ce = float(_ex_s), float(_ex_e)
+        ref = {"cut_start": cs, "cut_end": ce, "onset": None, "silence_at": None,
+               "notes": ["人工核定切点（跳过波形精修）"]}
+        log("  切点: 人工核定 %.2f → %.2f（%.1fs）" % (cs, ce, ce - cs))
     else:
-        log("  切入点检测: 不可用（%s）→ 维持波形精修切点" % det.get("reason", "?"))
+        ref = wave_refine.refine_segment(ffmpeg, src, seg["start"], seg["end"],
+                                         tmp_dir=os.path.join(workdir, "_tmp"))
+        for nline in ref["notes"]:
+            log("  波形: " + nline)
+        cs, ce = ref["cut_start"], ref["cut_end"]
+        log("  切点精修: %.2f → %.2f（%.1fs；粗切点 %.2f→%.2f）" % (
+            cs, ce, ce - cs, seg["start"], seg["end"]))
+
+        # 1.5 切入点检测（默认执行）：说话段 → 静音谷 → 能量回升起点。
+        #     修复「粗切点偏晚吞掉渐强前奏」——wave_refine 只向回搜 12s 且切点
+        #     不低于粗起点，粗点落在歌中间时（寄明月实例偏晚 15s+）无能为力。
+        det = timeline_sync.detect_entry(ffmpeg, src, seg["start"], seg["end"],
+                                         tmp_dir=os.path.join(workdir, "_tmpwav"), log=log)
+        onset_abs = None
+        if det.get("ok"):
+            onset_abs = det["onset"]
+            new_cs, moved, _note = timeline_sync.refine_head(cs, det)
+            log("  切入点检测: onset=%.3f 静音谷=%.2f~%.2f%s" % (
+                onset_abs, det["valley"][0], det["valley"][1],
+                ("，cut_start %.2f → %.2f" % (cs, new_cs)) if moved else "，与精修切点一致，维持"))
+            if moved:
+                cs = new_cs
+        else:
+            log("  切入点检测: 不可用（%s）→ 维持波形精修切点" % det.get("reason", "?"))
 
     # 2. 歌词 + 封面自动匹配（封面：网易云专辑图；歌名识别不受影响）
+    #    artist_hint：曲库里的原唱歌手，用于让搜索结果对准正确版本。
+    #    ref_text：本片段的演唱转写，用于「歌词正文 vs 实际唱了什么」字面比对——
+    #              同名不同歌的错版本（如《泡泡》牛佳钰版 vs 娃娃版）一测即出。
+    _hint = lookup_library_artist(seg["title_guess"])
+    ref_text = ""
+    if srt_entries:
+        ref_text = "\n".join(t for (a, b, t) in srt_entries if cs - 2 <= a <= ce + 2)
     lrc, cover_path, linfo = lyrics_fetch.fetch_lyrics_and_cover(
-        seg["title_guess"], dur=ce - cs,
+        seg["title_guess"], artist_hint=_hint, dur=ce - cs, ref_text=ref_text,
         cache_dir=os.path.join(workdir, "_media_cache"))
+    if _hint:
+        log("  曲库歌手提示: %s" % _hint)
     src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
     artist = (linfo.get("artist") or "").strip()
     tags = seg.get("tags") or "翻唱, 现场版"
@@ -744,6 +790,11 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
             linfo.get("lyrics_tail_sec", 0.0), ce - cs, _cov * 100, _flag))
     if linfo.get("warn_t2s"):
         log("  ⚠ %s" % linfo["warn_t2s"])
+    if linfo.get("warn_lyrics_mismatch"):
+        log("  ⚠⚠ 歌词版本存疑：%s" % linfo["warn_lyrics_mismatch"])
+    elif ref_text and linfo.get("lyrics_overlap") is not None:
+        log("  歌词一致性: 与演唱内容字面重合 %.0f%%（OK）"
+            % (linfo["lyrics_overlap"] * 100))
 
     # 2.5 原曲分析（默认执行）：全曲 DTW 速度比 + 局部互相关校正锚点。
     #     产出 ①精确伴奏结束点（尾部切点 = 乐句结束 + 余韵）②歌词时间轴。
@@ -786,7 +837,12 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     #   C) ASR 对齐（降级）：FunASR 演唱行配对 + 聚类常数偏移；
     #   D) 原始时间轴（兜底）。
     tl_src = "raw"
-    if lrc and sync.get("ok"):
+    if LRC_OVERRIDE and os.path.exists(LRC_OVERRIDE):
+        lrc = io.open(LRC_OVERRIDE, encoding="utf-8").read()
+        tl_src = "override"
+        log("  歌词时间轴: 使用 --lrc-override 指定文件（%d 行，跳过对齐链）"
+            % len(lrc.splitlines()))
+    if tl_src == "raw" and lrc and sync.get("ok"):
         lrc2 = timeline_sync.render_lrc(sync, lrc, head_pad)
         if lrc2:
             lrc, tl_src = lrc2, "dtw"
@@ -946,6 +1002,10 @@ def main():
                     help="自检不通过则以退出码 3 结束（供自动化流程判定是否继续）")
     ap.add_argument("--qc-deep", action="store_true",
                     help="自检启用深度项（V06 全片帧节奏扫描，约 +60s/首）")
+    ap.add_argument("--lrc-override", default="",
+                    help="直接用指定 LRC 渲染，跳过 CTC/ASR 对齐链（人工核定时间轴时用）")
+    ap.add_argument("--force", action="store_true",
+                    help="成品已存在也强制重渲（默认跳过；修时间轴/切点后复渲时用）")
     ap.add_argument("--res", type=int, default=2, choices=(1, 2),
                     help="输出倍率：2=3840×2160（默认，4K60），1=1920×1080")
     ap.add_argument("--bitrate", type=int, default=18_000_000,
@@ -969,9 +1029,10 @@ def main():
                          "缺省则由歌曲意境自动匹配")
     args = ap.parse_args()
 
-    global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, OUT_VCODEC, OUT_PAGES
+    global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC, OUT_PAGES
     OUT_RES, OUT_BITRATE = args.res, args.bitrate
     OUT_ENCODER, OUT_PRESET = args.encoder, args.preset
+    LRC_OVERRIDE = getattr(args, "lrc_override", "") or ""
     OUT_VCODEC, OUT_PAGES = args.vcodec, args.pages
     PERF_NO = args.perf_no
 
@@ -1073,8 +1134,8 @@ def main():
             if args.dry_run:
                 continue
             ref_extra = {}
-            if os.path.exists(out_mp4) and os.path.getsize(out_mp4) > 1048576:
-                log("  成品已存在，跳过")
+            if os.path.exists(out_mp4) and os.path.getsize(out_mp4) > 1048576 and not args.force:
+                log("  成品已存在，跳过（--force 可强制重渲）")
             else:
                 if args.raw_cut:
                     t0 = time.time()

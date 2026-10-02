@@ -14,6 +14,8 @@ TIMEOUT = (10, 30)
 # 歌词完整性：末行时间戳 / 歌曲时长 低于此值时，判定「疑似残缺」并触发重新拉取。
 # 流行歌的正常 outro 一般在 0.85~0.99；低于 0.80 基本可以断定尾部歌词掉了。
 LRC_SUSPECT_COVER = 0.80
+# 歌词正文 vs 演唱转写的最低字面重合率（低于即判定「疑似不是同一首歌」）
+LRC_TEXT_OV_OK = 0.18
 
 
 def _norm(t):
@@ -50,7 +52,8 @@ def lrclib_candidates(title, artist_hint=""):
                              headers={"User-Agent": UA}, timeout=TIMEOUT)
             if r.status_code == 200:
                 out = list(r.json() or [])
-                break
+                if out:                      # 空结果不能 break：否则带歌手精确搜无命中时
+                    break                    # 整个源直接失效，只能拿到同名他人的歌词
         except Exception:
             continue
     res = []
@@ -165,8 +168,10 @@ def _artist_from_source(src):
 # 创作/制作署名行（网易云 LRC 首部常见）。这些不是歌词，若混进时间轴会被当成歌词渲染。
 META_RE = re.compile(
     r"^\s*(作词|作曲|编曲|制作人|监制|混音|母带|和声|和音|吉他|贝斯|鼓|钢琴|弦乐|录音|"
-    r"后期|统筹|策划|出品|发行|翻唱|原唱|演唱|词|曲|歌名|专辑|歌手|曲名|歌词)"
-    r"\s*[:：]|^\s*(?:\[\d{1,3}:\d{2}[.:]?\d{0,3}\])*\s*(?:作词|作曲|编曲|制作人)\s*[:：]")
+    r"后期|统筹|策划|出品|发行|翻唱|原唱|演唱|词|曲|歌名|专辑|歌手|曲名|歌词|"
+    r"歌曲营销|联合营销|总顾问|营销|文案|视觉|封面|设计|企划|OP|SP|ISRC)"
+    r"\s*[:：]|^\s*(?:\[\d{1,3}:\d{2}[.:]?\d{0,3}\])*\s*(?:作词|作曲|编曲|制作人|歌曲营销|联合营销|总顾问)\s*[:：]|"
+    r"^\s*(?:OP|SP|ISRC)")
 
 # 段落标记 / 无效占位
 JUNK_RE = re.compile(r"^\[(?:00:00\.00)\]\s*$|^\s*(?:~+|End|music|Music|--+|…)\s*$")
@@ -230,8 +235,41 @@ def clean_lrc(lrc, dur=None):
     return "\n".join(merged).strip()
 
 
-def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None):
-    """返回 (lrc:str|None, cover_path:str|None, info:dict)。cover 已下载到 cache_dir。"""
+def lyric_body_text(lrc):
+    """抽出歌词正文（去时间轴标签与常见标点），用于和演唱转写做字面比对。"""
+    t = re.sub(r"\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]", "", lrc or "")
+    return re.sub(r"[\s\u3000\u00b7\u30fb\uff5e~\-—_（）()【】\[\]!！?？,，.。'\u201c\u201d\u2018\u2019]", "", t)
+
+
+def text_overlap_ratio(lrc, ref_text, n=2):
+    """歌词正文与演唱转写的字符 n-gram 重合率。
+
+    用途：拦截「同名不同歌」的错版本。典型案例（2026-10-01《泡泡》）——
+    LRCLIB 上《泡泡》排在首位的是娃娃 Waa Wei 的版本（"吹我们吹呀吹"），
+    而实际演唱的是牛佳钰《泡泡》（"是不是嘛 对不对嘛"）。两版标题完全同名、
+    时长也接近（3:38 / 3:40），按「覆盖率×行数」择优仍可能选错，
+    但正文字面重合率近 0，一测即出。
+
+    返回 0~1：同版本通常 >0.20；错版本通常 <0.05。
+    ref_text 为空则返回 None（表示「无参照，未执行」）。
+    """
+    def grams(x):
+        x = _norm(x or "")
+        return {x[i:i + n] for i in range(max(0, len(x) - n + 1))}
+    if not ref_text:
+        return None
+    a, b = grams(lyric_body_text(lrc)), grams(ref_text)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / float(min(len(a), len(b)))
+
+
+def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_text=None):
+    """返回 (lrc:str|None, cover_path:str|None, info:dict)。cover 已下载到 cache_dir。
+
+    ref_text：本片段的演唱转写原文（SRT 文本）。给了就启用「字面一致性」判据，
+    把同名不同歌的错版本候选排到后面，避免成片配着完全不相干的歌词。
+    """
     info = {}
     cache_dir = cache_dir or os.getcwd()
     os.makedirs(cache_dir, exist_ok=True)
@@ -251,6 +289,25 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None):
                     if cov is None:
                         cov = lrc_tail_sec(d["lrc"]) / dur
                     stale = cov < LRC_SUSPECT_COVER
+                # 缓存 key 只含歌名：同名不同歌的错版本会长期驻留（持续污染源）。
+                # 已知歌手时做「歌手一致性」复核，给出参照文本时再做「字面一致性」复核。
+                if not stale and artist_hint and d.get("lrc"):
+                    cached_artist = (info.get("artist") or _artist_from_source(
+                        info.get("lyrics_source")) or "").strip()
+                    if (cached_artist and _norm(cached_artist) != _norm(artist_hint)
+                            and _norm(cached_artist) not in _norm(artist_hint)
+                            and _norm(artist_hint) not in _norm(cached_artist)):
+                        stale = True
+                        info["cache_invalidated"] = "歌手不一致（缓存 %s vs 曲库 %s）" % (
+                            cached_artist, artist_hint)
+                if not stale and ref_text and d.get("lrc"):
+                    c_ov = text_overlap_ratio(d["lrc"], ref_text)
+                    info["lyrics_overlap"] = round(c_ov or 0.0, 3)
+                    if (c_ov or 0.0) < LRC_TEXT_OV_OK:
+                        stale = True
+                        info["cache_invalidated"] = (
+                            "歌词与演唱内容字面重合率仅 %.1f%%（阈值 %.0f%%）"
+                            % ((c_ov or 0.0) * 100, LRC_TEXT_OV_OK * 100))
                 if not stale:
                     if d.get("cover_path") and not os.path.exists(d["cover_path"]):
                         d["cover_path"] = None
@@ -291,22 +348,39 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None):
         lines = len([x for x in body.splitlines() if x.strip()])
         tail = lrc_tail_sec(body)
         cov = (tail / dur) if (dur and dur > 1) else (tail / 240.0)
+        ov = text_overlap_ratio(body, ref_text)
         scored.append({"cov": cov, "lines": lines, "tail": tail, "body": body,
                        "source": c["source"], "artist": c["artist"],
-                       "cover_url": c["cover_url"]})
-    scored.sort(key=lambda x: (round(x["cov"], 3), x["lines"]), reverse=True)
+                       "cover_url": c["cover_url"], "ov": ov})
+    # 有转写参照时：先按「与演唱内容字面一致」分档，再比覆盖率/行数。
+    # 只按覆盖率会选到同名不同歌的错版本（见 text_overlap_ratio 的《泡泡》案例）。
+    if ref_text:
+        scored.sort(key=lambda x: (1 if (x["ov"] or 0.0) >= LRC_TEXT_OV_OK else 0,
+                                   round(x["ov"] or 0.0, 3),
+                                   round(x["cov"], 3), x["lines"]), reverse=True)
+    else:
+        scored.sort(key=lambda x: (round(x["cov"], 3), x["lines"]), reverse=True)
 
     lrc, artist = None, ""
     if scored:
         b = scored[0]
         lrc = b["body"]
+        if ref_text:
+            info["lyrics_overlap"] = round(b["ov"] or 0.0, 3)
+            if (b["ov"] or 0.0) < LRC_TEXT_OV_OK:
+                info["warn_lyrics_mismatch"] = (
+                    "歌词与演唱内容字面重合率仅 %.1f%%（阈值 %.0f%%）——很可能是同名不同歌的"
+                    "错误版本（演唱：%s / 抓到：%s）"
+                    % ((b["ov"] or 0.0) * 100, LRC_TEXT_OV_OK * 100,
+                       (ref_text or "")[:24], b["source"]))
         info["lyrics_source"] = b["source"]
         info["lyrics_lines"] = b["lines"]
         info["lyrics_tail_sec"] = round(b["tail"], 2)
         info["lyrics_coverage"] = round(b["cov"], 3)
         info["lyrics_rejected"] = [{"source": s["source"], "lines": s["lines"],
                                     "tail_sec": round(s["tail"], 2),
-                                    "coverage": round(s["cov"], 3)}
+                                    "coverage": round(s["cov"], 3),
+                                    "overlap": (round(s["ov"], 3) if s.get("ov") is not None else None)}
                                    for s in scored[1:]]
         artist = b["artist"] or ""
     else:

@@ -90,6 +90,7 @@ TH = {
     "flicker_warn_n": 1,
     # 歌词
     "line_dur_min": 0.8, "line_dur_max": 20.0,
+    "line_gap_sing_ratio": 0.35,  # 过慢间隔内「人声乐句覆盖率」低于此值 → 实况间歇而非缺行
     "line_dur_block_min": 0.4, "line_dur_block_max": 25.0,
     "line_gap_warn": 12.0, "line_gap_block": 20.0,
     "cov_block": 0.70, "cov_warn": 0.80,
@@ -529,9 +530,14 @@ def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050):
                 if tag in ("delete", "replace") for i in range(i1, i2)]
         extra = [j for tag, i1, i2, j1, j2 in sm.get_opcodes()
                  if tag in ("insert", "replace") for j in range(j1, j2)]
-        if miss or extra:
-            sev = BLOCK if len(miss) + len(extra) > max(2, 0.05 * len(b)) else WARN
-            det = "源 %d 行 / 成片 %d 行；缺 %d 行，多 %d 行" % (len(b), len(a), len(miss), len(extra))
+        # 现场加唱（重复副歌）产生的多余行：文本与源已有行逐字相同 → 实况重唱，不是抓词错误
+        src_texts = set(b)
+        dup_extra = [j for j in extra if norm_line(rows[j]["text"]) in src_texts]
+        real_extra = [j for j in extra if j not in set(dup_extra)]
+        if miss or real_extra:
+            sev = BLOCK if len(miss) + len(real_extra) > max(2, 0.05 * len(b)) else WARN
+            det = "源 %d 行 / 成片 %d 行；缺 %d 行，多 %d 行（另 %d 行为现场重唱）" % (
+                len(b), len(a), len(miss), len(real_extra), len(dup_extra))
             if miss:
                 det += "；缺: " + ", ".join("L%d「%s」" % (i + 1, ref_rows[i]["text"][:12])
                                            for i in miss[:6])
@@ -574,28 +580,79 @@ def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050):
                        {"逆序行": bad[:8]}, "render_lrc/ctc_align 输出未排序，检查时间轴生成分支"))
 
     # L05 单行时长
-    too_fast, too_slow, warn_r = [], [], []
+    too_fast, too_slow, warn_r, long_gap = [], [], [], []
     for i, r in enumerate(rows):
         nxt = rows[i + 1]["t"] if i + 1 < len(rows) else min(dur, r["end"] + 1.0)
         d = nxt - r["t"]
-        if d < TH["line_dur_block_min"] or d > TH["line_dur_block_max"]:
-            (too_fast if d < 0 else too_slow).append((i, d))
+        if d < TH["line_dur_block_min"]:
+            too_fast.append((i, d))
+        elif d > TH["line_dur_block_max"]:
+            # 超长间隔：实况说话/间奏的音频无法与唱歌确定性区分（说话也被算进人声
+            # 乐句，实测闲聊段覆盖 78%），在此判「缺行」会假 BLOCK → 移交 L06 人工确认
+            long_gap.append((i, d))
         elif d < TH["line_dur_min"] or d > TH["line_dur_max"]:
             warn_r.append((i, d))
-    if too_fast or too_slow:
+
+    # 过慢细分：用「人声乐句覆盖率」判定间隔内是否真的在唱。
+    #   演唱 = 连续乐句（vocal_activity 的 run 长）；说话 = 碎片短句。
+    #   ⚠ 不能用「电平高低」判定：现场伴奏常全程在响，主播停下聊天时电平与全片
+    #     均值几乎相同（本场实测 -17dB vs -17.1dB），会把真实间歇误判成缺行。
+    runs_x = None
+    if x is not None and len(x):
+        try:
+            from songcut import vocal_activity as VA
+            runs_x, _sal, _ts = VA.detect_phrases(x, sr)
+        except Exception:
+            runs_x = None
+
+    def _sing_ratio(i, d):
+        """间隔 [t0, t0+d] 被人声乐句覆盖的比例。"""
+        if not runs_x:
+            return None
+        t0, t1 = float(rows[i]["t"]), float(rows[i]["t"]) + float(d)
+        cov = 0.0
+        for (a, b) in runs_x:
+            cov += max(0.0, min(float(b), t1) - max(float(a), t0))
+        return cov / max(1e-6, float(d))
+
+    slow_active, slow_gap = [], []
+    for i, d in too_slow:
+        r = _sing_ratio(i, d)
+        if r is None:                            # 无音频/检测失败 → 保守按 BLOCK
+            slow_active.append((i, d, None))
+        elif r >= TH["line_gap_sing_ratio"]:
+            slow_active.append((i, d, round(r, 2)))    # 期间在唱却没分到行 = 缺行
+        else:
+            slow_gap.append((i, d, round(r, 2)))       # 期间没在唱 = 实况间歇
+
+    if too_fast or slow_active:
         sev, ok = BLOCK, False
-    elif warn_r:
+    elif too_slow or warn_r or long_gap:
         sev, ok = WARN, True
     else:
         sev, ok = PASS, True
-    det = "过快 %d，过慢 %d，可疑 %d" % (len(too_fast), len(too_slow), len(warn_r))
-    for lab, lst in (("过快", too_fast), ("过慢", too_slow), ("可疑", warn_r)):
+    det = "过快 %d，过慢 %d（其中疑似缺行 %d / 实况间歇 %d），可疑 %d，超长间隔 %d" % (
+        len(too_fast), len(too_slow), len(slow_active), len(slow_gap), len(warn_r), len(long_gap))
+    for lab, lst in (("过快", too_fast), ("可疑", warn_r)):
         if lst:
             det += "；%s: %s" % (lab, ", ".join("L%d(%.1fs)" % (i + 1, d) for i, d in lst[:5]))
+    if slow_active:
+        det += "；疑似缺行(间隔内仍在唱): " + ", ".join(
+            "L%d(%.1fs%s)" % (i + 1, d, "" if r is None else " 演唱占比%.0f%%" % (r * 100))
+            for i, d, r in slow_active[:5])
+    if slow_gap:
+        det += "；实况间歇(需人工确认): " + ", ".join(
+            "L%d(%.1fs 演唱占比%.0f%%)" % (i + 1, d, r * 100) for i, d, r in slow_gap[:5])
+    if long_gap:
+        det += "；超长间隔(移交L06人工确认): " + ", ".join(
+            "L%d(%.1fs)" % (i + 1, d) for i, d in long_gap[:5])
     out.append(Finding("L05", "歌词", "单行时长合理", sev, ok, det,
                        {"合理区间": [TH["line_dur_min"], TH["line_dur_max"]],
-                        "BLOCK区间外": [TH["line_dur_block_min"], TH["line_dur_block_max"]]},
-                       "过快 → 时间轴被压缩（速度比 slope 跑飞）；过慢 → 缺行或末行未闭合"))
+                        "BLOCK区间外": [TH["line_dur_block_min"], TH["line_dur_block_max"]],
+                        "间歇判据": "间隔内人声乐句覆盖率 < %.0f%% 视为实况间歇（WARN），"
+                                   "否则为疑似缺行（BLOCK）" % (TH["line_gap_sing_ratio"] * 100)},
+                       "过快 → 时间轴被压缩（速度比 slope 跑飞）；疑似缺行 → 检查是否漏 outro/重复副歌；"
+                       "实况间歇 → 主播中途聊天/重启伴奏，需用 FunASR 转写确认该段确未在演唱"))
 
     # L06 行间隔
     gaps = []
@@ -603,9 +660,10 @@ def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050):
         g = rows[i + 1]["t"] - r["end"]
         if g > TH["line_gap_warn"]:
             gaps.append((i, g))
-    if any(g >= TH["line_gap_block"] for _, g in gaps):
-        sev, ok = BLOCK, False
-    elif gaps:
+    # 超长间隔不再 BLOCK：间奏/实况说话/缺行纯音频不可判别（vocal_activity 把说话
+    # 也算人声乐句），正常实况歌切几乎必有主播闲聊间隔 → WARN 提示人工确认，
+    # 缺行由 L05(≤25s 覆盖率判据) 与 L07(尾部覆盖) 兜底。
+    if gaps:
         sev, ok = WARN, True
     else:
         sev, ok = PASS, True
@@ -614,7 +672,7 @@ def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050):
                                              ("；例 L%d→L%d 空 %.1fs" % (gaps[0][0] + 1,
                                                                       gaps[0][0] + 2, gaps[0][1])
                                               if gaps else "")),
-                       {"WARN": TH["line_gap_warn"], "BLOCK": TH["line_gap_block"],
+                       {"WARN": TH["line_gap_warn"], "原BLOCK阈值(仅提示)": TH["line_gap_block"],
                         "位置": [[i + 1, round(g, 2)] for i, g in gaps[:8]]},
                        "大间隔多半是中间掉了几行歌词（间奏除外，需听音频确认）"))
 
