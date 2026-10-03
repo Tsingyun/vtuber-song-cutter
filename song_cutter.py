@@ -638,6 +638,26 @@ def pick_node():
     raise RuntimeError("找不到 node 可执行文件（可用环境变量 SONGCUT_NODE 指定）")
 
 
+def _cleanup_render_tmp(out_path):
+    """删掉本次渲染留下的 mjpeg / 分段 mp4 / concat 清单（失败路径兜底）。"""
+    import glob as _g
+
+    def _esc(p):
+        return p.replace("[", "[[]").replace("]", "[]]").replace("?", "[?]").replace("*", "[*]")
+
+    n = 0
+    base = _esc(out_path)
+    for pat in (base + ".p*.mjpeg", base + ".p*.mp4", base + ".concat.txt", base + ".render.mp4"):
+        for f in _g.glob(pat):
+            try:
+                os.remove(f)
+                n += 1
+            except OSError:
+                pass
+    if n:
+        log("  渲染失败已清理中间产物 %d 个" % n)
+
+
 def render_player_video(workdir, job, ffmpeg=None):
     """调 render_song.cjs：无头浏览器离线逐帧渲染播放器画面并编码落盘。
 
@@ -645,6 +665,24 @@ def render_player_video(workdir, job, ffmpeg=None):
                                因为 Chromium 软件 H.264 码率控制饱和，到不了 B站 不二压区间）
     job.encoder = "webcodecs"→ 页面内 WebCodecs 编码后整片 POST 回落（1080P 回退档）
     """
+    # ── 磁盘预检：两阶段渲染要按「每帧 ~2.2MB × 帧数」预留 mjpeg 空间 ──
+    try:
+        _frames = int(float(job.get("duration") or 0) * 60)
+        _need = (2.0 * 1024 ** 3
+                 + float(job.get("pages") or 2) * max(1, _frames) * 2.2 * 1024 ** 2)
+        _tot, _used, _free = shutil.disk_usage(
+            os.path.dirname(os.path.abspath(job["out"])) or ".")
+        if _free < _need:
+            raise RuntimeError(
+                "磁盘空间不足：渲染需约 %.0f GB（mjpeg 中间文件），当前可用仅 %.1f GB。"
+                "请先清理（渲染中间产物通常在回收站里）"
+                % (_need / 1024 ** 3, _free / 1024 ** 3))
+        log("  磁盘预检：需 %.0f GB / 可用 %.1f GB ✓" % (_need / 1024 ** 3, _free / 1024 ** 3))
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
     job_f = os.path.join(workdir, "_render_job.json")
     io.open(job_f, "w", encoding="utf-8", newline="").write(
         json.dumps(job, ensure_ascii=False))
@@ -661,6 +699,7 @@ def render_player_video(workdir, job, ffmpeg=None):
             log("  [render] " + line.strip()[:160])
     if p.returncode != 0 or not os.path.exists(job["out"]):
         tail = ((p.stderr or "") + (p.stdout or "")).strip()[-400:]
+        _cleanup_render_tmp(job["out"])       # 失败也要清理，否则满盘 mjpeg 会拖垮下一次
         raise RuntimeError("渲染失败 rc=%s：%s" % (p.returncode, tail))
     return job["out"]
 
@@ -913,6 +952,7 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "preset": OUT_PRESET,             # libx264 preset（仅 ffmpeg 通路 + vcodec=libx264）
         "vcodec": OUT_VCODEC,             # h264_nvenc（默认，硬编）/ libx264（CPU 回退）
         "pages": OUT_PAGES,               # 并行渲染实例数（默认 3）
+        "duration": round(ce - cs, 2),      # 渲染前磁盘预检要用（估算 mjpeg 峰值）
         "out": render_tmp,
     }
     t0 = time.time()

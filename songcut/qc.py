@@ -353,7 +353,20 @@ def check_av_xcorr(ffmpeg, mp4, src, ss, x, sr, ctx):
 
 
 # ── 检查项：画面 ────────────────────────────────────────────────────────
-def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=False):
+def _near_lyric_switch(frame, lyric_times, fps=60.0, tol_frame=3):
+    """该帧是否落在某行歌词的起点附近（换行瞬间亮度变化属正常）。"""
+    if not lyric_times or not fps:
+        return False
+    t = frame / float(fps)
+    for lt in lyric_times:
+        if abs(t - lt) <= tol_frame / float(fps):
+            return True
+    return False
+
+
+def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=False,
+                lyric_times=None, fps=60.0):
+    """lyric_times: 歌词各行起点（秒）。用于把「歌词换行」的亮度跳变从脉冲里剔除。"""
     out = []
     if nframes <= 0:
         return [Finding("V01", "画面", "帧数", BLOCK, False, "无法读取帧数", {}, "")], 0
@@ -378,6 +391,7 @@ def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=Fa
                            {"期望窗口": len(starts)}, "成片可能被 -shortest 截断，核对时长"))
 
     black, freeze_runs, flick, violent, per_win = [], [], [], [], []
+    switch_pulse = []        # 落在歌词换行处的跳变（合法，不计缺陷）
     for s, arr in frames.items():
         if arr is None or len(arr) < 2:
             continue
@@ -422,6 +436,9 @@ def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=Fa
             nb = max(d[k - 1] if k > 0 else 0.0, d[k + 1] if k + 1 < len(d) else 0.0)
             if (d[k] > max(TH["flicker_abs"], TH["flicker_med_mult"] * m)
                     and nb > TH["flicker_nb_mult"] * m):
+                if _near_lyric_switch(s + k, lyric_times, fps):
+                    switch_pulse.append(s + k)
+                    continue
                 flick.append((s + k, float(d[k]), float(nb), round(m, 4)))
 
     nb_block = [b for b in black if b[2] == "黑帧"]
@@ -464,6 +481,8 @@ def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=Fa
         sev, ok = PASS, True
     det = "双稳态闪烁窗口 %d；疑似 %d；孤立脉冲 %d（全片帧差基准 %.3f，剧烈窗口 %d）" % (
         len(stab), len(stab_w), len(flick), base, len(violent))
+    if switch_pulse:
+        det += "；歌词换行处跳变 %d 帧（合法，已排除）" % len(switch_pulse)
     if stab:
         det += "；闪烁: " + ", ".join("f%d(交替率%.2f 幅度%.0f)" % (a, b, c) for a, b, c in stab[:5])
     if flick:
@@ -831,7 +850,9 @@ def run_qc(mp4, *, entry=None, lrc_text=None, ref_lrc_text=None, ffmpeg=None,
             findings.append(Finding("A02", "音频", "音频可解码", BLOCK, False,
                                     "解码失败：%s" % str(e)[:160], {}, "成片音轨损坏，重新混流"))
 
-    vf, ngrab = check_video(ffmpeg, mp4, int(ctx["nframes"] or 0), windows, win, seed, deep)
+    _lt = [float(r["t"]) for r in rows] if rows else None
+    vf, ngrab = check_video(ffmpeg, mp4, int(ctx["nframes"] or 0), windows, win, seed, deep,
+                            lyric_times=_lt)
     findings += vf
     findings += check_lyrics(rows, lrc_text, ref_rows, ctx["duration"],
                              x, sr if x is not None else 22050)

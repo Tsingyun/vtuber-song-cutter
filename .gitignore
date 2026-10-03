@@ -46,3 +46,6 @@ _tmpctc/
 
 # ---- 每日检测报告（含本机绝对路径，属于运行时产物）----
 reports/
+
+# agent 运行时目录
+.workbuddy/
