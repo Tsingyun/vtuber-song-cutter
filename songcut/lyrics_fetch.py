@@ -292,7 +292,17 @@ def text_overlap_ratio(lrc, ref_text, n=2):
     """
     if not ref_text:
         return None
-    a, b = _grams_of(lyric_body_text(lrc), n), _grams_of(ref_text, n)
+    body = lyric_body_text(lrc)
+    # 英文歌词：2-gram 结构被 FunASR 错字打得只剩噪声（实测 0.00），
+    # 改用「歌词的词有多少出现在演唱里」——字母序错但词的表层形式常有对上的部分。
+    if _latin_ratio(body) >= 0.5:
+        # lyric_body_text 会把空白也删掉，取词必须用保留空白的原文
+        raw = re.sub(r"\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]", "", lrc or "")
+        lw, rw = set(_latin_words(raw)), set(_latin_words(ref_text))
+        if not lw or not rw:
+            return 0.0
+        return len(lw & rw) / float(len(lw))
+    a, b = _grams_of(body, n), _grams_of(ref_text, n)
     if not a or not b:
         return 0.0
     return len(a & b) / float(min(len(a), len(b)))
