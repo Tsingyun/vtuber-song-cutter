@@ -344,7 +344,11 @@ function pickFfmpeg() {
       }
       await Promise.all(encJobs);
       const listFile = outAbs + '.concat.txt';
-      fs.writeFileSync(listFile, parts.map(pp => `file '${pp.replace(/\\/g, '/')}'`).join('\n') + '\n');
+      // ⚠ 路径里的单引号必须转义：ffmpeg concat 语法是 file '<path>'，
+      //   歌名含 ' 时（如 Don't Look Back In Anger）会被截断成半条路径。
+      //   demuxer 规定引号内的 ' 写成 '\''（闭引号 + 转义 + 重开引号）。
+      const escConcatPath = (p) => p.replace(/\\/g, '/').replace(/'/g, "'\\''");
+      fs.writeFileSync(listFile, parts.map(pp => `file '${escConcatPath(pp)}'`).join('\n') + '\n');
       const cc = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'warning',
                                 '-f', 'concat', '-safe', '0', '-i', listFile,
                                 '-c', 'copy', '-movflags', '+faststart', outAbs],
