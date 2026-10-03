@@ -250,19 +250,32 @@ def _latin_ratio(x):
     return len(re.findall(r"[A-Za-z]", x)) / float(max(1, len(x)))
 
 
+def _latin_words(x):
+    """从文本里抽出拉丁词序列。
+
+    ⚠️ 绝不能先过 _norm —— 它连空白一起删，英文歌词会被压成一个巨型"词"
+    （实测《Moon River》: "Moon river wider than a mile" → "moonriverwiderthanamile"，
+    词级 2-gram 只剩 1 个元素，locate 的 len(lg)<20 判据会把所有英文歌一票否决）。
+    """
+    # 标点/符号一律替换为空格，空白保留，用于分词
+    z = re.sub(r"[^A-Za-z0-9'\s]", " ", str(x or "")).lower()
+    return re.findall(r"[a-z0-9']+", z)
+
+
 def _grams_of(x, n=2):
     """拉丁文本 → 词级 n-gram；中文/日文 → 字符 n-gram。
 
     英文若用字符 2-gram，任意两段文字都会因 th/he/in/er 等常见字母对而高度重合
     （实测：《Lover》歌词 vs《奇异博士》英文对白 重合率 0.83，纯属噪声）。
     """
-    x = _norm(x or "")
-    if _latin_ratio(x) >= 0.5:
-        w = re.findall(r"[a-z0-9']+", x.lower())
+    xn = _norm(x or "")
+    if _latin_ratio(xn) >= 0.5:
+        w = _latin_words(x)
         if len(w) >= n:
             return set(tuple(w[i:i + n]) for i in range(len(w) - n + 1))
-        return set(w)
-    return {x[i:i + n] for i in range(max(0, len(x) - n + 1))}
+        # 词太少（短句/单词）→ 退化到字符 n-gram，避免只剩 0~1 个 gram
+        return {xn[i:i + n] for i in range(max(0, len(xn) - n + 1))}
+    return {xn[i:i + n] for i in range(max(0, len(xn) - n + 1))}
 
 
 def text_overlap_ratio(lrc, ref_text, n=2):

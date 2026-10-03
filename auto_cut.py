@@ -47,6 +47,10 @@ BLOCK_SEC = 2700.0          # LLM 分块长度（45 分钟）
 BLOCK_OVERLAP = 180.0
 MAX_BLOCKS = 10
 MENTION_MAX = 8             # 曲库歌名在整场被提及次数上限（超过视为常用词，不作为候选）
+LIB_SCAN_RECALL = 0.30      # 曲库全量粗筛阈值：宁可多选几个，交给 locate 精判
+                            # （实测：真歌英文 .57~.76 / 中文 .72，噪声英文 ≤.27 / 中文 ≤.07）
+LIB_SCAN_MAX = 1200         # 单场最多扫多少首曲库歌词
+LIB_SCAN_TOP = 12           # 粗筛后最多留几个候选做精判
 
 SYS_LYRIC = (
     "你是直播录播分析助手。任务：判断一段语音转写里是否存在主播完整演唱一首歌的段落，"
@@ -201,6 +205,43 @@ def build_candidates(entries, llm_win, workdir, use_llm=True, cfg=None):
     return cands
 
 
+def library_fallback(entries, workdir, log=print):
+    """兜底候选来源：拿曲库歌词回整场转写粗筛，找出真被唱过的歌名。
+
+    用于「LLM 说有唱歌，但所有候选都核验不过」的场景 —— 说明歌名没能生成，
+    而不是没唱。歌词走 _media_cache 缓存，第二次起几乎不联网。
+    """
+    idx = lyric_locate.window_index(entries)
+    if not idx:
+        return []
+    try:
+        lib = json.load(io.open(SC.SONG_LIB_JSON, encoding="utf-8"))
+    except Exception:
+        return []
+    names, seen = [], set()
+    for x in lib:
+        nm = (x.get("song_name") or "").strip()
+        ar = (x.get("artist") or "").strip()
+        if nm and nm not in seen:
+            seen.add(nm)
+            names.append((nm, ar))
+    hits = []
+    scanned = 0
+    for nm, ar in names[:LIB_SCAN_MAX]:
+        lrc, _info = fetch_lrc(nm, workdir, ar)
+        if not lrc:
+            continue
+        scanned += 1
+        r, _t, _mode = lyric_locate.fast_screen(idx, lrc)
+        if r >= LIB_SCAN_RECALL:
+            hits.append((r, nm))
+    hits.sort(reverse=True)
+    log("曲库全量粗筛：扫描 %d 首歌词，%.2f 以上 %d 首 → %s"
+        % (scanned, LIB_SCAN_RECALL, len(hits),
+           "、".join(n for _r, n in hits[:8]) or "无"))
+    return [{"name": nm, "src": "library-scan"} for _r, nm in hits[:LIB_SCAN_TOP]]
+
+
 def verify_candidate(cand, entries, workdir):
     """抓歌词 → 转写定位 → 重合率/时长核验。返回 (item, ok)。"""
     title = cand["name"]
@@ -222,9 +263,17 @@ def verify_candidate(cand, entries, workdir):
             % (loc["matched_lines"], loc["lyric_lines"], need_lines))
         return item, False
     ref_text = "\n".join(t for (a, b, t) in entries if loc["start"] - 2 <= a <= loc["end"] + 2)
-    ov = lyrics_fetch.text_overlap_ratio(lrc, ref_text)
+    if loc.get("latin_recall") is not None:
+        # 英文歌词：2-gram 重合率被 FunASR 错字打成 0.00，改看 locate 已算的词召回率
+        ov = loc["latin_recall"]
+        item["match_metric"] = "latin_recall"
+    else:
+        ov = lyrics_fetch.text_overlap_ratio(lrc, ref_text)
+        item["match_metric"] = "text_overlap"
     if (ov or 0.0) < OV_OK:
-        item["notes"].append("歌词与转写字面重合率 %.2f < %.2f，判为不匹配" % (ov or 0.0, OV_OK))
+        item["notes"].append(
+            "歌词与演唱内容重合度 %.2f < %.2f（判据=%s），判为不匹配"
+            % (ov or 0.0, OV_OK, item["match_metric"]))
         return item, False
 
     # 原曲官方时长：优先取歌词抓取时的网易云元数据，缺失再单独查一次
@@ -310,6 +359,8 @@ def main():
     ap.add_argument("--no-cut", action="store_true", help="只检测不出片")
     ap.add_argument("--asr", action="store_true", help="忽略上游 SRT，强制自建转写")
     ap.add_argument("--no-llm", action="store_true", help="跳过 LLM 分块找演唱窗口")
+    ap.add_argument("--no-scan", action="store_true",
+                    help="禁用曲库全量粗筛兜底（快，但英文歌场景下可能召回为 0）")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--chunk", type=float, default=30.0, help="自建转写分块秒数")
     ap.add_argument("--qc-strict", action="store_true", help="自检不通过则整体失败")
@@ -401,6 +452,25 @@ def main():
             else:
                 rep["rejected"].append({"title": item["title"], "source": item["source"],
                                         "why": "；".join(item["notes"]) or "核验未通过"})
+        if not ok_items and not args.no_scan:
+            # 常规候选一个没通过 → 很可能是歌名压根没进候选（英文歌典型：
+            # FunASR 歌词乱码 + 歌名从未被字面提及）。反过来拿曲库歌词回转写筛。
+            # 注意：不能只在 LLM 的 singing=True 时才兜底 —— GLM 降级后判定极不稳定
+            # （同一份转写两次分别给出 singing=True 与 False）。
+            SC.log("常规候选 %d 个全部未通过（LLM singing=%s）→ 启动曲库全量粗筛兜底"
+                   % (len(cands), singing))
+            for c in library_fallback(entries, workdir, log=SC.log):
+                item, ok = verify_candidate(c, entries, workdir)
+                if ok:
+                    ok_items.append(item)
+                    SC.log("  ✓ %s 核验通过（兜底）：%s~%s（%.2f，原曲 %ss）"
+                           % (item["title"], item["rough_start_hms"], item["rough_end_hms"],
+                              item["overlap"], item.get("orig_duration_s")))
+                else:
+                    rep["rejected"].append(
+                        {"title": item["title"], "source": item["source"],
+                         "why": "；".join(item["notes"]) or "核验未通过"})
+
         for it in dedupe(ok_items):
             it["tag"] = tag
             verified_all.append(it)
