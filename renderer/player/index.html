@@ -1975,7 +1975,9 @@ function drawArtLayer(){
 /* 封面：圆角 + 柔化边缘（无硬边框）。
    视觉重构后左栏为「封面 + 声波地平线 + 进度条」，右栏为「信息 + 歌词」，
    两栏垂直跨度接近，不出现大片空洞。 */
-const COVER_S = 600, COVER_X = 268, COVER_Y = 110;      // Editorial 主视觉：封面放大偏置
+const COVER_S = 560, COVER_X = 268, COVER_Y = 96;      // Editorial 主视觉：封面放大偏置
+/* 左栏版式预算（1920×1080 设计坐标）：封面 96~656 → 标题带 692~910 → colophon ~990，
+   进度条基线 1002。标题/封面/歌词列（x≥980）三者零重叠。 */
 /* 进度条几何：左栏水平基线，与封面左右边缘对齐；细线、低调、精确。
    绘制与命中测试共用此函数 → 缩放/窄屏下交互不会错位。 */
 function barGeom(){
@@ -2303,32 +2305,40 @@ function drawInfo(t){
   const twoLine = lines.length > 1;
   /* 字号：西文改用「实测字宽反算」——英文字符宽远窄于汉字，沿用中文的
      字数估算式（780/(n·1.08)）会把 10 字符的英文压到 72px，小得不合理。 */
-  const TITLE_W = 820;
+  const TITLE_W = 780;                     // 收在左栏内：x 96~876，距歌词列（x=980）留 ~104px 装订线
   let hf;
   if(hasCJK){
-    hf = twoLine ? 76 : Math.max(64, Math.min(168, Math.floor(780/(chs.length*1.08))));
+    hf = twoLine ? 76 : Math.max(64, Math.min(112, Math.floor(780/(chs.length*1.08))));
   }else{
-    /* 总宽 = Σ字宽 + hsp·(n−1)，字宽与 hsp 均正比于字号 → 宽度严格正比，一次比例即精确 */
+    /* 字号按「最宽行」实测反算。⚠ 旧实现只量末行——"Don't Look Back"（15字符）
+       会继承末行 "In Anger"（8字符）反算出的 168px，直接横穿封面与歌词列。 */
     const PF = 100, PSP = Math.round(PF*0.06);
     ctx.save();
     ctx.font = '600 '+PF+'px "HarmonyOS Sans SC",sans-serif';
-    let w0 = -PSP;
-    for(const ch of lines[lines.length-1]) w0 += ctx.measureText(ch).width + PSP;
+    let wMax = 0;
+    for(const ln of lines){
+      let w0 = -PSP;
+      for(const ch of ln) w0 += ctx.measureText(ch).width + PSP;
+      if(w0 > wMax) wMax = w0;
+    }
     ctx.restore();
-    hf = Math.max(56, Math.min(168, Math.floor(PF * TITLE_W / Math.max(1, w0))));
+    hf = Math.max(52, Math.min(112, Math.floor(PF * TITLE_W / Math.max(1, wMax))));
   }
   const hsp = Math.round(hf*0.06);
   const lineH = Math.round(hf*1.16);
-  const lastBase = 800;                                  // 末行基线恒定：标题顶部明确压入封面下缘约四成字身（叠压构图）
-  const l1Base = twoLine ? lastBase - lineH : lastBase;
+  /* 垂直位置：标题整体移到封面下方，与封面、歌词列零重叠。
+     （旧版 lastBase=800 恒定 + 最高 168px 的「压入封面下缘」叠压构图，
+      在长英文标题下会盖住封面大半并横穿歌词列——2026-10-03 用户反馈后废弃。）
+     上限 910：保证 colophon（lastBase+66~74 + 行高≈16）不越过进度条基线 1002。 */
+  const coverBottom = COVER_Y + COVER_S;
+  const lastBase = Math.min(
+    coverBottom + 36 + Math.round(hf*0.80) + (twoLine ? lineH : 0), 910);
+  const l1Base = lastBase - (twoLine ? lineH : 0);
   const enT = easeOutC((t - 0.16) / 1.0);
   ctx.font = '600 '+hf+'px "HarmonyOS Sans SC",sans-serif';
-  /* 标题自适应配色：按封面叠压带（下部）亮度切深/浅字，并加反向光晕/投影，
-     保证任意封面上标题清晰可读（黑封面→浅字+暗影；中间调→墨字+白晕） */
-  const lb = (typeof PAL.lumaBand === 'number') ? PAL.lumaBand : 1;
-  const tInk = lb < 0.40 ? { fill:'#F3EFE6', halo:'rgba(8,12,20,.50)' }
-             : lb < 0.60 ? { fill:INK.title, halo:'rgba(255,255,255,.42)' }
-             : { fill:INK.title, halo:'rgba(255,255,255,.14)' };
+  /* 标题配色：标题已不再压入封面，恒落在页面纸底上 → 固定深墨字 + 白晕。
+     （旧版按封面叠压带亮度切深/浅字，是「叠压构图」的配套设计，随之废弃） */
+  const tInk = { fill: INK.title, halo: 'rgba(255,255,255,.42)' };
   ctx.save();
   /* shadowBlur 在设备像素、不随 CTM 缩放（偏移量 shadowOffsetY 反之随 CTM，不用补偿） */
   ctx.shadowColor = tInk.halo; ctx.shadowBlur = 20*OUT_SCALE; ctx.shadowOffsetY = 3;
