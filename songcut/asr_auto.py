@@ -24,6 +24,11 @@ import numpy as np
 
 TAG_RE = re.compile(r"<\|[^|]*\|>")
 MUSIC_TAGS = ("BGM", "Music", "Sing", "Song")
+# ⚠ 音乐事件标记前缀：SenseVoice 判定「这段是伴奏/音乐」时会输出 <|BGM|> 等标签，
+#   以前只用它统计 music_chunks 就把标签抹掉了，歌词正文照写进字幕 →
+#   自动歌切无法区分「主播在唱」和「只是放了首BGM」，导致纯 BGM 被误判成演唱。
+#   现在保留为 cue 文本前缀（零宽、不破坏 (start,end,text) 三元组、不进 LLM 正文比对）。
+MUSIC_PREFIX = "\u266b"   # ♪
 # 纯标点/语气符：SenseVoice 在无内容时也会吐「。」
 PUNCT_ONLY = re.compile(u"[\\s，。！？、；：,.!?;:~\u3000\u2026\u2018\u2019\u201c\u201d'\"()（）\\[\\]【】]+")
 
@@ -104,12 +109,15 @@ def transcribe_to_srt(video, out_srt, chunk=30.0, lang="zh", max_sec=None,
             if not text:
                 continue
             tags = TAG_RE.findall(text)
-            if any(t.strip("<|>") in MUSIC_TAGS for t in tags):
+            is_music = any(t.strip("<|>") in MUSIC_TAGS for t in tags)
+            if is_music:
                 music_chunks += 1
             body = TAG_RE.sub("", text).strip()
             if not PUNCT_ONLY.sub("", body):          # 只剩标点的空句不写字幕
                 continue
-            cues.append((i * chunk, min((i + 1) * chunk, total), body))
+            # is_music 的块打上标记前缀（♪），下游据此判断「这段只有伴奏、没有主播人声」
+            cues.append((i * chunk, min((i + 1) * chunk, total),
+                         (MUSIC_PREFIX + body) if is_music else body))
             if not quiet and i % 50 == 0:
                 sys.stdout.write("  ASR %.0f/%.0fs（%d 句）\n" % ((i + 1) * chunk, total, len(cues)))
                 sys.stdout.flush()
@@ -129,8 +137,12 @@ def transcribe_to_srt(video, out_srt, chunk=30.0, lang="zh", max_sec=None,
 
     with io.open(out_srt, "w", encoding="utf-8") as f:
         for i, (s, e, t) in enumerate(cues, 1):
-            f.write("%d\n%s --> %s\n%s\n\n" % (i, _srt_time(s), _srt_time(e), t))
-    return {"srt": out_srt, "cues": len(cues), "chars": sum(len(t) for _a, _b, t in cues),
+            # ♪ 前缀只留在内存 cues 里供 auto_cut 判定用，不写进 SRT 正文
+            f.write("%d\n%s --> %s\n%s\n\n"
+                    % (i, _srt_time(s), _srt_time(e), t.lstrip(MUSIC_PREFIX)))
+    return {"srt": out_srt, "cues": len(cues),
+            "chars": sum(len(t.lstrip(MUSIC_PREFIX)) for _a, _b, t in cues),
+            "music_cues": sum(1 for _a, _b, t in cues if t.startswith(MUSIC_PREFIX)),
             "span_sec": round(total, 2), "chunks": n_chunks, "silent_chunks": skipped,
             "music_chunks": music_chunks, "music_sec": round(music_chunks * chunk, 1),
             "engine": "FunASR/SenseVoiceSmall", "elapsed_s": round(time.time() - t0, 1)}

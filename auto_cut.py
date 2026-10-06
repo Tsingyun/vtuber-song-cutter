@@ -40,9 +40,25 @@ from songcut import lyrics_fetch               # noqa: E402
 from songcut import lyric_locate               # noqa: E402
 from songcut import asr_auto                   # noqa: E402
 
+MUSIC_PREFIX = asr_auto.MUSIC_PREFIX           # ♪：cue 文本前缀，表示该块被判定为纯音乐/BGM
+
+
+def is_music_cue(text):
+    """cue 是否带音乐事件标记（上游 SRT 无此信息 → 一律 False，只在自建转写时可用）。"""
+    return bool(text) and text.startswith(MUSIC_PREFIX)
+
+
+def strip_music(text):
+    return (text or "").lstrip(MUSIC_PREFIX)
+
 OV_OK = getattr(lyrics_fetch, "LRC_TEXT_OV_OK", 0.18)
 DUR_UPPER = 1.15            # 区间/原曲时长 上限：超出按原曲时长收紧出点
-DUR_LOWER = 0.80            # 下限：低于此判「疑似切短」，只告警不自动延长
+# ⚠ 2026-10-06 由0.80 收紧到 0.55：低于此不再自动出片，只标「疑似·待人工确认」。
+#   原 0.80 太松 → 「只是放了首 BGM、她跟着哼两句」也能过（span 通常只有原曲 20~40%）。
+DUR_LOWER = 0.55
+SPAN_RATIO_MIN = 0.40       # 可定位歌词跨度/原曲 时长下限：低于此判「没真正唱」
+# 疑似演唱区间前后 ±N 秒内若无任何转写 → 判为孤立纯音频（更像 BGM；用户提出）
+NEAR_CUE_SEC = 60.0
 BLOCK_SEC = 2700.0          # LLM 分块长度（45 分钟）
 BLOCK_OVERLAP = 180.0
 MAX_BLOCKS = 10
@@ -276,6 +292,62 @@ def verify_candidate(cand, entries, workdir):
             % (ov or 0.0, OV_OK, item["match_metric"]))
         return item, False
 
+    # ==== 闸门 4：区分「她唱」与「只放 BGM」 ====
+    # 实测教训（10-01/10-02/10-05 三场真实数据）：**逐句文本分类原理性失效**
+    #   · BGM 里的歌词与她唱的歌词在转写文本上完全一样，无法区分；
+    #   · FunASR 中文错字多（守候→守住/发芽→发茅），单句 2-gram 命中率极低
+    #     （《泡泡》真唱段 16/16 句被误判成「说话」）；
+    #   · 字幕句长/间隔结构也无区分度（真唱 34.9 字 vs 闲聊 50.9 字，都是长句）。
+    # ⇒ 改用两条可靠判据：
+    #   4a. ASR 音乐事件标签（自建转写可用；上游 SRT 无此信息 → 恒为 0）
+    #   4b. 存在性判据（用户提出：放 BGM 时她通常同时在说话）——
+    #       真唱段前后一定有她的说话；孤立的纯音频更像在播放 BGM。
+    win = [(a_, b_, strip_music(t)) for (a_, b_, t) in entries
+           if loc["start"] - 2 <= a_ <= loc["end"] + 2]
+
+    # ---- 闸门 4a：纯音乐标签 ----
+    music_ratio = (sum(1 for (a_, _b_, t) in entries
+                       if loc["start"] - 2 <= a_ <= loc["end"] + 2 and is_music_cue(t))
+                   / float(len(win))) if win else 0.0
+    item["music_ratio"] = round(music_ratio, 3)
+    item["gate4_music"] = "PASS"
+    if music_ratio >= 0.8:
+        item["gate4_music"] = "FAIL"
+        item["notes"].append(
+            "区间内 %.0f%% 的转写块被 ASR 标记为纯音乐（<|BGM|>）：只有伴奏没有主播人声"
+            % (music_ratio * 100))
+        return item, False
+
+    # ---- 闸门 4b：前后说话存在性 ----
+    if entries:
+        LO, HI = max(0.0, loc["start"] - NEAR_CUE_SEC), loc["end"] + NEAR_CUE_SEC
+        near = [t for (a_, _b_, t) in entries if LO <= a_ <= HI and t.strip()]
+        item["nearby_cues"] = len(near)
+        item["gate4_near"] = "PASS" if near else "FAIL"
+        if not near:
+            item["notes"].append(
+                "疑似演唱区间前后 %ds 内没有任何转写内容：孤立的纯音频，"
+                "更像在播放 BGM 而非主播演唱" % int(NEAR_CUE_SEC))
+            return item, False
+
+    # ---- 闸门 5：歌词版本一致性 ----
+    # 网易云同一首歌可能返回完全不同的版本（实测搜「泡泡」拿到片头曲
+    # "我们吹呀吹"，主播唱的是 "告诉我吧告诉我吧"）→ 文本判据全部失真，
+    # 会「真歌唱不出、假歌反而通过」。用区间转写与歌词的整体重合做版本核对。
+    if win:
+        g_win = lyric_locate.grams("\n".join(t for (_a, _b, t) in win))
+        lg_all = lyric_locate.grams("\n".join(t for (_t, t) in lyric_locate.lrc_lines(lrc)))
+        if len(g_win) >= 5 and len(lg_all) >= 20:
+            ver = len(g_win & lg_all) / float(len(g_win))
+            item["lyric_version_ov"] = round(ver, 3)
+            item["gate5_version"] = "PASS"
+            if ver < 0.06:
+                item["gate5_version"] = "FAIL"
+                item["notes"].append(
+                    "区间转写与歌词整体重合仅 %.0f%%：抓到的歌词很可能是**别的版本**，"
+                    "判为不可核验（避免真歌漏/假歌过）" % (ver * 100))
+                return item, False
+
     # 原曲官方时长：优先取歌词抓取时的网易云元数据，缺失再单独查一次
     ms = info.get("netease_duration_ms")
     orig = round(ms / 1000.0, 1) if ms else lyric_locate.song_duration(title, hint or "")
@@ -298,9 +370,14 @@ def verify_candidate(cand, entries, workdir):
             item["notes"].append("演唱区 %.0fs 长于原曲 %.0fs（%.0f%%）→ 已按原曲时长定出点，"
                                  "尾部的加唱/闲聊不计入" % (loc["span_s"], orig, (ratio - 1) * 100))
         elif ratio < DUR_LOWER:
-            item["notes"].append("可辨认演唱区 %.0fs / 原曲 %.0fs = %.0f%%："
-                                 "部分段落 ASR 未能辨认（常见），出点已按原曲时长给定"
-                                 % (loc["span_s"], orig, ratio * 100))
+            # 闸门 3：比例过低不再自动出片（以前只告警 → 纯 BGM 假歌蒙混过关）
+            item["notes"].append(
+                "可辨认演唱区 %.0fs / 原曲 %.0fs = %.0f%% < %d%%：判为未真正演唱，"
+                "不自动出片（可能是只放 BGM 或仅哼唱）"
+                % (loc["span_s"], orig, ratio * 100, int(DUR_LOWER * 100)))
+            return item, False
+        elif ratio < SPAN_RATIO_MIN:
+            item["notes"].append("演唱跨度 %.0f%% 偏低，仅作备注" % (ratio * 100))
     return item, True
 
 
