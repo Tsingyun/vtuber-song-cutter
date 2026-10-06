@@ -57,7 +57,7 @@ DUR_UPPER = 1.15            # 区间/原曲时长 上限：超出按原曲时长
 #   原 0.80 太松 → 「只是放了首 BGM、她跟着哼两句」也能过（span 通常只有原曲 20~40%）。
 DUR_LOWER = 0.55
 SPAN_RATIO_MIN = 0.40       # 可定位歌词跨度/原曲 时长下限：低于此判「没真正唱」
-# 疑似演唱区间前后 ±N 秒内若无任何转写 → 判为孤立纯音频（更像 BGM；用户提出）
+# 疑似演唱区间前后 ±N 秒内的转写条数（仅记录，不参与否决，见闸门 4c）
 NEAR_CUE_SEC = 60.0
 BLOCK_SEC = 2700.0          # LLM 分块长度（45 分钟）
 BLOCK_OVERLAP = 180.0
@@ -67,6 +67,14 @@ LIB_SCAN_RECALL = 0.30      # 曲库全量粗筛阈值：宁可多选几个，�
                             # （实测：真歌英文 .57~.76 / 中文 .72，噪声英文 ≤.27 / 中文 ≤.07）
 LIB_SCAN_MAX = 1200         # 单场最多扫多少首曲库歌词
 LIB_SCAN_TOP = 12           # 粗筛后最多留几个候选做精判
+
+# ==== 「她同时在讲别的事」判据（用户 2026-10-06 提出，BGM 误判治理核心）====
+# 播 BGM 时她通常同时在说话，FunASR 会把讲的内容一并转写 → 窗口内非歌词语音占比很高。
+# 真唱时窗口内几乎全是歌词。实测：假唱 You(=I) 100% / 173s 一整段；真歌 0~30.5% / 最长 15s。
+# ⚠ 只统计**时长占比**与**最长连续段**，不逐句下结论 —— 逐句分类已被实测否决
+#   （FunASR 中文错字会把真唱段 16/16 句误判成说话，见 verify_candidate 闸门 4 注释）。
+NONLYRIC_RATIO_MAX = 0.55   # 窗口内非歌词语音时长占比上限
+NONLYRIC_RUN_MAX = 45.0     # 单段连续非歌词语音上限（秒）
 
 SYS_LYRIC = (
     "你是直播录播分析助手。任务：判断一段语音转写里是否存在主播完整演唱一首歌的段落，"
@@ -298,10 +306,10 @@ def verify_candidate(cand, entries, workdir):
     #   · FunASR 中文错字多（守候→守住/发芽→发茅），单句 2-gram 命中率极低
     #     （《泡泡》真唱段 16/16 句被误判成「说话」）；
     #   · 字幕句长/间隔结构也无区分度（真唱 34.9 字 vs 闲聊 50.9 字，都是长句）。
-    # ⇒ 改用两条可靠判据：
+    # ⇒ 改用两条**时长级**判据（不逐句下结论）：
     #   4a. ASR 音乐事件标签（自建转写可用；上游 SRT 无此信息 → 恒为 0）
-    #   4b. 存在性判据（用户提出：放 BGM 时她通常同时在说话）——
-    #       真唱段前后一定有她的说话；孤立的纯音频更像在播放 BGM。
+    #   4b.「她同时在讲别的事」（用户提出）：播 BGM 时她通常同时说话，那段时间的
+    #       转写内容是**她在讲的事**而非歌词 → 窗口内非歌词语音时长占比 + 最长连续段。
     win = [(a_, b_, strip_music(t)) for (a_, b_, t) in entries
            if loc["start"] - 2 <= a_ <= loc["end"] + 2]
 
@@ -318,17 +326,46 @@ def verify_candidate(cand, entries, workdir):
             % (music_ratio * 100))
         return item, False
 
-    # ---- 闸门 4b：前后说话存在性 ----
+    # ---- 闸门 4b：她同时在讲别的事（区分真唱 / 只放 BGM）----
+    # 只看时长占比与最长连续段，不逐句判定（逐句已被实测否决，见上方注释）。
+    prof = lyric_locate.speech_profile(entries, lrc, loc["start"], loc["end"])
+    item["nonlyric_ratio"] = prof["nonlyric_ratio"]
+    item["nonlyric_max_run_s"] = prof["max_run_s"]
+    item["nonlyric_runs"] = prof["runs"][:6]
+    item["window_speech_s"] = prof["speech_s"]
+    item["gate4_speech"] = "PASS"
+    ratio, run = prof["nonlyric_ratio"], prof["max_run_s"]
+    if prof["speech_s"] <= 0:
+        # 窗口内一条转写都没有 → 上游 SRT 缺这段，只能交给音频判据，不在这里否决
+        item["gate4_speech"] = "SKIP"
+    elif ratio > NONLYRIC_RATIO_MAX:
+        item["gate4_speech"] = "FAIL"
+        item["notes"].append(
+            "演唱窗口内 %.0f%% 的语音（%.0f/%.0fs）匹配不上歌词，最长连续 %.0fs："
+            "这段时间她在**讲别的事**（播 BGM 时的解说/闲聊），不是在唱这首歌"
+            % (ratio * 100, prof["nonlyric_s"], prof["speech_s"], run))
+        return item, False
+    elif run > NONLYRIC_RUN_MAX:
+        item["gate4_speech"] = "FAIL"
+        item["notes"].append(
+            "演唱窗口内有一段连续 %.0fs 的非歌词语音：她在讲别的事，不是只放 BGM 就是在唱别的"
+            % run)
+        return item, False
+    elif ratio > NONLYRIC_RATIO_MAX * 0.6 or run > NONLYRIC_RUN_MAX * 0.6:
+        # 逼近阈值 → 不否决，但写进报告供人工判断（宁可疑似不可漏）
+        item["gate4_speech"] = "WARN"
+        item["notes"].append(
+            "窗口内非歌词语音 %.0f%%、最长连续 %.0fs，接近 BGM 阈值（%d%% / %ds），"
+            "已标为待人工确认" % (ratio * 100, run, int(NONLYRIC_RATIO_MAX * 100),
+                                  int(NONLYRIC_RUN_MAX)))
+
+    # ---- 闸门 4c：前后说话存在性（弱信号，仅记录）----
+    # ⚠ 早期版本把这条当否决闸门（前后无转写→判BGM），方向与用户判据相反且会误杀：
+    #   真唱段前后本来就可能是纯伴奏。保留为记录项，不参与否决。
     if entries:
         LO, HI = max(0.0, loc["start"] - NEAR_CUE_SEC), loc["end"] + NEAR_CUE_SEC
-        near = [t for (a_, _b_, t) in entries if LO <= a_ <= HI and t.strip()]
-        item["nearby_cues"] = len(near)
-        item["gate4_near"] = "PASS" if near else "FAIL"
-        if not near:
-            item["notes"].append(
-                "疑似演唱区间前后 %ds 内没有任何转写内容：孤立的纯音频，"
-                "更像在播放 BGM 而非主播演唱" % int(NEAR_CUE_SEC))
-            return item, False
+        item["nearby_cues"] = len([t for (a_, _b_, t) in entries
+                                   if LO <= a_ <= HI and t.strip()])
 
     # ---- 闸门 5：歌词版本一致性 ----
     # 网易云同一首歌可能返回完全不同的版本（实测搜「泡泡」拿到片头曲
@@ -550,10 +587,21 @@ def main():
 
         for it in dedupe(ok_items):
             it["tag"] = tag
+            # 闸门 4b 判为 WARN（非歌词语音接近 BGM 阈值）→ 只标疑似，不自动出片。
+            # 与 10-02「泡泡」定调一致：宁可标疑似留人工确认，也不出一片错歌。
+            if it.get("gate4_speech") == "WARN":
+                it["needs_review"] = True
             verified_all.append(it)
 
     if args.limit:
         verified_all = verified_all[:args.limit]
+
+    auto_list = [it for it in verified_all if not it.get("needs_review")]
+    if auto_list:
+        verified_all = auto_list
+    elif verified_all:
+        rep["singing"]["note"] = ("%d 首核验通过但「非歌词语音占比」接近 BGM 阈值，"
+                                  "已全部标为待人工确认，本次不出片" % len(verified_all))
 
     rep["singing"]["method"] = ("LLM 分块找演唱窗口（只摘唱词不猜歌名）→ 网易云歌词检索定歌名 "
                                 "→ 歌词回整场转写定位区间 → 重合率/原曲时长核验")

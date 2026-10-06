@@ -296,6 +296,95 @@ def _latin_locate(entries, lines):
             "intro_s": round(lines[0][0], 2) if lines else 0.0}
 
 
+# ---------------- 「她同时在讲别的事」判据（区分真唱 vs 只放 BGM） ----------------
+# 用户提出（2026-10-06）：播BGM 时她通常同时在说话，FunASR 会把那段时间她在讲的内容
+# 也转写出来。真唱时窗口内几乎全是歌词；只放 BGM 时窗口内大部分是「非歌词语音」。
+#
+# ⚠ 与已否决方案的差别：早先试过**逐句**问「这句算不算歌词」，原理性失效 ——
+#   BGM 里的歌词与她唱的歌词文本完全一样，且 FunASR 中文错字会让真唱段 16/16 句被
+#   误判成说话（逐句 chat_ratio 会**全杀真歌**）。本判据只统计**时长占比**和
+#   **最长连续段**，不逐句下结论，阈值宽容（真歌最高 30.5%，假唱 100%）。
+NONLYRIC_HIT_THR = 0.45   # 单句命中歌词的阈值（与 locate 的 hit_thr 一致）
+NONLYRIC_MERGE_GAP = 8.0  # 相邻非歌词句间隔 ≤ 此值算同一段连续说话
+# 窗口内非歌词语音时长占比上限：超过则判「她在讲别的事，不是只放 BGM 就是没唱」
+NONLYRIC_RATIO_MAX = 0.55
+# 单段连续非歌词语音上限（秒）：BGM 误判实测 173s 一整段；Moon River 真唱最长 15s
+NONLYRIC_RUN_MAX = 45.0
+# 判定「非歌词语音」需要的最小时长，太短的（<1s，多为标点/呼吸）不计
+NONLYRIC_MIN_CUE = 1.0
+
+
+def speech_profile(entries, lrc_text, start, end, hit_thr=NONLYRIC_HIT_THR,
+                   pad=2.0):
+    """统计演唱窗口内「非歌词语音」的时长占比与最长连续段。
+
+    返回 dict:
+      speech_s      窗口内转写语音总时长
+      lyric_s       能匹配上歌词的时长
+      nonlyric_s    匹配不上歌词的时长
+      nonlyric_ratio非歌词时长 / 总时长
+      max_run_s     最长一段连续非歌词语音（秒）
+      runs          [(起, 止)] 每段连续非歌词语音
+      hit_cues / total_cues
+    空窗口或无歌词 → nonlyric_ratio=1.0（视作「整段都在讲别的事」，交给上层否决）。
+    """
+    lines = lrc_lines(lrc_text or "")
+    body = "\n".join(t for _t, t in lines)
+    out = {"speech_s": 0.0, "lyric_s": 0.0, "nonlyric_s": 0.0, "nonlyric_ratio": 1.0,
+           "max_run_s": 0.0, "runs": [], "hit_cues": 0, "total_cues": 0,
+           "metric": "none"}
+    if not lines or not entries:
+        return out
+    latin = latin_ratio(body) >= LATIN_BODY_TH
+    out["metric"] = "latin_recall" if latin else "text_overlap"
+    lg = grams(body)
+    lw_all = set(latin_words(body))
+    lo, hi = float(start) - pad, float(end) + pad
+    win = [(a, b, t) for (a, b, t) in entries if lo <= a <= hi]
+    if not win:
+        return out
+    speech = sum(b - a for a, b, _t in win)
+    if speech <= 0:
+        return out
+    lyric_s, rows = 0.0, []
+    for a, b, t in win:
+        if latin:
+            w = set(latin_words(t))
+            p = (len(w & lw_all) / float(len(w))) if len(w) >= 3 else None
+        else:
+            g = grams(t)
+            p = (len(g & lg) / float(len(g))) if len(g) >= 3 else None
+        hit = p is not None and p >= hit_thr
+        if hit:
+            lyric_s += b - a
+        rows.append((a, b, hit, (b - a) >= NONLYRIC_MIN_CUE))
+    # 只把「够长」的非歌词句计入连续段（短句多为标点/呼吸，不构成「在讲别的事」）
+    runs, cur = [], None
+    for a, b, hit, long_enough in rows:
+        if not hit and long_enough:
+            if cur is not None and a - cur[1] <= NONLYRIC_MERGE_GAP:
+                cur = (cur[0], b)
+            else:
+                if cur is not None:
+                    runs.append(cur)
+                cur = (a, b)
+        else:
+            if cur is not None:
+                runs.append(cur)
+            cur = None
+    if cur is not None:
+        runs.append(cur)
+    nonlyric_s = speech - lyric_s
+    out.update({"speech_s": round(speech, 2), "lyric_s": round(lyric_s, 2),
+                "nonlyric_s": round(nonlyric_s, 2),
+                "nonlyric_ratio": round(nonlyric_s / speech, 3),
+                "max_run_s": round(max([b - a for a, b in runs], default=0.0), 2),
+                "runs": [[round(a, 2), round(b, 2)] for a, b in runs],
+                "hit_cues": sum(1 for r in rows if r[2]),
+                "total_cues": len(rows)})
+    return out
+
+
 def locate(entries, lrc_text, hit_thr=0.45, gap=15.0, min_run=40.0, line_jac=0.7):
     """在整场转写里定位「真正在唱这首歌」的那一段。
 
