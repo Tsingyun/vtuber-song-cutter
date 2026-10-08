@@ -1250,6 +1250,12 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         tl_src = "override"
         log("  歌词时间轴: 使用 --lrc-override 指定文件（%d 行，跳过对齐链）"
             % len(lrc.splitlines()))
+        # ⚠ override 文件按「cut 相对时间」书写，与 dtw/asr/ctc 三条路径口径一致；
+        # 片头补静音会让成片时间轴整体后移 head_pad，这里必须同步平移，
+        # 否则渲染出的歌词会比人声早 head_pad（0.93s 级），QC 的 L09 也会系统性偏差。
+        if lrc and head_pad > 0:
+            lrc = _shift_lrc(lrc, head_pad)
+            log("  歌词时间轴: 片头补静音 %.2fs → 歌词整体后移（override 口径对齐）" % head_pad)
     if tl_src == "raw" and lrc and sync.get("ok"):
         lrc2 = timeline_sync.render_lrc(sync, lrc, head_pad)
         if lrc2:
