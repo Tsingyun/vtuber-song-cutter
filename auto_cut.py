@@ -53,6 +53,10 @@ def strip_music(text):
 
 OV_OK = getattr(lyrics_fetch, "LRC_TEXT_OV_OK", 0.18)
 DUR_UPPER = 1.15            # 区间/原曲时长 上限：超出按原曲时长收紧出点
+# ⚠ 时长可信度上限（2026-10-08）：实测演唱跨度超过「官方时长 ×1.35」→ 该时长必错，
+#   拒绝自动出片（网易云限流时 LRCLIB 会返回离谱值，如《反方向的钟》131.3 vs 实际 258）。
+#   真唱跨度 ≤ 官方时长 + 现场加唱（通常 +10~20%），1.35 留足余量。
+DUR_TRUST_MAX = 0.35
 # ⚠ 2026-10-06 由0.80 收紧到 0.55：低于此不再自动出片，只标「疑似·待人工确认」。
 #   原 0.80 太松 → 「只是放了首 BGM、她跟着哼两句」也能过（span 通常只有原曲 20~40%）。
 DUR_LOWER = 0.55
@@ -63,10 +67,18 @@ BLOCK_SEC = 2700.0          # LLM 分块长度（45 分钟）
 BLOCK_OVERLAP = 180.0
 MAX_BLOCKS = 10
 MENTION_MAX = 8             # 曲库歌名在整场被提及次数上限（超过视为常用词，不作为候选）
-LIB_SCAN_RECALL = 0.30      # 曲库全量粗筛阈值：宁可多选几个，交给 locate 精判
-                            # （实测：真歌英文 .57~.76 / 中文 .72，噪声英文 ≤.27 / 中文 ≤.07）
+# ==== 兜底扫描范围（2026-10-08，为修 10-07《反方向的钟》整首漏切）====
+# 旧设计：library_fallback 只在「常规候选一个都没通过」时触发。10-07 常规候选
+# 命中了《爱情讯息》→ ok_items 非空 → 兜底**根本没跑**，于是同场第二首
+#《反方向的钟》（ASR 报成「反风飒钟」，字面提及匹配失效）永远进不了候选池。
+# ⇒ 改成「候选被核验掉的歌曲数 > 0 就跑兜底」：只要有一首歌没被识别出来，
+#   就说明歌名生成环节漏了，必须全量扫一遍曲库歌词。
+#代价是每场多扫一次曲库（1246 首，走 _media_cache 缓存，第二次起几乎不联网）。
 LIB_SCAN_MAX = 1200         # 单场最多扫多少首曲库歌词
 LIB_SCAN_TOP = 12           # 粗筛后最多留几个候选做精判
+LIB_SCAN_RECALL = 0.30      # 曲库全量粗筛阈值：宁可多选几个，交给 locate 精判
+                            # （实测：真歌英文 .57~.76 / 中文 .72，噪声英文 ≤.27 / 中文 ≤.07）
+                            # ⚠ 这是**唯一**可靠的漏切信号来源，别再试图用文本特征替代（见下方注释）。
 
 # ==== 「她同时在讲别的事」判据（用户 2026-10-06 提出，BGM 误判治理核心）====
 # 播 BGM 时她通常同时在说话，FunASR 会把讲的内容一并转写 → 窗口内非歌词语音占比很高。
@@ -182,7 +194,19 @@ def llm_windows(cfg, entries, block=BLOCK_SEC, overlap=BLOCK_OVERLAP, max_blocks
 
 
 def mention_candidates(entries, lib_names):
-    """曲库歌名在转写中被提及 → 补充候选（只作候选，区间仍由歌词定位决定）。"""
+    """曲库歌名在转写中被提及 → 补充候选（只作候选，区间仍由歌词定位决定）。
+
+    ⚠ 2026-10-08 教训：**不要在这里做模糊/同音容错**。
+    为修 10-07《反方向的钟》漏切（她报「我有反风飒钟」，字面匹配失效），
+    实测过三种模糊方案全部失败：
+      ① 字符集覆盖 ≥75%           → 候选 42 → 255（星星/大风吹 到处命中）
+      ② 顺序子序列 ≥60%（≥3字）   → 候选 42 → 128（长闲聊句乱凑）
+      ③ 歌单序列（同句≥3 首）     → 3720s 那句因夹大量英文电影解说反而没被认出，
+                                      13840s 英文长句反而「命中 24 首」
+    根本原因：文本相似度不是识别判据，**歌词定位才是**。
+    同音错字问题由 `library_fallback`（拿曲库歌词回全曲定位）统一解决 ——
+    见`main` 里「兜底常开」的触发条件修复。
+    """
     hits = {}
     for nm in lib_names:
         if len(nm) < 2:
@@ -205,7 +229,13 @@ def fetch_lrc(title, workdir, artist_hint=None):
 
 
 def build_candidates(entries, llm_win, workdir, use_llm=True, cfg=None):
-    """把「LLM 摘出的唱词」和「转写提及的曲库歌名」汇成候选歌名列表。"""
+    """把「LLM 摘出的唱词」和「转写提及的曲库歌名」汇成候选歌名列表。
+
+    ⚠ 2026-10-08：提及候选分两档，避免 ASR 同音错字造成的漏切被噪声淹没。
+      模糊命中（mention-fuzzy）**先用本地歌词缓存做 locate 快筛**：
+      唱词在整场转写里定位不出来的，直接丢弃 —— 这让「你在玩你的游戏」
+      凑出「如果的事」这类噪声在**零联网成本**下被筛掉。
+    """
     cands, seen = [], set()
 
     def add(name, src, lines=None):
@@ -227,6 +257,29 @@ def build_candidates(entries, llm_win, workdir, use_llm=True, cfg=None):
     for nm in mention_candidates(entries, names):
         add(nm, "mention")
     return cands
+
+
+def _overlaps(a1, a2, b1, b2, min_overlap=30.0):
+    """两个演唱区间是否**实质性**重叠（重叠时长须≥ min_overlap 秒才算同一段）。
+
+    兜底常会把同一段识别成不同歌名（同名不同版/剪辑版），需要去重；
+    但**擦边不算重叠**：两首歌前后紧接、或同一首歌被间奏切成两段时，
+    边界只有十几秒交叠，应当视为两首不同的歌各出各的片。
+    ⇒ 判据用「交叠时长」而不是「区间相交」：
+         overlap = min(a2,b2) - max(a1,b1)，> 0 时取该值；≤0 视为不相交。
+    """
+    ov = min(a2, b2) - max(a1, b1)
+    return ov >= min_overlap
+
+
+# ⚠ 已否决的漏切信号（2026-10-08 实测，勿再尝试，代码已移除）：
+#   「转写里存在未被已识别歌曲覆盖的成段歌词样文字 → 必有漏切」
+#   想法：用转写自身结构特征（连续≥4 条、总时长≥45s、平均每条≥11 字、
+#   句间隔≤14s）找出没被认出来的演唱。
+#   实测：10-07 整场跑出 **31 段全部误报**（闲聊段同样长句密集）。
+#   ⇒ 与 10-06 的教训一致：FunASR 转写里「歌词」与「闲聊」在**文本结构上
+#     不可区分**（34.9 字/句 vs 50.9 字/句都是长句），逐句/分段结构判据原理性失效。
+#   ⇒ 唯一可靠的漏切信号是 `library_fallback`：**歌词定位**天然过滤噪声。
 
 
 def library_fallback(entries, workdir, log=print):
@@ -387,7 +440,11 @@ def verify_candidate(cand, entries, workdir):
 
     # 原曲官方时长：优先取歌词抓取时的网易云元数据，缺失再单独查一次
     ms = info.get("netease_duration_ms")
+    src_dur = "netease"
     orig = round(ms / 1000.0, 1) if ms else lyric_locate.song_duration(title, hint or "")
+    if not orig and not ms:
+        src_dur = "lrclib/guess"
+    item["orig_duration_src"] = src_dur
     if orig:
         item["orig_duration_s"] = round(orig, 1)
     # 起点：首句唱到的时刻 − 原曲前奏（伴奏进来的那一段）；终点：起点 + 原曲时长
@@ -400,6 +457,26 @@ def verify_candidate(cand, entries, workdir):
                             "raw": [loc["raw_start"], loc["raw_end"]]},
                  "rough_start": round(rough_start, 2), "rough_end": round(rough_end, 2),
                  "rough_start_hms": hms(rough_start), "rough_end_hms": hms(rough_end)})
+
+    # ==== 时长可信度闸门（2026-10-08，为修「原曲时长错误导致切短」）====
+    # 实测：网易云限流时 orig 来自 LRCLIB，对《反方向的钟》返回 **131.3s**
+    #   （真实 4:18=258s）。于是 rough_end = 3756.5+131.3 = 3887.8，
+    #   而开唱在 3782.9 → **成片只剩 105s，一半歌被切掉**，且全程无任何报错。
+    #
+    # 判据：实测演唱跨度 span_s 超过「官方时长 × (1 + DUR_TRUST_MAX)」→ 该时长
+    #   不可能是官方时长。真唱跨度必然 ≤ 官方时长 + 少量加唱，DUR_TRUST_MAX=0.35
+    #   已留足余量（现场加唱副歌通常 +10~20%）。标定见 tests：
+    #   《反方向的钟》198.3s vs 131.3s → 1.51✗ 拒绝（比值 1.51 > 1.35）
+    #   《爱情讯息》219.7/280.7=0.78 ✓  《泡泡》217.3/214.0=1.02 ✓  全部正常放行。
+    if orig and loc["span_s"] > orig * (1.0 + DUR_TRUST_MAX):
+        item["notes"].append(
+            "实测演唱 %.0fs 明显长于查到的原曲时长 %.0fs（来源 %s，比值 %.2f > %.2f）——"
+            "该时长不可能是官方时长（真唱跨度应接近官方时长），已拒绝自动出片，"
+            "须人工核定切点后用 segments 的 cut_start_abs/cut_end_abs 重跑"
+            % (loc["span_s"], orig, src_dur, loc["span_s"] / max(1.0, orig),
+               1.0 + DUR_TRUST_MAX))
+        item["duration_suspect"] = True
+        return item, False
     if orig:
         ratio = loc["span_s"] / orig
         item["duration_ratio"] = round(ratio, 3)
@@ -566,24 +643,53 @@ def main():
             else:
                 rep["rejected"].append({"title": item["title"], "source": item["source"],
                                         "why": "；".join(item["notes"]) or "核验未通过"})
-        if not ok_items and not args.no_scan:
-            # 常规候选一个没通过 → 很可能是歌名压根没进候选（英文歌典型：
-            # FunASR 歌词乱码 + 歌名从未被字面提及）。反过来拿曲库歌词回转写筛。
-            # 注意：不能只在 LLM 的 singing=True 时才兜底 —— GLM 降级后判定极不稳定
-            # （同一份转写两次分别给出 singing=True 与 False）。
-            SC.log("常规候选 %d 个全部未通过（LLM singing=%s）→ 启动曲库全量粗筛兜底"
-                   % (len(cands), singing))
+
+        # ==== 兜底：默认执行（2026-10-08 修复 10-07《反方向的钟》整首漏切）====
+        # 三个版本都被实测推翻，这是最终形态：
+        #  ① 旧版 `if not ok_items`（常规候选全军覆没才扫）
+        #     10-07 实测：常规候选命中了《爱情讯息》→ ok_items 非空 → 兜底**根本没跑**，
+        #     而她同场唱的第二首《反方向的钟》因 ASR 把歌名听成「反风飒钟」（同音错字），
+        #     字面提及匹配 0 命中、LLM 摘词检索也没覆盖到 → 永久漏切。
+        #  ② 改为 `or len(win) > len(ok_items)`（LLM 窗口数 > 识别数就扫）
+        #     复测再次漏切：GLM 只报了 **1 个**窗口（首次报 2 个），1 > 1 为 False。
+        #     ⇒ **LLM 窗口数本身不可靠**（Google 429 降级到 GLM 后判定极不稳定）。
+        #  ③ 试过「转写里存在未被覆盖的成段歌词样文字 → 必定漏切」
+        #     实测 31 段误报 —— FunASR 转写里歌词与闲聊的**文本结构无法区分**
+        #     （长句密集这一特征闲聊同样满足），已实测否决，见 MEMORY。
+        #
+        # 最终：**兜底默认执行**。它是唯一靠「歌词定位」而非「文本相似度」的判据，
+        # 噪声天然被 locate 过滤（实测 1174 首里只 108 首入围粗筛、12 首进精判）。
+        # 代价：每场约 17 分钟（首次；歌词走 _media_cache，第二次起几乎不联网）。
+        # --no-scan 仍可显式关闭。
+        if not args.no_scan:
+            SC.log("启动曲库全量粗筛兜底（常规候选已通过 %d 首，LLM singing=%s）"
+                   % (len(ok_items), singing))
+            known = {lyric_locate.norm(i["title"]) for i in ok_items}
+            known_spans = [(i["rough_start"], i["rough_end"]) for i in ok_items]
             for c in library_fallback(entries, workdir, log=SC.log):
+                # 与已识别歌曲去重：同一首歌的重复版/同曲不同版本不重复出片
+                if lyric_locate.norm(c["name"]) in known:
+                    continue
                 item, ok = verify_candidate(c, entries, workdir)
-                if ok:
-                    ok_items.append(item)
-                    SC.log("  ✓ %s 核验通过（兜底）：%s~%s（%.2f，原曲 %ss）"
-                           % (item["title"], item["rough_start_hms"], item["rough_end_hms"],
-                              item["overlap"], item.get("orig_duration_s")))
-                else:
+                if not ok:
                     rep["rejected"].append(
                         {"title": item["title"], "source": item["source"],
                          "why": "；".join(item["notes"]) or "核验未通过"})
+                    continue
+                # 时间轴重叠检查：兜底常会把同一段识别成不同歌名
+                if any(_overlaps(item["rough_start"], item["rough_end"], s, e)
+                       for s, e in known_spans):
+                    SC.log("  ✗ %s 区间与已识别歌曲重叠，跳过" % item["title"])
+                    rep["rejected"].append(
+                        {"title": item["title"], "source": item["source"],
+                         "why": "演唱区间与已识别歌曲重叠（同一段被识别成不同歌名）"})
+                    continue
+                ok_items.append(item)
+                known.add(lyric_locate.norm(c["name"]))
+                known_spans.append((item["rough_start"], item["rough_end"]))
+                SC.log("  ✓ %s 核验通过（兜底）：%s~%s（%.2f，原曲 %ss）"
+                       % (item["title"], item["rough_start_hms"], item["rough_end_hms"],
+                          item["overlap"], item.get("orig_duration_s")))
 
         for it in dedupe(ok_items):
             it["tag"] = tag

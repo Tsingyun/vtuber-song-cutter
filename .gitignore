@@ -9,6 +9,8 @@ cuts/
 segments/
 transcript/out/
 _media_cache/
+_trash/
+# _trash/ = 重渲前的旧片备份（运行时产物，可安全删）
 kdocs_songs.json
 song_library.txt
 _render_job.json
