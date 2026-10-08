@@ -2408,6 +2408,40 @@ function drawInfo(t){
       });
       ctx.globalAlpha = 1;
     }
+
+    /* ② 歌曲注释（note）：档案信息行下方的一行小字，淡入跟随档案行。
+          编辑面板里的「歌曲注释」此前只写进输入框、主画面从不显示，
+          导致 segments JSON 里配好的文案完全看不到。
+          ⚠ 必须限宽：note 有人写成整段技术诊断（实测 200+ 字），fillText 不截断
+          会直接冲出画面右边界。超长时先缩字号（下限 9px），仍放不下则裁字加省略号。 */
+    const noteEl = $('noteText');
+    const noteTx = noteEl ? noteEl.value.trim() : '';
+    if(noteTx){
+      /* 坐标系是 W=1920 的逻辑像素（ctx 已按 OUT_SCALE 放大），
+         右边界对齐页脚的 1824（见drawSpaced right 对齐处），留 96px 外边距。 */
+      const NOTE_X = 96, NOTE_MAXW = 1824 - NOTE_X;
+      let nfs = 14, ntxt = noteTx;
+      ctx.font = 'italic 400 ' + nfs + 'px "HarmonyOS Sans SC",sans-serif';
+      if(ctx.measureText(ntxt).width > NOTE_MAXW){
+        while(nfs > 9 && ctx.measureText(ntxt).width > NOTE_MAXW){
+          nfs -= 0.5;
+          ctx.font = 'italic 400 ' + nfs + 'px "HarmonyOS Sans SC",sans-serif';
+        }
+        if(ctx.measureText(ntxt).width > NOTE_MAXW){          // 9px 还放不下 → 裁到边界
+          let lo = 0, hi = ntxt.length;
+          while(lo < hi){
+            const mid2 = (lo + hi + 1) >> 1;
+            if(ctx.measureText(ntxt.slice(0, mid2) + '…').width <= NOTE_MAXW) lo = mid2;
+            else hi = mid2 - 1;
+          }
+          ntxt = ntxt.slice(0, lo).trimEnd() + '…';
+        }
+      }
+      ctx.globalAlpha = en3 * 0.82;
+      ctx.fillStyle = 'rgba(30,40,54,.62)';
+      ctx.fillText(ntxt, NOTE_X, lastBase + 102);
+      ctx.globalAlpha = 1;
+    }
   }
 }
 
