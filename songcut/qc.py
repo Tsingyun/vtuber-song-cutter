@@ -51,6 +51,10 @@ except Exception:                       # pragma: no cover
 
 BLOCK, WARN, PASS = "BLOCK", "WARN", "PASS"
 
+# 切点自检阈值（D02）：ASR 对齐推出的「原曲起点 − 切点」，即切点相对原曲起点的误差。
+# 歌词轴会被对齐链自动纠正，所以画面对得上 ≠ 切点对；切点错了只有这个量会暴露。
+TL_OFFSET_WARN_S, TL_OFFSET_BLOCK_S = 3.0, 8.0
+
 # ── 判定阈值（集中放置，便于按机型/平台调整）─────────────────────────────
 TH = {
     # 规格
@@ -828,14 +832,39 @@ def run_qc(mp4, *, entry=None, lrc_text=None, ref_lrc_text=None, ffmpeg=None,
             _od = float(_od)
             _act = float(ctx["duration"])
             _dev = _act / _od if _od > 0 else 0.0
-            _ok = 0.85 <= _dev <= 1.10
+            # 下限由 0.85 收到 0.93：实测 −10% 的成片（掐掉 19.67s 前奏）竟擦边放行，
+            # 而「短了」几乎总是切点问题（前奏被掐），比「长了」更需要拦截。
+            _ok = 0.93 <= _dev <= 1.10
             findings.append(Finding(
                 "D01", "边界", "成片时长与原曲一致",
                 PASS if _ok else WARN, _ok,
                 "成片 %.1fs vs 原曲 %.1fs（%+.0f%%）" % (_act, _od, (_dev - 1) * 100),
                 {"actual_s": round(_act, 2), "orig_s": _od, "ratio": round(_dev, 3)},
-                "偏差超 ±10%%/±15%%：疑似混入歌后闲聊或现场加唱；"
-                "用 seg.cut_start_abs/cut_end_abs 人工核定切点后 --force 重渲"))
+                "短了优先查前奏是否被掐（看 D02 对齐偏移）；长了查是否混入歌后闲聊；"
+                "核定 seg.cut_start_abs/cut_end_abs 后 --force 重渲"))
+        except Exception:
+            pass
+
+    # D02: 切点自检 —— manifest.timeline_offset_s（ASR 对齐推出的「原曲起点 − 切点」）。
+    # 这是唯一能直接指认「前奏被掐 / 起点含多余静音」的量：歌词时间轴会被对齐链自动
+    # 纠正到正确位置，所以画面看起来完全正常；切点本身错了只有这个数会暴露。
+    # 实测案例 10-06《连名带姓》：偏移 −20.67s = 前奏 19.67s 被掐，画面上毫无异常。
+    _off = entry.get("timeline_offset_s")
+    if _off is not None:
+        try:
+            _off = float(_off)
+            _ao = abs(_off)
+            _dir = ("起点晚于原曲起点 → 前奏被掐掉" if _off < 0
+                    else "起点早于原曲起点 → 混入多余静音/说话")
+            findings.append(_f(
+                "D02", "边界", "切点与原曲起点对齐",
+                "对齐偏移 %+.2fs（%s）" % (_off, _dir),
+                _ao <= TL_OFFSET_WARN_S,
+                BLOCK if _ao > TL_OFFSET_BLOCK_S else WARN,
+                {"timeline_offset_s": round(_off, 2)},
+                "负值：seg.cut_start_abs 应改为「现切点 + 偏移」（前移），"
+                "并同步核对出点是否也漏了尾奏淡出；正值：起点过早，含多余静音/说话。"
+                "改后 --force 重渲"))
         except Exception:
             pass
 

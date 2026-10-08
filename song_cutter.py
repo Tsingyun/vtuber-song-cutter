@@ -72,6 +72,9 @@ _RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
 
 # 画面底部注释行的字数上限：只放得下一句短句（中文 ≈40 字）
 NOTE_MAX_CHARS = 40
+# 切点自检：ASR 对齐推出的「原曲起点 − 切点」超过此值 → 判切点没对齐。
+# 负值 = 起点晚于原曲起点（前奏被掐）；正值 = 起点早于原曲起点（混入多余静音/说话）。
+TL_OFFSET_WARN_S = 3.0
 MIN_SEC, MAX_SEC = 40, 900          # 单首合理区间
 LRC_OVERRIDE = ""                   # --lrc-override：人工核定的歌词时间轴
 PAD_START, PAD_END = 1.5, 2.0       # 边界留白（秒）
@@ -992,6 +995,7 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     #   C) ASR 对齐（降级）：FunASR 演唱行配对 + 聚类常数偏移；
     #   D) 原始时间轴（兜底）。
     tl_src = "raw"
+    tl_offset = None          # ASR 对齐推出的「原曲起点 − 切点」，用于切点自检
     if LRC_OVERRIDE and os.path.exists(LRC_OVERRIDE):
         lrc = io.open(LRC_OVERRIDE, encoding="utf-8").read()
         tl_src = "override"
@@ -1013,6 +1017,14 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
             lrc, ainfo = lyric_align.align_lrc(lrc, srt_entries, cs, ce)
             tl_src = "asr"
             log("  歌词时间轴: ASR 对齐降级（%s）" % ainfo.get("summary", "?"))
+            tl_offset = ainfo.get("offset_in_cut")
+            if tl_offset is not None and abs(tl_offset) > TL_OFFSET_WARN_S:
+                log("  ⚠ 切点自检：ASR 对齐偏移 %+.2fs（阈值 %.1fs）——疑切点未对齐：%s"
+                    % (tl_offset, TL_OFFSET_WARN_S,
+                       "起点晚于原曲起点，前奏被掐掉" if tl_offset < 0
+                       else "起点早于原曲起点，混入了额外静音/说话"))
+                log("     建议 seg.cut_start_abs = %.2f（现 %.2f，差 %+.2f）后 --force 重渲"
+                    % (cs + tl_offset, cs, tl_offset))
         else:
             log("  歌词时间轴: 无原曲对齐结果且无 SRT，保持原时间轴")
         if lrc and head_pad > 0:
@@ -1096,10 +1108,13 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         _od = round(_od / 1000.0, 1)
         _dev = (ce - cs) / _od
         log("  原曲时长比对: 成片 %.1fs vs 原曲 %.1fs（%+.0f%%）" % (ce - cs, _od, (_dev - 1) * 100))
-        if _dev > 1.10 or _dev < 0.85:
-            log("  ⚠ 时长偏差超 10%%：疑似混入歌后闲聊/现场加唱，需人工核定 seg.cut_start_abs/cut_end_abs 后 --force 重渲")
+        if _dev > 1.10 or _dev < 0.93:
+            log("  ⚠ 时长偏差超限（上限 +10%% / 下限 −7%%）：短了优先查前奏是否被掐"
+                "（比对官方 LRC 首行偏移），长了查是否混入歌后闲聊；"
+                "核定 seg.cut_start_abs/cut_end_abs 后 --force 重渲")
     return {"lrc_path": lrc_snap, "lrc_src_path": src_snap,
             "cut_start": cs, "cut_end": ce, "head_pad": round(head_pad, 3),
+            "timeline_offset_s": (round(tl_offset, 2) if tl_offset is not None else None),
             "orig_duration_s": (round(linfo["netease_duration_ms"] / 1000.0, 1)
                                 if linfo.get("netease_duration_ms") else None),
             "onset": round(onset_abs, 3) if onset_abs else None,
