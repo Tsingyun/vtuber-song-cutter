@@ -13,6 +13,8 @@ _trash/
 # _render_tmp/ = 渲染中间产物（mjpeg/分段mp4/concat），运行时产物，可整体删
 _render_tmp/
 # _trash/ = 重渲前的旧片备份（运行时产物，可安全删）
+# _cache/ = 准备阶段的结果缓存（LLM 分块窗口等，按 SRT 指纹失效，可整体删）
+_cache/
 kdocs_songs.json
 song_library.txt
 _render_job.json

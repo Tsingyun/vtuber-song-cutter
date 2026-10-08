@@ -1052,16 +1052,30 @@ def render_player_video(workdir, job, ffmpeg=None):
 
 
 
+_ART_DATAURL_CACHE = {"done": False, "val": None}
+
+
 def _art_dataurl():
-    """装饰立绘 → dataURL（未配置或文件缺失返回 None，播放器自动跳过该图层）。"""
+    """装饰立绘 → dataURL（未配置或文件缺失返回 None，播放器自动跳过该图层）。
+
+    结果按进程缓存：这是一张固定不变的静态立绘，base64 后约 2.2 MB，
+    每首都重新读盘 + 编码一遍纯属浪费（还会让每首的渲染 job 多写 2 MB 文本）。
+    """
+    if _ART_DATAURL_CACHE["done"]:
+        return _ART_DATAURL_CACHE["val"]
+    val = None
     if not STREAMER_ART or not os.path.exists(STREAMER_ART):
         if STREAMER_ART:
             log("警告：装饰立绘不存在，跳过该图层：%s" % STREAMER_ART)
-        return None
-    head = io.open(STREAMER_ART, "rb").read(4)
-    mime = "image/png" if head == b"\x89PNG" else "image/jpeg"
-    import base64 as _b64
-    return "data:%s;base64,%s" % (mime, _b64.b64encode(io.open(STREAMER_ART, "rb").read()).decode())
+    else:
+        head = io.open(STREAMER_ART, "rb").read(4)
+        mime = "image/png" if head == b"\x89PNG" else "image/jpeg"
+        import base64 as _b64
+        val = "data:%s;base64,%s" % (
+            mime, _b64.b64encode(io.open(STREAMER_ART, "rb").read()).decode())
+    _ART_DATAURL_CACHE["done"] = True
+    _ART_DATAURL_CACHE["val"] = val
+    return val
 
 
 HEAD_SIL_TARGET = 1.0     # 片头静音目标时长（秒）
@@ -1103,6 +1117,64 @@ def _ensure_head_silence(ffmpeg, mp3_path, target=HEAD_SIL_TARGET, min_sil=HEAD_
         return 0.0
     os.replace(tmp, mp3_path)
     return pad
+
+
+class PreRenderGateError(Exception):
+    """渲染前闸门未通过：成片已可判定为废片/错片，不值得再花 14 分钟去渲。"""
+
+
+# 时长可信度上限：真唱跨度必 ≤ 官方时长 ×(1+余量)（现场加唱/拖拍不会超过 35%）。
+# 2026-10-08 事故：网易云限流时 orig 静默取到 LRCLIB 的 131.3s（《反方向的钟》真实 258s），
+# 成片被切掉一半且全程零报错 —— 这是唯一能拦住「时长填错」的判据。
+DUR_TRUST_MAX = 0.35
+DUR_LOWER, DUR_UPPER = 0.93, 1.10     # 成片/原曲 时长的合理区间（与收尾段日志同口径）
+GATE_IGNORE = False                   # --ignore-gate：闸门降级为警告（应急放行）
+GATE_ALLOW_NO_LRC = False             # --allow-no-lrc：放行无歌词的片
+
+
+def _pre_render_gate(dur, lrc, linfo, tl_src, cov, date, disp):
+    """渲染前闸门：返回 (fail[], warn[])。fail 非空 → 不该进渲染。
+
+    只拦「成片一定有问题」的硬伤，判据全部来自既有常量与已发生的事故，
+    不引入新阈值。每条都写明怎么修，避免拦下来却不知道下一步做什么。
+    """
+    fail, warn = [], []
+    # G1 区间非法：比 MIN_SEC 还短的片段不是一首歌
+    if dur < MIN_SEC:
+        fail.append("G1 片段时长 %.1fs < 下限 %ds：切点没落在歌上，先核定 "
+                    "seg.cut_start_abs/cut_end_abs" % (dur, MIN_SEC))
+    # G2 无歌词：铁律「歌词不许遗漏」，没有歌词的片等于没做
+    if not (lrc or "").strip():
+        msg = ("G2 未取到歌词（来源=%s）：出片会整段无字幕。先确认歌名与歌手，"
+               % (linfo.get("lyrics_source") or "无"))
+        if GATE_ALLOW_NO_LRC:
+            warn.append(msg + "本次按 --allow-no-lrc 放行")
+        else:
+            fail.append(msg + "或用 --allow-no-lrc 明确放行")
+    # G3 原曲时长：缺失不许猜（静默填错值会把成片切短，且零报错）
+    _od = linfo.get("netease_duration_ms")
+    if not _od:
+        fail.append("G3 原曲官方时长缺失：严禁猜测（2026-10-08 曾因静默填 LRCLIB 的错值 "
+                    "把《反方向的钟》切掉一半）。请联网核实后写入 segments 的 "
+                    "orig_duration_s，或确认歌词站恢复后重跑")
+    else:
+        _od_s = _od / 1000.0
+        _dev = dur / _od_s
+        if _dev > 1.0 + DUR_TRUST_MAX:
+            fail.append("G3 成片 %.1fs 比原曲 %.1fs 长 %.0f%%（>%.0f%%）：真唱跨度不可能 "
+                        "超出这么多，疑 orig 取到错版本或混入了歌后闲聊。核定 "
+                        "seg.cut_end_abs" % (dur, _od_s, (_dev - 1) * 100,
+                                             DUR_TRUST_MAX * 100))
+        elif _dev > DUR_UPPER or _dev < DUR_LOWER:
+            warn.append("G3 时长偏差 %+.0f%%（合理区间 %+.0f%%~%+.0f%%）：短了查前奏是否被掐，"
+                        "长了查是否混入歌后闲聊" % ((_dev - 1) * 100,
+                                                 (DUR_LOWER - 1) * 100, (DUR_UPPER - 1) * 100))
+    # G4 歌词残缺：outro/重复副歌掉了（保留为警告，由人工决定是否放行）
+    if lrc and cov is not None and cov < 0.80:
+        warn.append("G4 歌词完整性 %.0f%% < 80%%：末行 %.1fs / 片段 %.1fs，疑漏 outro 或"
+                    "重复副歌，请复核歌词版本" % (cov * 100,
+                                               linfo.get("lyrics_tail_sec", 0.0), dur))
+    return fail, warn
 
 
 def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_entries=None,
@@ -1295,6 +1367,23 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         log("  ⚠ 歌词快照落盘失败（QC 将无法比对文本）：%s" % e)
         lrc_snap = src_snap = None
 
+    # ── 3.9 渲染前闸门（快速失败）──────────────────────────────────────────
+    # 4K60 单首渲染约 14 分钟。以下任一条件成立时，成片**必然**是废片或错片，
+    # 与其渲完才发现（浪费 14 min + 35 GB 临时空间），不如在渲染前就拦下来。
+    # 判据全部复用已有常量，不新增阈值；每条都给出可照做的修复动作。
+    _gate_fail, _gate_warn = _pre_render_gate(
+        dur=dur, lrc=lrc, linfo=linfo, tl_src=tl_src,
+        cov=linfo.get("lyrics_coverage"), date=date, disp=disp)
+    if _gate_fail and not GATE_IGNORE:
+        raise PreRenderGateError(
+            "%s：渲染前闸门未通过 ——\n      %s\n    "
+            "→ 修复后 --force 重渲；确认该片可接受时用 --ignore-gate 放行"
+            % (disp, "\n      ".join(_gate_fail)))
+    if _gate_fail and GATE_IGNORE:
+        log("  ⚠ --ignore-gate 已指定，闸门降级为警告（成片可能不符规格）")
+    for _w in _gate_warn:
+        log("  ⚠ " + _w)
+
     # 3.8 标题装饰方案自动匹配（音频节奏 + 歌词意象 + 封面色调，四维权衡；--scheme 可手动覆盖）
     dec = decor_pick.pick(seg["title_guess"], artist, lrc or "", cover_path, out_mp3,
                           force=scheme_override)
@@ -1473,13 +1562,19 @@ def main():
                          "不够 → 自动降级 P=1（约 1.8 GB 峰值，慢约 33%%）；连 P=1 都不够则渲染前直接报错。"
                          "同时给了 --pages 时以 --pages 为准")
     ap.add_argument("--raw-cut", action="store_true", help="旧档：直接切源视频画面（不做播放器渲染）")
+    ap.add_argument("--ignore-gate", action="store_true",
+                    help="渲染前闸门只警告不拦截（应急放行；成片可能不符规格）")
+    ap.add_argument("--allow-no-lrc", action="store_true",
+                    help="放行「未取到歌词」的片（默认按铁律直接拦下，不出无字幕片）")
     ap.add_argument("--scheme", type=int, default=None,
                     help="手动指定标题装饰方案 0~4（流光渐变/描边镂空/霓虹柔光/色块高亮/双色错位），"
                          "缺省则由歌曲意境自动匹配")
     args = ap.parse_args()
 
     global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC
-    global OUT_PAGES, AUTO_PAGES
+    global OUT_PAGES, AUTO_PAGES, GATE_IGNORE, GATE_ALLOW_NO_LRC
+    GATE_IGNORE = bool(getattr(args, "ignore_gate", False))
+    GATE_ALLOW_NO_LRC = bool(getattr(args, "allow_no_lrc", False))
     OUT_RES, OUT_BITRATE = args.res, args.bitrate
     OUT_ENCODER, OUT_PRESET = args.encoder, args.preset
     LRC_OVERRIDE = getattr(args, "lrc_override", "") or ""
@@ -1594,6 +1689,11 @@ def main():
                 % (args.only, sorted(only_set), len(songs)))
         log("本场识别 %d 首（置信度≥%.2f）" % (len(all_songs), args.min_confidence))
 
+        # ⚠ 整场 SRT 只在**本场开头**解析一次（原先写在逐首循环里，N 首就重复解析
+        # N 次同一份 150 KB 文本）。produce_one 只按切点切片引用它，不修改。
+        srt_entries = parse_srt(srt_path)
+        log("转写索引：%d 条（本场共用，不逐首重读）" % len(srt_entries))
+
         title_count = {}
         qc_fail = 0
         for idx, seg in enumerate(songs, 1):
@@ -1617,10 +1717,24 @@ def main():
                     cut_one(ffmpeg, src, seg, out_mp4, out_mp3, fast_copy=args.fast_copy)
                     log("  原始切割完成，耗时 %.0fs" % (time.time() - t0))
                 else:
-                    ref_extra = produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp,
-                                            args.date, args.workdir,
-                                            srt_entries=parse_srt(srt_path),
-                                            scheme_override=args.scheme)
+                    try:
+                        ref_extra = produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp,
+                                                args.date, args.workdir,
+                                                srt_entries=srt_entries,
+                                                scheme_override=args.scheme)
+                    except PreRenderGateError as e:
+                        # 渲染前就被拦下：本首不出片，但**不牵连同场其他首**
+                        log("  ✗ " + str(e).replace("\n", "\n  "))
+                        qc_fail += 1
+                        manifest["songs"].append({
+                            "title": disp, "title_guess": seg["title_guess"],
+                            "start": seg["start_hms"], "end": seg["end_hms"],
+                            "confidence": seg["confidence"],
+                            "mp4": None, "specs": {}, "specs_ok": False,
+                            "renderer": "blocked-by-gate",
+                            "gate_blocked": str(e)[:400],
+                        })
+                        continue
             specs = verify_specs(ffprobe, out_mp4)
             ok = (specs["width"] == 1920 * OUT_RES and specs["height"] == 1080 * OUT_RES
                   and specs["fps"] >= 59.9

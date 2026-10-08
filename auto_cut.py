@@ -56,7 +56,7 @@ DUR_UPPER = 1.15            # 区间/原曲时长 上限：超出按原曲时长
 # ⚠ 时长可信度上限（2026-10-08）：实测演唱跨度超过「官方时长 ×1.35」→ 该时长必错，
 #   拒绝自动出片（网易云限流时 LRCLIB 会返回离谱值，如《反方向的钟》131.3 vs 实际 258）。
 #   真唱跨度 ≤ 官方时长 + 现场加唱（通常 +10~20%），1.35 留足余量。
-DUR_TRUST_MAX = 0.35
+DUR_TRUST_MAX = SC.DUR_TRUST_MAX   # 单一真源：检测与出片用同一个可信度上限
 # ⚠ 2026-10-06 由0.80 收紧到 0.55：低于此不再自动出片，只标「疑似·待人工确认」。
 #   原 0.80 太松 → 「只是放了首 BGM、她跟着哼两句」也能过（span 通常只有原曲 20~40%）。
 DUR_LOWER = 0.55
@@ -158,10 +158,40 @@ def parse_block_json(raw):
     return None
 
 
-def llm_windows(cfg, entries, block=BLOCK_SEC, overlap=BLOCK_OVERLAP, max_blocks=MAX_BLOCKS):
-    """分块问 LLM：有没有唱歌段落？有则原样摘出歌词行。返回 [(start, end, [lines])]。"""
+def llm_windows(cfg, entries, block=BLOCK_SEC, overlap=BLOCK_OVERLAP, max_blocks=MAX_BLOCKS,
+                srt_path=None, workdir=None):
+    """分块问 LLM：有没有唱歌段落？有则原样摘出歌词行。返回 [(start, end, [lines])]。
+
+    结果按「SRT 指纹 + 分块参数 + 模型」缓存（2026-10-09）：
+    这是每场**唯一的常驻 Token 开销**（整场约 7 万字转写切 10 块喂进去，≈44k token），
+    而同一份 SRT 在调试/重渲/补片时会被反复处理 —— 不改判据、只复用结果，
+    第二次起直接读盘。SRT 一变（mtime/size）指纹就变，自动失效。
+    """
     if not entries:
         return []
+    cache_f = None
+    if srt_path and workdir:
+        try:
+            st = os.stat(srt_path)
+            sm = (cfg.get("summarize") or {})
+            model = str(sm.get("model") or sm.get("provider") or "")
+            fp = "%s|%d|%d|%s|%d|%d|%d" % (os.path.basename(srt_path), int(st.st_mtime),
+                                           st.st_size, re.sub(r"[^\w]", "", model)[:24],
+                                           int(block), int(overlap), max_blocks)
+            d = os.path.join(workdir, "_cache", "llmwin")
+            os.makedirs(d, exist_ok=True)
+            cache_f = os.path.join(d, "%s.json" % re.sub(r"[^\w.-]", "_", fp)[:120])
+            if os.path.exists(cache_f):
+                try:
+                    c = json.load(io.open(cache_f, encoding="utf-8"))
+                    SC.log("LLM 分块：复用缓存（%s，%d 个窗口，saved ~%d 次调用）"
+                           % (os.path.basename(cache_f), len(c.get("windows") or []),
+                              c.get("calls", len(c.get("windows") or []))))
+                    return [tuple(w) for w in (c.get("windows") or [])], bool(c.get("singing"))
+                except Exception:
+                    pass
+        except Exception:
+            cache_f = None
     total = max(e for _s, e, _t in entries)
     out, t, n, singing_any = [], 0.0, 0, False
     while t < total and n < max_blocks:
@@ -190,6 +220,13 @@ def llm_windows(cfg, entries, block=BLOCK_SEC, overlap=BLOCK_OVERLAP, max_blocks
             if (data or {}).get("singing"):
                 singing_any = True
         t = t1 - overlap if t1 < total else total
+    if cache_f:
+        try:
+            io.open(cache_f, "w", encoding="utf-8", newline="").write(json.dumps(
+                {"windows": out, "singing": singing_any, "calls": n,
+                 "at": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False))
+        except Exception:
+            pass
     return out, singing_any
 
 
@@ -282,11 +319,79 @@ def _overlaps(a1, a2, b1, b2, min_overlap=30.0):
 #   ⇒ 唯一可靠的漏切信号是 `library_fallback`：**歌词定位**天然过滤噪声。
 
 
+def _local_cached_lrc(name, workdir, artist_hint=""):
+    """直接读本地歌词缓存正文（不联网）。全库粗筛只需要歌词正文做 fast_screen。
+
+    背景：全库粗筛原本逐首调 fetch_lyrics_and_cover，而它每首都要走
+    歌手一致性 / 字面重合率 / 残缺复检 —— 任一条不符就判 stale 重新联网，
+    实测 631 ms/首 × 1200 首 ≈ 12.6 min/场；而真正下判据的 fast_screen 只要 1.9 ms/首。
+
+    ⚠ 歌手一致性这**一条**必须在这里保留（其余两条粗筛用不到）：
+    2026-10-09 实测《Blessing》缓存里存的是 FictionJunction 版，与曲库原唱
+    halyosy/初音ミク 不符 —— 拿错版本的歌词去粗筛，recall 从 0.652 掉到 0.042，
+    **直接跌破 0.30 阈值造成漏召**（漏切是最贵的事故，见 MEMORY）。
+    所以：歌手不符 → 返回 None，交给 fetch_lrc 走原路径复核纠正，
+    纠正结果会写回缓存，下一场起这首歌就转为本地直读（自愈）。
+    """
+    f = os.path.join(workdir, "_media_cache",
+                     "_lrc_%s.json" % lyrics_fetch.cache_key(name))
+    if not os.path.exists(f):
+        return None
+    try:
+        d = json.load(io.open(f, encoding="utf-8"))
+    except Exception:
+        return None
+    lrc = d.get("lrc")
+    if not lrc:
+        return None
+    info = d.get("info") or {}
+    if artist_hint:
+        cached_artist = (info.get("artist")
+                         or lyrics_fetch._artist_from_source(info.get("lyrics_source"))
+                         or "").strip()
+        if not lyrics_fetch.artist_matches(artist_hint, cached_artist):
+            # 歌手不符 → 缓存可能是翻唱版（同名不同歌时粗筛会漏召，见 Blessing）。
+            # 但「已经用同一个 hint 纠正过」的，说明歌词站确实拿不到更匹配的版本
+            # （网易云常无原唱条目，如《反方向的钟》只有「乐乐仔」版），
+            # 再纠正一万次也是同一个结果 —— 记下已检查，后续直接放行。
+            # ⚠ 这个标记是**性能**手段，不是正确性判据：粗筛漏召才是致命的，
+            #   而放行只可能多给候选，精判 verify_candidate 仍会用正确版本复核。
+            if info.get("artist_checked_hint") == artist_hint:
+                return lrc
+            return None      # 未检查过 → 交给 fetch_lrc 纠正一次
+    return lrc
+
+
+def _mark_artist_checked(name, workdir, artist_hint):
+    """给歌词缓存打「已用该歌手提示纠正过」的标记，避免每场重复纠正同一批翻唱缓存。"""
+    if not artist_hint:
+        return
+    f = os.path.join(workdir, "_media_cache",
+                     "_lrc_%s.json" % lyrics_fetch.cache_key(name))
+    if not os.path.exists(f):
+        return
+    try:
+        d = json.load(io.open(f, encoding="utf-8"))
+        info = d.setdefault("info", {})
+        if info.get("artist_checked_hint") == artist_hint:
+            return
+        info["artist_checked_hint"] = artist_hint
+        info["artist_checked_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        io.open(f, "w", encoding="utf-8", newline="").write(
+            json.dumps(d, ensure_ascii=False))
+    except Exception:
+        pass      # 打标失败不影响结果，只是下次还会再纠正一次
+
+
 def library_fallback(entries, workdir, log=print):
     """兜底候选来源：拿曲库歌词回整场转写粗筛，找出真被唱过的歌名。
 
     用于「LLM 说有唱歌，但所有候选都核验不过」的场景 —— 说明歌名没能生成，
-    而不是没唱。歌词走 _media_cache 缓存，第二次起几乎不联网。
+    而不是没唱。
+
+    2026-10-09 提速：粗筛阶段**本地歌词优先**（实测 1201 首 / 2.3 s，
+    对比原先逐首 fetch_lrc 约 12.6 min）。只有本地没缓存的歌名才走联网，
+    联网新拉到的写回缓存，下一场起同样免联网。
     """
     idx = lyric_locate.window_index(entries)
     if not idx:
@@ -304,8 +409,16 @@ def library_fallback(entries, workdir, log=print):
             names.append((nm, ar))
     hits = []
     scanned = 0
+    fetched = 0          # 本地没缓存、必须联网的歌名数
+    t0 = time.time()
     for nm, ar in names[:LIB_SCAN_MAX]:
-        lrc, _info = fetch_lrc(nm, workdir, ar)
+        lrc = _local_cached_lrc(nm, workdir, ar)
+        if lrc is None:
+            # 本地无缓存 / 缓存是错版本（歌手不符且未检查过）→ 走原路径，
+            # 会联网纠正并写回；纠正完打标记，后续场次不再重复纠正。
+            lrc, _info = fetch_lrc(nm, workdir, ar)
+            _mark_artist_checked(nm, workdir, ar)
+            fetched += 1
         if not lrc:
             continue
         scanned += 1
@@ -313,9 +426,9 @@ def library_fallback(entries, workdir, log=print):
         if r >= LIB_SCAN_RECALL:
             hits.append((r, nm))
     hits.sort(reverse=True)
-    log("曲库全量粗筛：扫描 %d 首歌词，%.2f 以上 %d 首 → %s"
-        % (scanned, LIB_SCAN_RECALL, len(hits),
-           "、".join(n for _r, n in hits[:8]) or "无"))
+    log("曲库全量粗筛：扫描 %d 首歌词（本地 %d + 联网 %d），%.2f 以上 %d 首，耗时 %.1fs → %s"
+        % (scanned, scanned - fetched, fetched, LIB_SCAN_RECALL, len(hits),
+           time.time() - t0, "、".join(n for _r, n in hits[:8]) or "无"))
     return [{"name": nm, "src": "library-scan"} for _r, nm in hits[:LIB_SCAN_TOP]]
 
 
@@ -625,7 +738,8 @@ def main():
         entries = SC.parse_srt(srt_path)
         tag = os.path.splitext(os.path.basename(srt_path))[0][:14]
         SC.log("--- 场次 %s：%d 句转写 ---" % (tag, len(entries)))
-        win, singing = ([], False) if args.no_llm else llm_windows(cfg, entries)
+        win, singing = ([], False) if args.no_llm else llm_windows(
+            cfg, entries, srt_path=srt_path, workdir=workdir)
         llm_singing = llm_singing or singing
         SC.log("LLM 分块：演唱窗口 %d 个（singing=%s）" % (len(win), singing))
         for st_, en_, lines in win:

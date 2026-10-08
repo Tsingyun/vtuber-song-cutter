@@ -232,6 +232,16 @@ META_RE = re.compile(
 JUNK_RE = re.compile(r"^\[(?:00:00\.00)\]\s*$|^\s*(?:~+|End|music|Music|--+|…)\s*$")
 
 
+def cache_key(title):
+    """歌词缓存文件名的 key 规则（唯一真源）。
+
+    ⚠ 2026-10-09：全库粗筛（library_fallback）改用本地歌词索引后，索引的 key
+    必须与这里**完全一致**，否则索引会查不到缓存而退化成逐首联网。
+    新增/修改 key 规则只能改这一个函数。
+    """
+    return re.sub(r"[^\w]", "_", _norm(title))[:40]
+
+
 def lrc_tail_sec(lrc):
     """最后一个「有文本」歌词行的秒数；无则返回 0.0。
     用于歌词完整性评估：末行越接近歌曲结束，说明 outro / 重复副歌没被漏掉。"""
@@ -368,7 +378,7 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
     info = {}
     cache_dir = cache_dir or os.getcwd()
     os.makedirs(cache_dir, exist_ok=True)
-    key = re.sub(r"[^\w]", "_", _norm(title))[:40]
+    key = cache_key(title)
 
     cache_f = os.path.join(cache_dir, "_lrc_%s.json" % key)
     if os.path.exists(cache_f):
