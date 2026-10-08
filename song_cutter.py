@@ -638,6 +638,27 @@ def pick_node():
     raise RuntimeError("找不到 node 可执行文件（可用环境变量 SONGCUT_NODE 指定）")
 
 
+def _rm_retry(path, tries=4, sleep_s=0.4):
+    """删文件，遇OSError 重试。
+
+    ⚠ Windows 上删除十几 GB 的大文件会**偶发瞬时失败**（杀毒软件 /
+      索引服务 / shell 删除钩子此刻仍持有句柄），等 0.4s 重试几乎必成。
+      不重试会静默留下一个巨额文件 —— 实测 14.47 GB 只清掉一半。
+      返回 True 表示确实删掉了。
+    """
+    import time as _t
+    for i in range(tries):
+        try:
+            os.remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            if i + 1 < tries:
+                _t.sleep(sleep_s)
+    return False
+
+
 def _cleanup_render_tmp(out_path):
     """删掉本次渲染留下的 mjpeg / 分段 mp4 / concat 清单（失败路径兜底）。"""
     import glob as _g
@@ -645,17 +666,62 @@ def _cleanup_render_tmp(out_path):
     def _esc(p):
         return p.replace("[", "[[]").replace("]", "[]]").replace("?", "[?]").replace("*", "[*]")
 
-    n = 0
+    n, freed, fail = 0, 0, 0
     base = _esc(out_path)
     for pat in (base + ".p*.mjpeg", base + ".p*.mp4", base + ".concat.txt", base + ".render.mp4"):
         for f in _g.glob(pat):
             try:
-                os.remove(f)
-                n += 1
+                sz = os.path.getsize(f)
             except OSError:
-                pass
+                sz = 0
+            if _rm_retry(f):
+                n += 1
+                freed += sz
+            else:
+                fail += 1
+                log("  ⚠ 中间产物删不掉（可能被占用）：%s（%.2f GB）" % (f, sz / 1024 ** 3))
     if n:
-        log("  渲染失败已清理中间产物 %d 个" % n)
+        log("  渲染失败已清理中间产物 %d 个，回收 %.2f GB" % (n, freed / 1024 ** 3))
+    if fail:
+        log("  ⚠ 仍有 %d 个中间产物未删净，磁盘不会立即释放" % fail)
+
+
+def _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=print):
+    """清掉**历史遗留**的渲染中间产物（不限于本次 out 路径）。
+
+    ⚠ 为什么必须做：`_cleanup_render_tmp` 只在失败路径按本次 out 清理，
+    但崩溃 / 断电 / 磁盘满被kill 时进程根本没走到那一步。实测2026-10-07
+    就留下 **14.47 GB** 的 `*.render.mp4.p{0,1}.mjpeg` 躺在 cuts/2026-10-07/
+    —— 那是成片体积的 22 倍，且**删掉后空间不立即释放**（在回收站里），
+    会让后续每次渲染的磁盘预检都误报。
+
+    只删「最后修改超过 older_than_h 小时」的文件，避免误删正在跑的任务。
+    """
+    import glob as _g
+    import time as _time
+    pats = ("**/*.render.mp4.p*.mjpeg", "**/*.render.mp4.p*.mp4",
+            "**/*.render.mp4", "**/*.render.mp4.concat.txt")
+    now = _time.time()
+    n, freed = 0, 0
+    for pat in pats:
+        for f in _g.glob(os.path.join(workdir, pat), recursive=True):
+            try:
+                st = os.stat(f)
+            except OSError:
+                continue
+            if now - st.st_mtime < older_than_h * 3600:
+                continue                      # 太新，可能是正在渲染
+            if _rm_retry(f):
+                n += 1
+                freed += st.st_size
+            else:
+                log("  ⚠ 残留无法删除（可能被占用）：%s（%.2f GB）"
+                    % (f, st.st_size / 1024 ** 3))
+    if n:
+        log("  已清理历史渲染残留 %d 个文件，回收 %.2f GB"
+            "（若磁盘未立即释放，是回收站占用，可用 gio/Recycle Bin 清空）"
+            % (n, freed / 1024 ** 3))
+    return freed
 
 
 def render_player_video(workdir, job, ffmpeg=None):
@@ -665,19 +731,47 @@ def render_player_video(workdir, job, ffmpeg=None):
                                因为 Chromium 软件 H.264 码率控制饱和，到不了 B站 不二压区间）
     job.encoder = "webcodecs"→ 页面内 WebCodecs 编码后整片 POST 回落（1080P 回退档）
     """
-    # ── 磁盘预检：两阶段渲染要按「每帧 ~2.2MB × 帧数」预留 mjpeg 空间 ──
+    # 0) 先扫历史残留。**必须放在预检之前** —— 清出来的空间要算进可用额度，
+    #    否则上一轮崩溃留下的十几 GB 会让预检误报「空间不足」。
     try:
-        _frames = int(float(job.get("duration") or 0) * 60)
-        _need = (2.0 * 1024 ** 3
-                 + float(job.get("pages") or 2) * max(1, _frames) * 2.2 * 1024 ** 2)
+        _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=log)
+    except Exception as _e:
+        log("  残留扫描跳过：%s" % _e)
+
+    # ── 磁盘预检（2026-10-08 修正）────────────────────────────────────
+    # 实测依据（280s/4K60 那次渲染留下的残留文件，双源互证）：
+    #   · cuts/2026-10-07/*.render.mp4.p{0,1}.mjpeg 共 14.47 GB，
+    #     按 JPEG SOI(ffd8ff) 计数得 8816 帧 → **2.03 MB/帧**
+    #   · 渲染日志 recvBytes 累计 13200 帧 / 27981 MB → 2.12 MB/帧
+    #   ⇒ 取 2.2 MB/帧（含 HTTP/流控开销的余量）。
+    #
+    # ⚠ 旧公式 `pages × frames × 2.2MB` 有两个错，**不要再改回去**：
+    #   ① **不该乘 pages**。两阶段是「分段落盘」——第 p 个实例只写自己那一段
+    #      （render_song.cjs: `p = floor(idx / SEG_PER)`），每帧全程只写一次。
+    #      乘 pages 等于凭空翻倍，与磁盘实测对不上。
+    #   ② 漏了分段 mp4 与 concat 输出的 .render.mp4（各约 frames×br/8/fps）。
+    #   两者相抵后旧公式整体**高估 2.1~2.2 倍**，造成两个方向都错：
+    #   「明明够却报不足」白等清盘，「报了不足其实够」渲到一半爆盘。
+    # 真实峰值 = mjpeg + 视频侧三份（分段×P + render.mp4 + 最终成片）。
+    try:
+        _d = float(job.get("duration") or 0)
+        _frames = int(_d * 60) or 1
+        _pages = max(1, int(job.get("pages") or 1))
+        _mjpeg = _frames * 2.2 * 1024 ** 2          # 不乘 pages：分段落盘，每帧只写一次
+        _video = _d * (OUT_BITRATE / 8.0) * 2.2# 分段 mp4 + render.mp4 + 成片
+        _need = _mjpeg + _video + 0.5 * 1024 ** 3     # +0.5GB 音频/波形/对齐余量
         _tot, _used, _free = shutil.disk_usage(
             os.path.dirname(os.path.abspath(job["out"])) or ".")
         if _free < _need:
             raise RuntimeError(
-                "磁盘空间不足：渲染需约 %.0f GB（mjpeg 中间文件），当前可用仅 %.1f GB。"
+                "磁盘空间不足：本次渲染实测需约 %.1f GB"
+                "（mjpeg %.1f GB + 视频流 %.1f GB），当前可用仅 %.1f GB。"
                 "请先清理（渲染中间产物通常在回收站里）"
-                % (_need / 1024 ** 3, _free / 1024 ** 3))
-        log("  磁盘预检：需 %.0f GB / 可用 %.1f GB ✓" % (_need / 1024 ** 3, _free / 1024 ** 3))
+                % (_need / 1024 ** 3, _mjpeg / 1024 ** 3, _video / 1024 ** 3,
+                   _free / 1024 ** 3))
+        log("  磁盘预检：需 %.1f GB（mjpeg %.1f + 视频 %.1f）/ 可用 %.1f GB ✓"
+            % (_need / 1024 ** 3, _mjpeg / 1024 ** 3, _video / 1024 ** 3,
+               _free / 1024 ** 3))
     except RuntimeError:
         raise
     except Exception:
