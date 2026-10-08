@@ -815,14 +815,22 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     if _hint:
         log("  曲库歌手提示: %s" % _hint)
     src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
-    artist = (linfo.get("artist") or "").strip()
+    #⚠ 取原唱要**优先 segments 的显式标注**：歌词站的 artist 字段常误配翻唱者
+    #   （2026-10-08实测《反方向的钟》LRCLIB 返回「乐乐仔」，原唱应为周杰伦）。
+    #   下方 meta 用的也是同一个值，这里必须同步，否则日志会打印出
+    #   与画面不同的原唱名，误导排查（画面其实是对的）。
+    artist = (seg.get("artist") or linfo.get("artist") or "").strip()
     tags = seg.get("tags") or "翻唱, 现场版"
     # 歌词完整性：末行时间戳 / 本片段时长的覆盖率。低于 80% 基本可断定尾部歌词掉了
     # （重复副歌、outro 是重灾区），显式告警以便人工复核，避免默默渲染残缺歌词。
     _cov = linfo.get("lyrics_coverage")
-    log("  歌词: %s（%d 行）| 原唱: %s | 封面: %s" % (
+    log("  歌词: %s（%d 行）| 原唱: %s%s | 封面: %s" % (
         linfo.get("lyrics_source"), len((lrc or "").splitlines()),
-        artist or "未知", linfo.get("cover_source")))
+        artist or "未知",
+        "（歌词站标 %s，已用segments 标注纠正）" % linfo["artist"]
+        if seg.get("artist") and linfo.get("artist")
+        and seg["artist"] != linfo["artist"] else "",
+        linfo.get("cover_source")))
     if lrc and _cov is not None and (ce - cs) > 1:
         _flag = " ⚠ 疑似残缺，请复核是否漏 outro/重复副歌" if _cov < 0.80 else ""
         log("  歌词完整性: 末行 %.1fs / 片段 %.1fs = %.0f%%%s" % (
@@ -929,13 +937,13 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "playerDir": _PLAYER_DIR,
         "audio": out_mp3,
         "title": seg["title_guess"],
-        "artist": seg.get("artist") or artist or "",   # 显式原唱标注优先（lrclib 常误配翻唱者）
+        "artist": artist,   # artist 已在上方按「segments 显式标注 > 歌词站」取值
         "trackLabel": seg.get("track_label") or "",
         "romaji": seg.get("romaji") or "",
         "vocal": seg.get("vocal") or CFG.path("streamer", "name", default=""),   # 演唱者（档案行 VOCAL）
         "producer": seg.get("producer") or "",         # P 主（术力口曲必填，非术力口留空）
         "tags": tags,
-        "note": "",
+        "note": seg.get("note") or "",              # 歌曲注释（segments JSON 的 note 字段）
         "footerLeft": footer_left_text(),          # 左下角档案号（<前缀>·P.N）
         "footerRight": date,
         "badge": CFG.path("streamer", "badge", default="") or "",   # 刊眉带品牌签名
