@@ -70,6 +70,8 @@ NODE_PATH_ENV = CFG.node_modules_path()
 _PLAYER_DIR = os.path.join(ROOT, "renderer", "player")
 _RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
 
+# 画面底部注释行的字数上限：只放得下一句短句（中文 ≈40 字）
+NOTE_MAX_CHARS = 40
 MIN_SEC, MAX_SEC = 40, 900          # 单首合理区间
 LRC_OVERRIDE = ""                   # --lrc-override：人工核定的歌词时间轴
 PAD_START, PAD_END = 1.5, 2.0       # 边界留白（秒）
@@ -909,6 +911,18 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     if _hint:
         log("  曲库歌手提示: %s" % _hint)
     src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
+    # ⚠ note 会显示在主画面底部（给观众看的文案），不是技术备注位。
+    #   超长会被播放器缩到 9px + 省略号，虽不再溢出画面，但一整行术语压在画面底部观感很差。
+    #   技术细节写 note_technical（不上屏）。这里硬拦，避免整片渲完才发现。
+    _note = (seg.get("note") or "").strip()
+    if len(_note) > NOTE_MAX_CHARS:
+        log("  ⚠ 歌曲注释 %d 字，超过 %d 字上限（画面底部只放得下一句短句）→ 已忽略 note，"
+            "技术细节请写 note_technical" % (len(_note), NOTE_MAX_CHARS))
+        log("    被忽略的内容：%s…" % _note[:60])
+        seg["note"] = ""
+        seg["note_rejected"] = _note
+    elif _note:
+        log("  歌曲注释（%d 字，上屏）：%s" % (len(_note), _note))
     #⚠ 取原唱要**优先 segments 的显式标注**：歌词站的 artist 字段常误配翻唱者
     #   （2026-10-08实测《反方向的钟》LRCLIB 返回「乐乐仔」，原唱应为周杰伦）。
     #   下方 meta 用的也是同一个值，这里必须同步，否则日志会打印出
@@ -1143,6 +1157,9 @@ def main():
     ap.add_argument("--workdir", default=DEFAULT_WORKDIR)
     ap.add_argument("--min-confidence", type=float, default=0.0)
     ap.add_argument("--limit", type=int, default=0, help="只切前 N 首（调试用）")
+    ap.add_argument("--only", default="",
+                    help="只重渲指定序号（1 起，逗号分隔，如 --only 2）。"
+                         "与 --limit 不同：不受 --force 全场牵连，且保留 manifest 其余条目")
     ap.add_argument("--fast-copy", action="store_true", help="视频用流复制快速档（切点吸附关键帧）")
     ap.add_argument("--redetect", action="store_true", help="强制重跑 LLM 识别")
     ap.add_argument("--dry-run", action="store_true", help="只识别不切割")
@@ -1272,10 +1289,27 @@ def main():
             data["kdocs_expected"] = expected_titles
             io.open(seg_json, "w", encoding="utf-8", newline="").write(
                 json.dumps(data, ensure_ascii=False, indent=2))
-        songs = [s for s in data["songs"] if s["confidence"] >= args.min_confidence]
-        if args.limit:
-            songs = songs[:args.limit]
-        log("本场识别 %d 首（置信度≥%.2f）" % (len(songs), args.min_confidence))
+        all_songs = [s for s in data["songs"] if s["confidence"] >= args.min_confidence]
+        songs = all_songs[:args.limit] if args.limit else list(all_songs)
+        # --only：按**原始序号**挑歌（不受 --limit 影响），便于只重渲某一首
+        only_set = set()
+        if getattr(args, "only", ""):
+            try:
+                only_set = {int(x) for x in str(args.only).replace("，", ",").split(",") if x.strip()}
+            except ValueError:
+                raise SystemExit("--only 只接受数字序号，如 --only 2 或 --only 1,3")
+            _bad = {n for n in only_set if n < 1 or n > len(all_songs)}
+            if _bad:
+                raise SystemExit("--only 序号越界：本场共 %d 首，收到 %s"
+                                 % (len(all_songs), sorted(_bad)))
+            _keep = []
+            for i, s_ in enumerate(all_songs, 1):
+                if i in only_set:
+                    _keep.append(s_)
+            songs = _keep
+            log("--only %s → 本场只处理第 %s 首（共 %d 首）"
+                % (args.only, sorted(only_set), len(songs)))
+        log("本场识别 %d 首（置信度≥%.2f）" % (len(all_songs), args.min_confidence))
 
         title_count = {}
         qc_fail = 0
@@ -1363,6 +1397,52 @@ def main():
             log("无待清理文件")
 
     mf = os.path.join(out_dir, "manifest.json")
+    # ⚠ 局部重渲（--limit/--only）时，manifest 只含本轮处理的歌 → 其余条目会被抹掉，
+    #   而 manifest 是重切的唯一钥匙（2026-10-08 连踩 3 次后才修）。
+    #   规则：若本轮只处理了部分歌曲，则从旧 manifest 里把「未处理且仍在磁盘上」的条目原样带回。
+    _partial = False
+    try:
+        _allseg = []
+        for _f in sorted(os.listdir(seg_dir)):
+            if _f.endswith(".json") and _f.startswith(ymd):
+                try:
+                    _d = json.load(io.open(os.path.join(seg_dir, _f), encoding="utf-8"))
+                    _allseg += [s for s in (_d.get("songs") or [])
+                                if s.get("confidence", 0) >= args.min_confidence]
+                except Exception:
+                    pass
+        _done = {s["title"] for s in manifest["songs"]}
+        _carry = [s for s in _allseg
+                  if s.get("title_guess") not in _done and s.get("title_guess")]
+        if _carry:
+            _old = {}
+            if os.path.exists(mf):
+                try:
+                    for s in json.load(io.open(mf, encoding="utf-8")).get("songs", []):
+                        _old[s.get("title")] = s
+                except Exception:
+                    _old = {}
+            for _c in _carry:
+                _t = _c["title_guess"]
+                _prev = _old.get(_t)
+                # 带回上一轮的完整条目（带 lrc_path/cut_start 等），而不是裸 segments 数据
+                manifest["songs"].append(_prev if _prev else {
+                    "title": _t, "title_guess": _t,
+                    "title_source": _c.get("title_source", "llm"),
+                    "start": _c.get("start_hms"), "end": _c.get("end_hms"),
+                    "confidence": _c.get("confidence"), "evidence": _c.get("evidence", []),
+                    "mp4": os.path.join(out_dir, out_basename(
+                        args.date, sanitize(_t)) + ".mp4"),
+                    "specs": (_prev or {}).get("specs", {}),
+                    "specs_ok": (_prev or {}).get("specs_ok", False),
+                    "renderer": (_prev or {}).get("renderer", ""),
+                })
+            _partial = True
+            log("⚠ 局部重渲：已从旧 manifest 带回 %d 首未处理的条目（%s）"
+                % (len(_carry), "、".join(c["title_guess"] for c in _carry)))
+    except Exception as e:
+        log("  ⚠ manifest 带入未处理条目失败（%s）：%s" % (type(e).__name__, str(e)[:120]))
+
     io.open(mf, "w", encoding="utf-8", newline="").write(
         json.dumps(manifest, ensure_ascii=False, indent=2))
     n_ok = sum(1 for s in manifest["songs"] if s["specs_ok"])

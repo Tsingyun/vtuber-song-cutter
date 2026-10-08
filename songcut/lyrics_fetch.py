@@ -22,11 +22,54 @@ def _norm(t):
     return re.sub(r"[\s\u3000·・～~\-—_（）()【】\[\]!！?？]", "", str(t)).lower()
 
 
-def _pick(results, title, artist_hint=""):
-    """在搜索结果里挑与歌名最匹配的条目。results: [{name, artist, ...}]"""
+# 原唱一致性的最小相似度：低于此值视为「不是原唱的那一版」。
+# 标定依据：张惠妹 vs en（王翊恩）= 0.0（完全不同的名字）；
+# aMEI vs 张惠妹 ≈ 0.5（英文/中文写法差异，需靠 ARTIST_ALIASES 兜），
+# 初音ミク vs 初音未来 ≈ 0.5（同上）。取 0.62 既容忍写法差异又能挡住翻唱者。
+ARTIST_MATCH_MIN = 0.62
+# 歌手名的等价写法（英文名/中文名/昵称），命中任一即视为同一人。
+ARTIST_ALIASES = {
+    "张惠妹": ("amei", "张惠妹amei"),
+    "初音未来": ("初音ミク", "初音miku", "hatsune miku"),
+    "初音ミク": ("初音未来", "初音miku", "hatsune miku"),
+    "周杰伦": ("jay chou", "jaychou", "周杰倫"),
+    "蔡健雅": ("tanya chua", "tanyachua"),
+    "田馥甄": ("hebe tien", "hebe"),
+    "郭静": ("jessie kuo", "郭靜"),
+}
+
+
+def artist_matches(a, b):
+    """两个歌手名是否指同一人。容忍中英文写法/昵称差异；缺一侧信息则不拦。"""
+    na, nb = _norm(a), _norm(b)
+    if not na or not nb:
+        return True
+    if na == nb or na in nb or nb in na:
+        return True
+    for key, al in ARTIST_ALIASES.items():
+        ka = _norm(key)
+        ka_hit = (ka in na) or any(_norm(x) in na for x in al)
+        kb_hit = (ka in nb) or any(_norm(x) in nb for x in al)
+        if ka_hit and kb_hit:
+            return True
+    return difflib.SequenceMatcher(None, na, nb).ratio() >= ARTIST_MATCH_MIN
+
+
+def _pick(results, title, artist_hint="", reject_artist_mismatch=False):
+    """在搜索结果里挑与歌名最匹配的条目。results: [{name, artist, ...}]
+
+    reject_artist_mismatch=True 时，**原唱对不上的候选直接淘汰**而不是靠加权竞争。
+    ⚠ 必须开这个开关的原因（2026-10-06《连名带姓》）：同名不同版时歌名分完全相同，
+    翻唱版歌手只是「+0.05 加分」，等于没有约束 → 谁的搜索排序靠前谁赢，
+    于是封面/歌手名/时长dt 一起被翻唱版污染（详见 ARTIST_MATCH_MIN 注释）。
+    仅对「元数据可信度要求高」的字段（封面、官方时长）启用该模式。
+    """
     tn = _norm(title)
     best, score = None, 0.0
     for r in results:
+        if reject_artist_mismatch and artist_hint:
+            if not artist_matches(artist_hint, r.get("artist")):
+                continue# 原唱不符 → 否决（不进候选池）
         name = r.get("name") or ""
         n = _norm(name)
         s = difflib.SequenceMatcher(None, tn, n).ratio()
@@ -88,6 +131,7 @@ def _netease(title, artist_hint=""):
     """返回 (lrc, cover_url, source, artist)。搜索用 cloudsearch（旧 api/search/pc 已返回空）。"""
     lrc = cover = src = artist = None
     dur_ms = None
+    relaxed = False          # True= 未命中原唱版，已退回宽松模式（元数据存疑）
     try:
         r = requests.post("https://music.163.com/api/cloudsearch/pc",
                           data={"s": title, "type": 1, "limit": 8},
@@ -106,7 +150,14 @@ def _netease(title, artist_hint=""):
             cand = [{"name": s.get("name"), "artist": (s.get("artists") or [{}])[0].get("name"),
                      "id": s.get("id"), "cover": (s.get("album") or {}).get("picUrl"),
                      "dur": s.get("dt")} for s in songs]
-        hit, score = _pick(cand, title, artist_hint)
+        # 原唱否决模式：封面/官方时长必须来自原唱那一版，否则会污染画面。
+        hit, score = _pick(cand, title, artist_hint, reject_artist_mismatch=True)
+        if not hit and artist_hint:
+            # 网易云候选里没有原唱版（歌手字段缺失/写法差异过大）→ 退回宽松模式，
+            # 但明确标记「元数据可能来自翻唱版」，由上层决定是否出片。
+            hit, score = _pick(cand, title, artist_hint)
+            if hit:
+                relaxed = True
         if hit:
             dur_ms = hit.get("dur")
             if hit.get("cover"):
@@ -121,7 +172,7 @@ def _netease(title, artist_hint=""):
             artist = (hit.get("artist") or "").strip() or None
     except Exception:
         pass
-    return lrc, cover, src, artist, dur_ms
+    return lrc, cover, src, artist, dur_ms, relaxed
 
 
 def _t2s(text):
@@ -338,9 +389,7 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
                 if not stale and artist_hint and d.get("lrc"):
                     cached_artist = (info.get("artist") or _artist_from_source(
                         info.get("lyrics_source")) or "").strip()
-                    if (cached_artist and _norm(cached_artist) != _norm(artist_hint)
-                            and _norm(cached_artist) not in _norm(artist_hint)
-                            and _norm(artist_hint) not in _norm(cached_artist)):
+                    if not artist_matches(artist_hint, cached_artist):
                         stale = True
                         info["cache_invalidated"] = "歌手不一致（缓存 %s vs 曲库 %s）" % (
                             cached_artist, artist_hint)
@@ -352,6 +401,11 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
                         info["cache_invalidated"] = (
                             "歌词与演唱内容字面重合率仅 %.1f%%（阈值 %.0f%%）"
                             % ((c_ov or 0.0) * 100, LRC_TEXT_OV_OK * 100))
+                if stale:
+                    # 歌手不符 →旧缓存里的封面图同样属于那个错误歌手，必须作废，
+                    # 否则重抓失败时会继续用翻唱版专辑图出片（2026-10-06 连名带姓事故）。
+                    d["cover_path"] = None
+                    info.pop("cover_source", None)
                 if not stale:
                     if d.get("cover_path") and not os.path.exists(d["cover_path"]):
                         d["cover_path"] = None
@@ -376,10 +430,17 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
         pass
     cover_url, nartist = None, ""
     try:
-        nl, ncover, nsrc, nart, ndur = _netease(title, artist_hint)
+        nl, ncover, nsrc, nart, ndur, nrelaxed = _netease(title, artist_hint)
         cover_url, nartist = ncover, (nart or "")
         if ndur:
             info["netease_duration_ms"] = ndur
+        if nrelaxed:
+            # 没拿到原唱版本的条目 → 封面与 dt 很可能属于某个翻唱版，不可信。
+            # 不静默：dt直接不采信（原曲时长铁律：缺失必须联网核实，不允许猜）。
+            info.pop("netease_duration_ms", None)
+            info["warn_artist_mismatch"] = (
+                "网易云候选中未找到原唱（%s）版本，封面与官方时长不可信，"
+                "已丢弃 dt、需人工指定封面" % (artist_hint or "?"))
         if nl:
             cands.append({"lrc": nl, "source": nsrc, "artist": nart,
                           "cover_url": ncover})
@@ -449,6 +510,9 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
                 info["cover_source"] = cover_url.split("?")[0]
         except Exception:
             pass
+    if not cover_url and info.get("cover_source") in (None, "none"):
+        # 没有任何可信封面来源时，尝试退回 LRCLIB 的专辑图（若有）
+        cover_url = next((s["cover_url"] for s in scored if s.get("cover_url")), None)
     info["cover_source"] = info.get("cover_source") or "none"
 
     try:
