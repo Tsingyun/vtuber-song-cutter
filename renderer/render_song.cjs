@@ -71,6 +71,37 @@ function pickFfmpeg() {
   throw new Error('找不到 ffmpeg（可用环境变量 FFMPEG_BIN 指定）');
 }
 
+/* ── 中间产物清理（2026-10-08）─────────────────────────────────────────
+ * Windows 上删几十 GB 的 mjpeg 会**偶发瞬时失败**（杀软 / 索引器 / shell 删除钩子
+ * 此刻仍持有句柄）。旧代码 unlinkSync 一次失败就 `catch: log` 假装完事 ——
+ * 实测 14.47 GB 只清掉一半。这里统一 4 次重试 + 幂等，失败必须打日志。
+ * ⚠ 只用 fs.unlinkSync = 永久删除；绝不能让临时帧进回收站（那样空间不释放）。 */
+const ARTIFACTS = { groups: [] };          // 按引用登记数组：[partMjpeg] [parts] [listFile]
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+async function unlinkRetry(p, tries = 4) {
+  for (let i = 0; i < tries; i++) {
+    try { fs.unlinkSync(p); return true; }
+    catch (e) {
+      if (e.code === 'ENOENT') return true;                 // 本来就不存在 = 成功（幂等）
+      if (i + 1 < tries) await _sleep(400);
+      else console.log('[cleanup] 删除失败（已重试 ' + tries + ' 次，可能被占用）：' + p + ' —— ' + e.message);
+    }
+  }
+  return false;
+}
+async function cleanupArtifacts() {
+  let n = 0, freed = 0;
+  for (const g of ARTIFACTS.groups) {
+    for (const p of g) {
+      try { freed += fs.statSync(p).size; } catch (e) { /* 已删或不存在 */ }
+      if (await unlinkRetry(p)) n++;
+    }
+    g.length = 0;
+  }
+  ARTIFACTS.groups.length = 0;
+  if (n) console.log('[cleanup] 已删除中间产物 ' + n + ' 个，回收 ' + (freed / 1073741824).toFixed(2) + ' GB');
+}
+
 (async () => {
   const jobFile = argOf('job');
   if (!jobFile) { console.error('缺少 --job'); process.exit(2); }
@@ -124,6 +155,7 @@ function pickFfmpeg() {
   /* 两阶段的中间产物（setup 拿到总帧数后初始化） */
   let SEG_PER = 1;
   const partStreams = [], partMjpeg = [];
+  ARTIFACTS.groups.push(partMjpeg);      // 登记：任何异常退出都要清掉这些 30GB 级的帧
 
   /* ---- ffmpeg 通路 ----
    * PAGES=1：经典流式 —— 收帧即写 stdin，边渲染边编码。
@@ -290,6 +322,7 @@ function pickFfmpeg() {
     console.error('[setup 失败]', e.message);
     for (const h of handles) await h.browser.close();
     server.close(); if (ff) ff.kill();
+    await cleanupArtifacts();
     process.exit(3);
   }
   const setup = handles[0].setup;
@@ -336,6 +369,7 @@ function pickFfmpeg() {
       const tEnc = Date.now();
       await Promise.all(partStreams.map(s => new Promise(r => s.end(r))));
       const parts = [], encJobs = [];
+      ARTIFACTS.groups.push(parts);
       for (let p = 0; p < PAGES; p++) {
         const partOut = outAbs + `.p${p}.mp4`;
         parts.push(partOut);
@@ -344,6 +378,7 @@ function pickFfmpeg() {
       }
       await Promise.all(encJobs);
       const listFile = outAbs + '.concat.txt';
+      ARTIFACTS.groups.push([listFile]);
       // ⚠ 路径里的单引号必须转义：ffmpeg concat 语法是 file '<path>'，
       //   歌名含 ' 时（如 Don't Look Back In Anger）会被截断成半条路径。
       //   demuxer 规定引号内的 ' 写成 '\''（闭引号 + 转义 + 重开引号）。
@@ -355,11 +390,7 @@ function pickFfmpeg() {
                        { stdio: ['ignore', 'inherit', 'inherit'] });
       await new Promise((res, rej) => cc.on('close', code => code === 0 ? res() : rej(new Error('concat 退出码 ' + code))));
       console.log(`[encode] ${PAGES} 段编码 + 拼接完成，耗时 ${((Date.now() - tEnc) / 1000).toFixed(1)}s`);
-      try {
-        fs.unlinkSync(listFile);
-        for (const pp of parts) fs.unlinkSync(pp);
-        for (const m of partMjpeg) fs.unlinkSync(m);
-      } catch (e) { console.log('[cleanup] 中间文件清理失败（不影响成片）:', e.message); }
+      await cleanupArtifacts();
     }
   } else {
     // 后台轮询进度
@@ -384,6 +415,7 @@ function pickFfmpeg() {
   if (!result.ok) {
     console.error('[render 失败]', result.error);
     if (ff) { try { ff.stdin.end(); } catch (e) {} ff.kill(); }
+    await cleanupArtifacts();
     process.exit(4);
   }
 
@@ -399,4 +431,4 @@ function pickFfmpeg() {
   const vbr = size * 8 / result.dur / 1e6;
   console.log(`[done] ${result.frames} 帧 / ${result.dur.toFixed(2)}s，耗时 ${secs}s，` +
               `成片 ${(size / 1048576).toFixed(1)} MB，视频码率 ${vbr.toFixed(2)} Mbps → ${outAbs}`);
-})().catch(e => { console.error('[fatal]', e); process.exit(5); });
+})().catch(async e => { console.error('[fatal]', e); await cleanupArtifacts(); process.exit(5); });

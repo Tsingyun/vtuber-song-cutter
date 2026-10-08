@@ -170,6 +170,155 @@ for d in (60, 120, 229, 280, 600):
              (d * 18e6 / 8 + d * 320e3 / 8) / GB, need_real(d) / (d * 18e6 / 8 + d * 320e3 / 8)))
 
 print()
+print()
+print("=" * 72)
+print("⑧ CLI 优先级：显式 --pages > --auto-pages > 默认 P=2")
+print("=" * 72)
+ck("  都不给 → 默认 P=2 且不开自动", SC.resolve_pages(None, False), (2, False))
+ck("  --pages 1 → (1, False)", SC.resolve_pages(1, False), (1, False))
+ck("  --pages 2 → (2, False)", SC.resolve_pages(2, False), (2, False))
+ck("  --auto-pages → (2, True)", SC.resolve_pages(None, True), (2, True))
+ck("  --pages 1 + --auto-pages → 服从 --pages", SC.resolve_pages(1, True), (1, False))
+
+print()
+print("=" * 72)
+print("⑨ P=1 / P=2 空间估算（P=1 帧不落盘，只有两份视频流）")
+print("=" * 72)
+p2 = SC.estimate_render_bytes(280, 18e6, 2)
+p1 = SC.estimate_render_bytes(280, 18e6, 1)
+bd2 = SC.estimate_render_breakdown(280, 18e6, 2)
+bd1 = SC.estimate_render_breakdown(280, 18e6, 1)
+print("   280s/4K60/18M：P=2 需 %.1f GB（mjpeg %.1f + 视频 %.1f + 余量 %.1f）"
+      % (p2 / GB, bd2["mjpeg"] / GB, bd2["video"] / GB, bd2["margin"] / GB))
+print("   280s/4K60/18M：P=1 需 %.1f GB（mjpeg %.1f + 视频 %.1f + 余量 %.1f）"
+      % (p1 / GB, bd1["mjpeg"] / GB, bd1["video"] / GB, bd1["margin"] / GB))
+ck("  P=2 估在 30~45 GB 区间", p2 / GB, 38.0, 7.0, "GB")
+ck("  P=1 估在 1~3 GB 区间（实测约 1.8 GB）", p1 / GB, 1.8, 1.0, "GB")
+ck("  P=1 相较高峰省 >88%%", (1 - p1 / p2) * 100, 95.0, 7.0, "%")
+ck("  P=1 的 mjpeg 项为 0（流式不落盘）", bd1["mjpeg"], 0)
+ck("  P=2 的 mjpeg 占 >85%%", bd2["mjpeg"] / bd2["total"] * 100, 95.0, 10.0, "%")
+ck("  单帧取值 ≥ 实测 2.03MB（不得退回抽帧的 0.57MB）", SC.MJPEG_FRAME_MB >= 2.03, True)
+
+print()
+print("=" * 72)
+print("⑩ --auto-pages 按空间自动选档")
+print("=" * 72)
+r = SC.choose_render_pages(int(200 * GB), 280, 18e6, prefer=2)
+ck("  可用 200 GB → P=2（速度优先）", r["pages"], 2)
+ck("  未触发降级", r["fallback"], False)
+r = SC.choose_render_pages(int(39 * GB), 280, 18e6, prefer=2)
+ck("  可用 39 GB（够 P=2 的 %.1f）→ 仍 P=2" % (r["need_p2"] / GB), r["pages"], 2)
+r = SC.choose_render_pages(int(5 * GB), 280, 18e6, prefer=2)
+ck("  可用 5 GB（不够 P=2）→ 降级 P=1", r["pages"], 1)
+ck("  fallback 标记为真", r["fallback"], True)
+ck("  降级后 need 取 P=1 的量", r["need"], r["need_p1"])
+
+print()
+print("=" * 72)
+print("⑪ P=1 也不足 → 必须在渲染开始前抛错（不启动长任务）")
+print("=" * 72)
+try:
+    SC.choose_render_pages(int(0.5 * GB), 280, 18e6, prefer=2)
+    ck("  抛 RuntimeError", False, True)
+except RuntimeError as e:
+    ck("  抛 RuntimeError", True, True)
+    msg = str(e)
+    ck("  信息含 P=2 需求量", "P=2" in msg and "GB" in msg, True)
+    ck("  信息含 P=1 需求量", "P=1" in msg, True)
+    ck("  信息含当前可用量", "当前可用" in msg, True)
+    print("   实际报错：%s" % msg)
+
+print()
+print("=" * 72)
+print("⑫ _render_tmp 与成片隔离 + 完成后不留大型残留")
+print("=" * 72)
+tmpd = tempfile.mkdtemp(prefix="tmproot_")
+try:
+    d = SC.render_tmp_dir(tmpd, "2026-10-08")
+    norm = os.path.abspath(d).replace("\\", "/")
+    ck("  目录是 _render_tmp/<date>", norm.endswith("_render_tmp/2026-10-08"), True)
+    ck("  不在 cuts/ 下（与成片物理隔离）", "/cuts/" in norm, False)
+    ck("  目录已创建", os.path.isdir(d), True)
+
+    fake_out = os.path.join(d, "【x】y【z】.mp4.render.mp4")
+    for suf in (".p0.mjpeg", ".p1.mjpeg", ".p0.mp4", ".p1.mp4", ".concat.txt"):
+        with open(fake_out + suf, "wb") as fh:
+            fh.write(b"\x00" * MB)
+    io.open(fake_out, "wb").write(b"\x00" * MB)          # .render.mp4 本体
+    ck("  渲染中 temp 统计含全部产物", SC._render_tmp_size(fake_out) >= 6 * MB, True)
+    SC._cleanup_render_tmp(fake_out)
+    ck("  清理后只剩 .render.mp4（混流还要用，不能提前删）",
+       sorted(os.listdir(d)), ["【x】y【z】.mp4.render.mp4"])
+    ck("  mjpeg 全清", any(f.endswith(".mjpeg") for f in os.listdir(d)), False)
+    _rm = SC._rm_retry(fake_out)
+    SC._prune_empty_tmp_dir(tmpd, "2026-10-08")
+    ck("  收尾后临时目录被删掉", os.path.exists(d), False)
+finally:
+    shutil.rmtree(tmpd, ignore_errors=True)
+
+print()
+print("=" * 72)
+print("⑬ 历史残留自愈：_render_tmp 下超过 6h 的残留会被下次启动清掉")
+print("=" * 72)
+tmpd = tempfile.mkdtemp(prefix="sweep2_")
+try:
+    d2 = os.path.join(tmpd, "_render_tmp", "2026-10-07")
+    os.makedirs(d2)
+    stale = os.path.join(d2, "old.render.mp4.p0.mjpeg")
+    with open(stale, "wb") as fh:
+        fh.write(b"\x00" * (5 * MB))
+    freed = SC._sweep_stale_render_tmp(tmpd, older_than_h=-1.0, log=lambda s: None)
+    ck("  回收字节数", freed, 5 * MB)
+    ck("  残留已消失", os.path.exists(stale), False)
+
+    fresh = os.path.join(d2, "new.render.mp4.p1.mjpeg")
+    with open(fresh, "wb") as fh:
+        fh.write(b"\x00" * (5 * MB))
+    ck("  刚写入的被视为正在跑，跳过",
+       SC._sweep_stale_render_tmp(tmpd, older_than_h=6.0, log=lambda s: None), 0)
+    ck("  正在跑的文件仍在", os.path.exists(fresh), True)
+finally:
+    shutil.rmtree(tmpd, ignore_errors=True)
+
+print()
+print("=" * 72)
+print("⑭ 测试内公式复刻与实现不得漂移（防止两边各改各的）")
+print("=" * 72)
+for d in (229, 280, 600):
+    ck("  %4ds 复刻 == 实现（差 <1KB）" % d,
+       abs(need_new(d) - SC.estimate_render_bytes(d, 18e6, 2)) < 1024, True)
+
+print()
+print("=" * 72)
+print("⑮ 渲染中磁盘监控常量自洽")
+print("=" * 72)
+ck("  监控间隔 30s", SC.DISK_MONITOR_INTERVAL_S, 30.0)
+ck("  危险区阈值 15%%", SC.DISK_DANGER_RATIO, 0.15)
+ck("  陈旧门槛 6h", SC.STALE_TMP_HOURS, 6.0)
+ck("  安全余量 0.5GB", SC.DISK_SAFETY_MARGIN, int(0.5 * GB))
+
+print()
+print("=" * 72)
+print("⑯ 渲染中危险区阈值：15% 占比必须有绝对上限（否则大容量盘会误杀）")
+print("=" * 72)
+# 2026-10-08 实测事故：931.5 GB 盘、剩 139.2 GB（14.9%）被判危险区，渲染被掐断，
+# 而当时本次渲染只需 24.8 GB —— 15% × 总容量 = 140 GB 是需求的 4 倍。
+th = SC.disk_danger_threshold(int(931.5 * GB), int(25 * GB))
+ck("  931GB盘/还需25GB → 阈值 27GB（需求侧生效）", th / GB, 27.0, 0.2, "GB")
+ck("  剩 139.2GB 时不该中止", 139.2 * GB < th, False)
+ck("  剩 100GB 时不该中止", 100 * GB < th, False)
+ck("  剩 26GB 时应中止", 26 * GB < th, True)
+th2 = SC.disk_danger_threshold(int(100 * GB), int(1 * GB))
+ck("  100GB盘/还需1GB → 阈值 15GB（15% 占比生效）", th2 / GB, 15.0, 0.2, "GB")
+th3 = SC.disk_danger_threshold(int(931.5 * GB), int(0.5 * GB))
+ck("  收尾阶段仍守 20GB 绝对底线（保护机器）", th3 / GB, 20.0, 0.2, "GB")
+ck("  剩 1GB 时应中止", 1 * GB < th3, True)
+ck("  剩 25GB 时不该中止", 25 * GB < th3, False)
+# 总容量 40GB 的小盘：15% = 6GB < 20GB 上限，占比规则原样生效
+th4 = SC.disk_danger_threshold(int(40 * GB), int(0.5 * GB))
+ck("  40GB小盘/还需0.5GB → 阈值 6GB（15%×40）", th4 / GB, 6.0, 0.2, "GB")
+ck("  15% 规则绝对上限 = 20GB", SC.DISK_DANGER_MAX_GATE, int(20 * GB))
+
 print("=" * 72)
 if _fails:
     print("✗ %d 项未通过：%s" % (len(_fails), _fails))

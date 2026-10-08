@@ -92,7 +92,30 @@ OUT_AUDIO_BR = "320k"
 OUT_ENCODER = "ffmpeg"
 OUT_PRESET = "fast"                # libx264 preset（仅 vcodec=libx264 时生效）
 OUT_VCODEC = "h264_nvenc"          # H.264 编码器：NVENC 硬编（实测与 x264 fast 同画质、快 3.3×）
-OUT_PAGES = 2                      # 并行渲染实例数（端到端实测：P=3 与编码进程互拖仅 13 fps，P=2 两阶段 9.2 min 最优）
+DEFAULT_PAGES = 2                  # 未显式指定 --pages、也未开 --auto-pages 时的默认档（保持历史行为 P=2）
+OUT_PAGES = DEFAULT_PAGES          # 并行渲染实例数（端到端实测：P=3 与编码进程互拖仅 13 fps，P=2 两阶段 9.2 min 最优）
+
+# ── 渲染磁盘治理（2026-10-08）────────────────────────────────────────────
+# 4K60 toBlob q0.98 实测 **2.03~2.12 MB/帧**（双源互证：残留 mjpeg 按 JPEG SOI 计数 /
+# 渲染日志 recvBytes）。取 2.2 留 HTTP+流控开销余量。
+# ⚠ 不要用 ffmpeg -q:v 2 抽帧测单帧（0.57 MB/帧）——那是解码后再压缩的帧，会低估 3~4 倍。
+MJPEG_FRAME_MB = 2.2
+# 视频侧份数：P>1 = 分段 mp4×P + concat 的 .render.mp4 + 最终成片；P=1 无分段、无 concat。
+VIDEO_COPY_FACTOR = 2.2
+VIDEO_COPY_FACTOR_P1 = 2.0
+DISK_SAFETY_MARGIN = int(0.5 * 1024 ** 3)      # 音频/波形/对齐等杂项余量
+# 渲染过程中：可用空间低于总量该比例即进入危险区 → 主动终止并清理，避免渲到 0 字节才失败
+DISK_DANGER_RATIO = 0.15           # 可用占比低于此值视为危险区
+DISK_ABORT_FLOOR = int(2.0 * 1024 ** 3)   # 判据①的底线余量：连这点都留不出就必然爆盘
+# ⚠ 15% 占比必须设**绝对上限**：931 GB 盘上 15% = 140 GB，是一次 P=2 渲染需求的 4 倍，
+#   照搬会把「空间充足」的正常渲染渲到一半掐掉（2026-10-08 实测：139 GB 可用被判危险区）。
+DISK_DANGER_MAX_GATE = int(20 * 1024 ** 3)
+DISK_MONITOR_INTERVAL_S = 30.0     # 渲染中磁盘采样间隔（秒）
+STALE_TMP_HOURS = 6.0              # 历史临时产物的陈旧门槛（小于此值视为正在跑，不碰）
+RENDER_TMP_ROOTNAME = "_render_tmp"  # 中间产物根目录（与 cuts/ 物理隔离）
+AUTO_PAGES = False                 # 是否按磁盘空间自动选 P=1/P=2（--auto-pages）
+GB = 1024 ** 3
+MB = 1024 ** 2
 # 码率验收下限（kbps）：低于此值视为未达标（用户要求「至少 4000」防二压模糊）。
 # 4K 目标 18 Mbps，留足余量；res=1 同口径校验。
 MIN_VIDEO_KBPS = 4000
@@ -643,52 +666,59 @@ def pick_node():
     raise RuntimeError("找不到 node 可执行文件（可用环境变量 SONGCUT_NODE 指定）")
 
 
-def _rm_retry(path, tries=4, sleep_s=0.4):
-    """删文件，遇OSError 重试。
+def _rm_retry(path, tries=4, sleep_s=0.4, log=None):
+    """删文件，遇 OSError 重试（Windows 大文件必需）。
 
     ⚠ Windows 上删除十几 GB 的大文件会**偶发瞬时失败**（杀毒软件 /
       索引服务 / shell 删除钩子此刻仍持有句柄），等 0.4s 重试几乎必成。
       不重试会静默留下一个巨额文件 —— 实测 14.47 GB 只清掉一半。
-      返回 True 表示确实删掉了。
+    ⚠ 一律用 os.remove = **永久删除**。绝不能让几十 GB 的 mjpeg 进
+      $RECYCLE.BIN —— 那样空间不会立即释放，下一次预检会误判。
+    返回 True 表示「此刻路径已不存在」（本来就不存在也算，幂等）。
     """
-    import time as _t
     for i in range(tries):
         try:
             os.remove(path)
             return True
         except FileNotFoundError:
             return True
-        except OSError:
+        except (NotADirectoryError, IsADirectoryError, PermissionError) as e:
+            # 传进来的是目录：os.remove 在 Windows 上抛 PermissionError
+            if log:
+                log("  ⚠ 删除失败（不是普通文件，请用 rmtree）：%s —— %s" % (path, e))
+            return False
+        except OSError as e:
             if i + 1 < tries:
-                _t.sleep(sleep_s)
+                time.sleep(sleep_s)
+            elif log:
+                log("  ⚠ 删除失败（已重试 %d 次，可能被占用）：%s —— %s" % (tries, path, e))
     return False
 
 
 def _cleanup_render_tmp(out_path):
-    """删掉本次渲染留下的 mjpeg / 分段 mp4 / concat 清单（失败路径兜底）。"""
-    import glob as _g
+    """删掉本次渲染留下的 mjpeg / 分段 mp4 / concat 清单。
 
-    def _esc(p):
-        return p.replace("[", "[[]").replace("]", "[]]").replace("?", "[?]").replace("*", "[*]")
-
+    ⚠ 成功路径也要调：cjs 正常分支会删，但异常分支可能留下几十 GB 的 mjpeg。
+    ⚠ 不包含 out_path 本身（.render.mp4 混流还要用，由 produce_one 收尾删）。
+    """
     n, freed, fail = 0, 0, 0
-    base = _esc(out_path)
-    for pat in (base + ".p*.mjpeg", base + ".p*.mp4", base + ".concat.txt", base + ".render.mp4"):
-        for f in _g.glob(pat):
-            try:
-                sz = os.path.getsize(f)
-            except OSError:
-                sz = 0
-            if _rm_retry(f):
-                n += 1
-                freed += sz
-            else:
-                fail += 1
-                log("  ⚠ 中间产物删不掉（可能被占用）：%s（%.2f GB）" % (f, sz / 1024 ** 3))
+    for f in _iter_render_artifacts(out_path):
+        try:
+            sz = os.path.getsize(f)
+        except OSError:
+            sz = 0
+        if _rm_retry(f, log=log):
+            n += 1
+            freed += sz
+        else:
+            fail += 1
+            # 绝不静默：删不掉意味着空间不会释放，下一次预检还会被这笔账坑
+            log("  ⚠ 中间产物删不掉（可能被占用）：%s（%.2f GB）" % (f, sz / GB))
     if n:
-        log("  渲染失败已清理中间产物 %d 个，回收 %.2f GB" % (n, freed / 1024 ** 3))
+        log("  已清理渲染中间产物 %d 个，回收 %.2f GB" % (n, freed / GB))
     if fail:
         log("  ⚠ 仍有 %d 个中间产物未删净，磁盘不会立即释放" % fail)
+    return freed
 
 
 def _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=print):
@@ -705,7 +735,9 @@ def _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=print):
     import glob as _g
     import time as _time
     pats = ("**/*.render.mp4.p*.mjpeg", "**/*.render.mp4.p*.mp4",
-            "**/*.render.mp4", "**/*.render.mp4.concat.txt")
+            "**/*.render.mp4", "**/*.render.mp4.concat.txt",
+            # _render_tmp/<date>/ 下的任何残留（哪怕命名对不上也一并收走）
+            "_render_tmp/**/*.mjpeg", "_render_tmp/**/*.mp4", "_render_tmp/**/*.txt")
     now = _time.time()
     n, freed = 0, 0
     for pat in pats:
@@ -724,63 +756,196 @@ def _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=print):
                     % (f, st.st_size / 1024 ** 3))
     if n:
         log("  已清理历史渲染残留 %d 个文件，回收 %.2f GB"
-            "（若磁盘未立即释放，是回收站占用，可用 gio/Recycle Bin 清空）"
-            % (n, freed / 1024 ** 3))
+            "（全程 os.remove 永久删除，不进回收站；若空间仍未释放多为杀软/索引器持句柄）"
+            % (n, freed / GB))
     return freed
+
+
+def render_tmp_dir(workdir, date):
+    """渲染中间产物目录：`_render_tmp/<date>/`。
+
+    ⚠ 必须与成片目录 `cuts/<date>/` **物理隔离**：
+      · mjpeg / 分段 mp4 / concat 清单 / .render.mp4 全在这里
+      · 渲染失败或崩溃后一眼可辨，可整体清理
+      · 不会被 `_trash/` 的旧片备份机制误判，正式输出目录保持干净
+    """
+    d = os.path.join(workdir, RENDER_TMP_ROOTNAME, str(date))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _iter_render_artifacts(out_path):
+    """本次渲染可能产生的中间产物（mjpeg / 分段 mp4 / concat 清单）。
+
+    ⚠ 不含 out_path 本身（那是 .render.mp4，混流还要用，不能提前删）。
+    """
+    import glob as _g
+
+    def _esc(p):
+        return p.replace("[", "[[]").replace("]", "[]]").replace("?", "[?]").replace("*", "[*]")
+
+    base = _esc(out_path)
+    for pat in (base + ".p*.mjpeg", base + ".p*.mp4", base + ".concat.txt"):
+        for f in _g.glob(pat):
+            yield f
+
+
+def _render_tmp_size(out_path):
+    """本次渲染已落盘的中间产物总字节（渲染中磁盘监控用）。"""
+    n = 0
+    for f in _iter_render_artifacts(out_path):
+        try:
+            n += os.path.getsize(f)
+        except OSError:
+            pass
+    try:                                   # P=1 时 .render.mp4 本身也在增长
+        n += os.path.getsize(out_path)
+    except OSError:
+        pass
+    return n
+
+
+def estimate_render_breakdown(duration, bitrate=None, pages=2, frame_mb=None):
+    """估算本次渲染的**峰值**临时空间（字节），返回拆分明细 dict。
+
+    ⚠ 公式依据（2026-10-08 实测，勿回退）：
+      P>1 两阶段：mjpeg 全片落盘（每帧只写一次，**不乘 pages** —— 分段落盘，
+                  第 p 个实例只写自己那段）+ 视频侧三份
+      P=1  流式  ：帧直接走 stdin 进 ffmpeg，**完全不落盘** → 只有两份视频流
+      ⚠ 旧式 `2GB + pages × frames × 2.2MB` 整体高估 2.1~2.2 倍，不要再改回去。
+    """
+    br = float(bitrate if bitrate is not None else OUT_BITRATE)
+    fm = float(frame_mb if frame_mb is not None else MJPEG_FRAME_MB)
+    d = float(duration or 0)
+    frames = max(1, int(round(d * 60)))
+    pages = max(1, int(pages or 1))
+    if pages > 1:
+        mjpeg = frames * fm * MB
+        video = d * (br / 8.0) * VIDEO_COPY_FACTOR
+    else:
+        mjpeg = 0.0
+        video = d * (br / 8.0) * VIDEO_COPY_FACTOR_P1
+    return {"frames": frames, "duration": d, "bitrate": br, "pages": pages,
+            "mjpeg": int(mjpeg), "video": int(video), "margin": DISK_SAFETY_MARGIN,
+            "total": int(mjpeg + video + DISK_SAFETY_MARGIN)}
+
+
+def estimate_render_bytes(duration, bitrate=None, pages=2, frame_mb=None):
+    """estimate_render_breakdown 的总量简写。"""
+    return estimate_render_breakdown(duration, bitrate, pages, frame_mb)["total"]
+
+
+def disk_danger_threshold(total_bytes, need_left_bytes):
+    """渲染过程中的「危险区」阈值（字节）：可用空间低于此值即应中止并清理。
+
+    取两个判据的**较大者**：
+      ① need_left + 2GB —— 剩下的空间已经不够把这次渲完，继续必然爆盘
+      ② min(15% × 总容量, 20GB) —— 占比危险区
+    ⚠ ② 必须设绝对上限：931 GB 盘上 15% = 140 GB，是一次 P=2 渲染需求的 4 倍。
+      照搬会把「空间充足」的正常渲染渲到一半掐掉
+      （2026-10-08 实测：139.2 GB 可用 / 931.5 GB = 14.9% 被判危险区而中止）。
+    """
+    gate_ratio = min(DISK_DANGER_RATIO * float(total_bytes or 0), DISK_DANGER_MAX_GATE)
+    return int(max(float(need_left_bytes) + DISK_ABORT_FLOOR, gate_ratio))
+
+
+def choose_render_pages(free_bytes, duration, bitrate=None, prefer=None):
+    """按可用空间选 pages：够 → prefer（默认 P=2 速度优先），不够 → 降级 P=1。
+
+    P=1 是最后保险：流式渲染，帧不落盘，峰值只有两份视频流（280s 约 1.8 GB），
+    代价是渲染慢约 33%（12.2 min vs 9.2 min）。
+    返回 dict: pages / need / need_p2 / need_p1 / fallback / breakdown。
+    ⚠ 连 P=1 都不够时抛 RuntimeError —— 必须在渲染**开始前**失败，
+      不能启动一个注定爆盘的长任务。
+    """
+    prefer = max(1, int(prefer if prefer is not None else DEFAULT_PAGES))
+    cands, seen = [], set()
+    for p in (prefer, 1):                  # prefer → 1 的降级链，去重
+        if p not in seen:
+            seen.add(p)
+            cands.append(p)
+    b2 = estimate_render_breakdown(duration, bitrate, 2)
+    b1 = estimate_render_breakdown(duration, bitrate, 1)
+    for p in cands:
+        b = estimate_render_breakdown(duration, bitrate, p)
+        if free_bytes >= b["total"]:
+            return {"pages": p, "need": b["total"], "need_p2": b2["total"],
+                    "need_p1": b1["total"], "fallback": p < prefer, "breakdown": b}
+    raise RuntimeError(
+        "磁盘空间不足：P=2 需约 %.1f GB，降级 P=1 仍需 %.1f GB，当前可用仅 %.1f GB。"
+        "请清理磁盘后重试（渲染中间产物在 %s/<日期>/ 下，可整体删除）"
+        % (b2["total"] / GB, b1["total"] / GB, free_bytes / GB, RENDER_TMP_ROOTNAME))
+
+
+def resolve_pages(cli_pages=None, auto=False):
+    """pages 优先级：显式 --pages > --auto-pages > 默认。返回 (pages, auto_on)。"""
+    if cli_pages is not None:
+        return max(1, int(cli_pages)), False      # 用户显式指定，绝不擅自改
+    return max(1, int(DEFAULT_PAGES)), bool(auto)
+
+
+def _prune_empty_tmp_dir(workdir, date):
+    """本次渲染收尾后，`_render_tmp/<date>/` 空了就顺手删掉，不留空壳。"""
+    d = os.path.join(workdir, RENDER_TMP_ROOTNAME, str(date))
+    try:
+        if os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+    except OSError:
+        pass
 
 
 def render_player_video(workdir, job, ffmpeg=None):
     """调 render_song.cjs：无头浏览器离线逐帧渲染播放器画面并编码落盘。
 
-    job.encoder = "ffmpeg"   → 画布逐帧 JPEG(q98) 流式交给 ffmpeg libx264 编码（4K 默认，
-                               因为 Chromium 软件 H.264 码率控制饱和，到不了 B站 不二压区间）
+    job.encoder = "ffmpeg"   → 画布逐帧 JPEG(q98) 交给 ffmpeg 编码（4K 默认，
+                               因为 Chromium 软件 H.264 码率控制饱和，到不了 18 Mbps）
     job.encoder = "webcodecs"→ 页面内 WebCodecs 编码后整片 POST 回落（1080P 回退档）
+
+    ⚠ 磁盘策略（2026-10-08）：先清历史残留 → 量可用空间 → 估算 P=2/P=1 需求
+      → --auto-pages 时自动选档 → 渲染中每 30s 采样 → 进危险区主动中止并清理。
+      P=1/P=2 的选择**只在开始前做一次**，渲染途中绝不动态切档（切了会白渲）。
     """
     # 0) 先扫历史残留。**必须放在预检之前** —— 清出来的空间要算进可用额度，
     #    否则上一轮崩溃留下的十几 GB 会让预检误报「空间不足」。
+    log("[DISK] Cleaning stale render temp...")
     try:
-        _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=log)
+        _sweep_stale_render_tmp(workdir, older_than_h=STALE_TMP_HOURS, log=log)
     except Exception as _e:
-        log("  残留扫描跳过：%s" % _e)
+        # 清理失败不许静默：可用空间账会算错，必须让人看见
+        log("  ⚠ [DISK] 历史残留扫描失败（可用空间账会偏保守）：%r" % (_e,))
 
-    # ── 磁盘预检（2026-10-08 修正）────────────────────────────────────
-    # 实测依据（280s/4K60 那次渲染留下的残留文件，双源互证）：
-    #   · cuts/2026-10-07/*.render.mp4.p{0,1}.mjpeg 共 14.47 GB，
-    #     按 JPEG SOI(ffd8ff) 计数得 8816 帧 → **2.03 MB/帧**
-    #   · 渲染日志 recvBytes 累计 13200 帧 / 27981 MB → 2.12 MB/帧
-    #   ⇒ 取 2.2 MB/帧（含 HTTP/流控开销的余量）。
-    #
-    # ⚠ 旧公式 `pages × frames × 2.2MB` 有两个错，**不要再改回去**：
-    #   ① **不该乘 pages**。两阶段是「分段落盘」——第 p 个实例只写自己那一段
-    #      （render_song.cjs: `p = floor(idx / SEG_PER)`），每帧全程只写一次。
-    #      乘 pages 等于凭空翻倍，与磁盘实测对不上。
-    #   ② 漏了分段 mp4 与 concat 输出的 .render.mp4（各约 frames×br/8/fps）。
-    #   两者相抵后旧公式整体**高估 2.1~2.2 倍**，造成两个方向都错：
-    #   「明明够却报不足」白等清盘，「报了不足其实够」渲到一半爆盘。
-    # 真实峰值 = mjpeg + 视频侧三份（分段×P + render.mp4 + 最终成片）。
-    try:
-        _d = float(job.get("duration") or 0)
-        _frames = int(_d * 60) or 1
-        _pages = max(1, int(job.get("pages") or 1))
-        _mjpeg = _frames * 2.2 * 1024 ** 2          # 不乘 pages：分段落盘，每帧只写一次
-        _video = _d * (OUT_BITRATE / 8.0) * 2.2# 分段 mp4 + render.mp4 + 成片
-        _need = _mjpeg + _video + 0.5 * 1024 ** 3     # +0.5GB 音频/波形/对齐余量
-        _tot, _used, _free = shutil.disk_usage(
-            os.path.dirname(os.path.abspath(job["out"])) or ".")
+    _dir = os.path.dirname(os.path.abspath(job["out"])) or "."
+    _tot, _used, _free = shutil.disk_usage(_dir)
+    log("[DISK] Available: %.1f GB" % (_free / GB))
+
+    _br = float(job.get("bitrate") or OUT_BITRATE)
+    _dur = float(job.get("duration") or 0)
+    _need_p2 = estimate_render_bytes(_dur, _br, 2)
+    _need_p1 = estimate_render_bytes(_dur, _br, 1)
+    log("[DISK] Estimated P=2 requirement: %.1f GB" % (_need_p2 / GB))
+    log("[DISK] Estimated P=1 requirement: %.1f GB" % (_need_p1 / GB))
+
+    if AUTO_PAGES:
+        try:
+            _pick = choose_render_pages(_free, _dur, _br,
+                                        prefer=job.get("pages") or DEFAULT_PAGES)
+        except RuntimeError as _e:
+            log("[DISK] %s" % _e)      # 渲染开始前就失败，不启动注定爆盘的长任务
+            raise
+        job["pages"] = _pick["pages"]
+        _need = _pick["need"]
+        log("[DISK] Selected pages=%d (%s)" % (
+            _pick["pages"], "speed priority" if _pick["pages"] > 1 else "low-space fallback"))
+    else:
+        job["pages"] = max(1, int(job.get("pages") or DEFAULT_PAGES))
+        _need = estimate_render_bytes(_dur, _br, job["pages"])
+        log("[DISK] Selected pages=%d (user-specified)" % job["pages"])
         if _free < _need:
             raise RuntimeError(
-                "磁盘空间不足：本次渲染实测需约 %.1f GB"
-                "（mjpeg %.1f GB + 视频流 %.1f GB），当前可用仅 %.1f GB。"
-                "请先清理（渲染中间产物通常在回收站里）"
-                % (_need / 1024 ** 3, _mjpeg / 1024 ** 3, _video / 1024 ** 3,
-                   _free / 1024 ** 3))
-        log("  磁盘预检：需 %.1f GB（mjpeg %.1f + 视频 %.1f）/ 可用 %.1f GB ✓"
-            % (_need / 1024 ** 3, _mjpeg / 1024 ** 3, _video / 1024 ** 3,
-               _free / 1024 ** 3))
-    except RuntimeError:
-        raise
-    except Exception:
-        pass
+                "磁盘空间不足：本次渲染（pages=%d）需约 %.1f GB，当前可用仅 %.1f GB。"
+                "空间紧张可改用 --auto-pages 或 --pages 1"
+                "（低占用模式约 %.1f GB，代价是渲染慢约 33%%）"
+                % (job["pages"], _need / GB, _free / GB, _need_p1 / GB))
 
     job_f = os.path.join(workdir, "_render_job.json")
     io.open(job_f, "w", encoding="utf-8", newline="").write(
@@ -791,16 +956,100 @@ def render_player_video(workdir, job, ffmpeg=None):
         env["FFMPEG_BIN"] = ffmpeg       # render_song.cjs 优先用本管线的 ffmpeg，避免找错
     cmd = [pick_node(), _RENDER_CJS, "--job", job_f]
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=10800, env=env, creationflags=flags)
-    for line in (p.stdout or "").splitlines():
+
+    # ⚠ 输出接 TemporaryFile 而不是 PIPE：子进程日志写满 64KB 管道缓冲区会直接卡死
+    import tempfile as _tf
+    _so = _tf.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+    _se = _tf.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+    proc = None
+    abort = None
+    try:
+        proc = subprocess.Popen(cmd, stdout=_so, stderr=_se, text=True,
+                                encoding="utf-8", errors="replace",
+                                env=env, creationflags=flags)
+        t_start = time.time()
+        last = t_start
+        # ── 渲染中磁盘监控：只在开始检查一次是不够的，mjpeg 会一路涨到 30 GB+ ──
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+            if time.time() - t_start > 10800:
+                abort = "渲染超时（>3h）"
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                break
+            now = time.time()
+            if now - last >= DISK_MONITOR_INTERVAL_S:
+                last = now
+                try:
+                    _t2, _u2, _f2 = shutil.disk_usage(_dir)
+                    _tmp_sz = _render_tmp_size(job["out"])
+                    _left = max(0, _need - _tmp_sz)
+                    log("[DISK] temp=%.1f GB, free=%.1f GB（还需约 %.1f GB）"
+                        % (_tmp_sz / GB, _f2 / GB, _left / GB))
+                    _th = disk_danger_threshold(_t2, _left)
+                    if _f2 < _th:
+                        if _left + DISK_ABORT_FLOOR >= _th:
+                            abort = ("剩余空间不足以完成本次渲染：还需 %.1f GB，仅剩 %.1f GB"
+                                     % (_left / GB, _f2 / GB))
+                            log("[DISK] CRITICAL: not enough space to finish"
+                                "（还需 %.1f GB，仅剩 %.1f GB）" % (_left / GB, _f2 / GB))
+                        else:
+                            abort = ("剩余空间进入危险区：%.1f GB / 共 %.1f GB（%.1f%%）"
+                                     % (_f2 / GB, _t2 / GB, _f2 / _t2 * 100))
+                            log("[DISK] CRITICAL: free space below %.0f%%"
+                                % (DISK_DANGER_RATIO * 100))
+                        try:
+                            proc.kill()
+                        except OSError:
+                            pass
+                        break
+                except Exception as _e:
+                    log("  ⚠ [DISK] 监控取样失败：%r" % (_e,))
+            time.sleep(1.0)
+        rc = proc.poll()
+        if rc is None:
+            rc = proc.wait()
+    except BaseException:
+        # 被 Ctrl-C / 外部中断也要收干净，否则几十 GB mjpeg 留在盘上
+        if proc is not None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        _cleanup_render_tmp(job["out"])
+        _rm_retry(job["out"], log=log)
+        raise
+    finally:
+        _so.seek(0)
+        _se.seek(0)
+        _out_txt = _so.read()
+        _err_txt = _se.read()
+        _so.close()
+        _se.close()
+
+    for line in (_out_txt or "").splitlines():
         if line.strip():
             log("  [render] " + line.strip()[:160])
-    if p.returncode != 0 or not os.path.exists(job["out"]):
-        tail = ((p.stderr or "") + (p.stdout or "")).strip()[-400:]
-        _cleanup_render_tmp(job["out"])       # 失败也要清理，否则满盘 mjpeg 会拖垮下一次
-        raise RuntimeError("渲染失败 rc=%s：%s" % (p.returncode, tail))
+
+    if abort:
+        log("[DISK] Aborting render and cleaning temporary files...")
+        _cleanup_render_tmp(job["out"])
+        _rm_retry(job["out"], log=log)
+        raise RuntimeError("渲染中止：%s（已清理临时文件）" % abort)
+    if rc != 0 or not os.path.exists(job["out"]):
+        tail = ((_err_txt or "") + (_out_txt or "")).strip()[-400:]
+        _cleanup_render_tmp(job["out"])
+        _rm_retry(job["out"], log=log)
+        raise RuntimeError("渲染失败 rc=%s：%s" % (rc, tail))
+
+    # 成功也要收尾：cjs 正常分支会删，但异常分支可能留下 mjpeg / 分段 mp4
+    _cleanup_render_tmp(job["out"])
     return job["out"]
+
 
 
 def _art_dataurl():
@@ -1052,7 +1301,9 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         head = io.open(cover_path, "rb").read(4)
         mime = "image/png" if head == b"\x89PNG" else "image/jpeg"
         cover_data = "data:%s;base64,%s" % (mime, base64.b64encode(io.open(cover_path, "rb").read()).decode())
-    render_tmp = out_mp4 + ".render.mp4"
+    # ⚠ 中间产物不再落进 cuts/<date>/：与成片物理隔离，崩溃后一眼可辨、可整体清理
+    render_tmp = os.path.join(render_tmp_dir(workdir, date),
+                              os.path.basename(out_mp4) + ".render.mp4")
     job = {
         "playerDir": _PLAYER_DIR,
         "audio": out_mp3,
@@ -1087,15 +1338,17 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     render_player_video(workdir, job, ffmpeg)
 
     # 5. 混流：渲染画面 + MP3 音轨 → 最终 MP4（视频流直拷，音轨 AAC 重编码）
-    rc, _, err = run([ffmpeg, "-y", "-v", "error", "-i", render_tmp, "-i", out_mp3,
-                      "-map", "0:v:0", "-map", "1:a:0",
-                      "-c:v", "copy", "-c:a", "aac", "-b:a", OUT_AUDIO_BR,
-                      "-movflags", "+faststart", "-shortest", out_mp4])
-    if os.path.exists(render_tmp):
-        try:
-            os.remove(render_tmp)
-        except OSError:
-            pass
+    try:
+        rc, _, err = run([ffmpeg, "-y", "-v", "error", "-i", render_tmp, "-i", out_mp3,
+                          "-map", "0:v:0", "-map", "1:a:0",
+                          "-c:v", "copy", "-c:a", "aac", "-b:a", OUT_AUDIO_BR,
+                          "-movflags", "+faststart", "-shortest", out_mp4])
+    finally:
+        # 混流成功/失败都要收掉 .render.mp4：它是 0.6 GB 级的中间体，
+        # 留在 _render_tmp 里会逐首累积（旧的 `if os.path.exists` 在 run() 抛异常时会漏掉）
+        if not _rm_retry(render_tmp, log=log) and os.path.exists(render_tmp):
+            log("  ⚠ 中间成片删不掉（可能被占用）：%s" % render_tmp)
+        _prune_empty_tmp_dir(workdir, date)
     if rc != 0:
         raise RuntimeError("混流失败：%s" % err[-300:])
     log("  渲染+混流完成，耗时 %.0fs" % (time.time() - t0))
@@ -1205,20 +1458,29 @@ def main():
     ap.add_argument("--vcodec", default="h264_nvenc", choices=("h264_nvenc", "libx264"),
                     help="H.264 编码器：h264_nvenc=NVENC 硬编（默认，实测 4K60 比 x264 fast 快 3.3×，"
                          "PSNR/SSIM 与 x264 持平）；libx264=CPU 软编回退")
-    ap.add_argument("--pages", type=int, default=2,
+    ap.add_argument("--pages", type=int, default=None,
                     help="并行渲染实例数（默认 2。端到端实测 P=2 两阶段最优：≥2 走先渲染落盘再并行编码，"
-                         "P=3 起与编码进程互拖反而变慢；只求稳可设 1）")
+                         "P=3 起与编码进程互拖反而变慢）。显式给出时不作任何自动降级；"
+                         "P=1 为低占用模式（帧不落盘，约 1.8 GB 峰值，但慢约 33%%）")
+    ap.add_argument("--auto-pages", action="store_true",
+                    help="按实测磁盘空间自动选档：空间够 → P=2（速度优先，约 35 GB 峰值）；"
+                         "不够 → 自动降级 P=1（约 1.8 GB 峰值，慢约 33%%）；连 P=1 都不够则渲染前直接报错。"
+                         "同时给了 --pages 时以 --pages 为准")
     ap.add_argument("--raw-cut", action="store_true", help="旧档：直接切源视频画面（不做播放器渲染）")
     ap.add_argument("--scheme", type=int, default=None,
                     help="手动指定标题装饰方案 0~4（流光渐变/描边镂空/霓虹柔光/色块高亮/双色错位），"
                          "缺省则由歌曲意境自动匹配")
     args = ap.parse_args()
 
-    global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC, OUT_PAGES
+    global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC
+    global OUT_PAGES, AUTO_PAGES
     OUT_RES, OUT_BITRATE = args.res, args.bitrate
     OUT_ENCODER, OUT_PRESET = args.encoder, args.preset
     LRC_OVERRIDE = getattr(args, "lrc_override", "") or ""
-    OUT_VCODEC, OUT_PAGES = args.vcodec, args.pages
+    OUT_VCODEC = args.vcodec
+    # 优先级：显式 --pages > --auto-pages > 默认 P=2。无显式指定时保持历史默认行为。
+    OUT_PAGES, AUTO_PAGES = resolve_pages(getattr(args, "pages", None),
+                                          getattr(args, "auto_pages", False))
     PERF_NO = args.perf_no
 
     # ---- 前置检查：配置缺失时给出可照做的提示，而不是在深处抛底层异常 ----
