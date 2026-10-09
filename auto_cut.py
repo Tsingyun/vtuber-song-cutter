@@ -86,11 +86,7 @@ LIB_SCAN_RECALL = 0.30      # 曲库全量粗筛阈值：宁可多选几个，�
 # ⚠ 只统计**时长占比**与**最长连续段**，不逐句下结论 —— 逐句分类已被实测否决
 #   （FunASR 中文错字会把真唱段 16/16 句误判成说话，见 verify_candidate 闸门 4 注释）。
 NONLYRIC_RATIO_MAX = 0.55   # 窗口内非歌词语音时长占比上限
-# 2026-10-09 由 45 → 60：《晚婚》真唱段「身边有好多像我的人，日子过得都很稳」被
-#   ASR 转成「生活也过得很稳」等错字，两句真歌词被判非歌词语音，拼出 27.8s 假 run
-#   → 超过旧 WARN 线 27s 被标疑似不出片。真唱的 run 上限实测可到 ~28s（错字场景）；
-#   纯 BGM 场景实测 ratio 60~100% / run 173s，ratio 仍是主力判据，run 60 只影响边界。
-NONLYRIC_RUN_MAX = 60.0     # 单段连续非歌词语音上限（秒）
+NONLYRIC_RUN_MAX = 45.0     # 单段连续非歌词语音上限（秒）
 
 SYS_LYRIC = (
     "你是直播录播分析助手。任务：判断一段语音转写里是否存在主播完整演唱一首歌的段落，"
@@ -269,11 +265,11 @@ def fetch_lrc(title, workdir, artist_hint=None):
     return (lrc if (info.get("lyrics_source") not in (None, "none")) else None), info
 
 
-# ==== 原唱归一化（用户 2026-10-09 再次强调，多次强调的铁律）====
-# 无论主播演唱的是什么版本（Live/音综/翻唱），成片的**歌名、歌手、封面**必须
-# 标注**原唱**。实测事故（2026-10-08《晚婚》）：LLM 歌词检索返回「晚婚 (Live)」
-# → lookup_library_artist("晚婚 (Live)") 查不到曲库的「晚婚→江蕙」→ hint 为空
-# → 网易云按「晚婚 (Live)」搜出谭维维音综版 → 歌手/封面/时长全是音综版出片。
+# ==== 原唱标注 vs 演唱版本（用户多次强调的铁律，2026-10-09 定稿语义）====
+# · 成片的**歌手名+封面**必须标**原唱**（江蕙之于《晚婚》、尤长靖之于《昨日青空》），
+#   无论她演唱的是 Live/音综/翻唱哪一版 —— 用裸歌名查曲库 artist 再抓封面。
+# · 歌词/定位/原曲时长/切点/DTW 对齐必须按**实际演唱版本** —— 实测教训：连这些也
+#   换成原唱版的话，江蕙版《晚婚》前奏 ~59s 被套进切点公式，成片前 59s 全是说话。
 _VER_PAT = re.compile(r"[\s]*[(（【\[][^)）】\]]*(?:live|翻唱|cover|伴奏|版|version)[^)）】\]]*[)）】\]][\s]*",
                       re.IGNORECASE)
 
@@ -458,17 +454,30 @@ def library_fallback(entries, workdir, log=print):
 def verify_candidate(cand, entries, workdir):
     """抓歌词 → 转写定位 → 重合率/时长核验。返回 (item, ok)。"""
     title = cand["name"]
-    # ---- 原唱归一化：剥版本后缀，用裸歌名查曲库原唱 hint，按裸歌名抓取元数据 ----
-    # （保证成片的歌手/封面/官方时长来自原唱版本，而非音综 Live/翻唱条目）
     base = strip_version_suffix(title)
-    hint = SC.lookup_library_artist(base) or SC.lookup_library_artist(title)
-    lrc, info = fetch_lrc(base, workdir, hint)
-    if not lrc and base != title:
-        lrc, info = fetch_lrc(title, workdir, hint)   # 裸歌名抓不到歌词再回退原名
+    # ==== 演唱内容 vs 原唱标注，两条线分开（用户 2026-10-09 定稿的铁律）====
+    # · 歌词/定位/原曲时长/切点/DTW对齐 → 一律按**实际演唱版本**（候选原名）；
+    #   实测教训：若换成原唱版，江蕙版《晚婚》前奏 ~59s 被套进切点公式，
+    #   成片前 59s 全是说话，Live 改词句也因歌词版本不同丢对齐。
+    # · 成片的**歌手名+封面** → 一律用**原唱**（曲库 artist + 裸歌名抓取），
+    #   无论演唱的是 Live/音综/翻唱哪一版。
+    hint = SC.lookup_library_artist(title)      # 演唱版本自己的 hint（通常为空）
+    lrc, info = fetch_lrc(title, workdir, hint)
     item = {"title": base, "source": cand["src"], "artist_hint": hint or None,
             "lyrics_source": info.get("lyrics_source"), "notes": []}
     if base != title:
-        item["sung_version"] = title       # 她实际唱的版本（仅记录，出片一律标原唱）
+        item["sung_version"] = title            # 她实际唱的版本（歌词/切点用这版）
+        # 原唱歌手 + 原唱封面：按裸歌名 + 曲库原唱 hint 单独抓取（仅取这两个字段）
+        orig_artist = SC.lookup_library_artist(base)
+        if orig_artist:
+            item["orig_artist"] = orig_artist
+            try:
+                _o_lrc, _o_cov, _o_info = lyrics_fetch.fetch_lyrics_and_cover(
+                    base, artist_hint=orig_artist, dur=None, ref_text=None,
+                    cache_dir=os.path.join(workdir, "_media_cache"))
+                item["orig_cover_path"] = _o_cov
+            except Exception:
+                pass
     if not lrc:
         item["notes"].append("未检索到该歌名歌词")
         return item, False
@@ -526,16 +535,9 @@ def verify_candidate(cand, entries, workdir):
 
     # ---- 闸门 4b：她同时在讲别的事（区分真唱 / 只放 BGM）----
     # 只看时长占比与最长连续段，不逐句判定（逐句已被实测否决，见上方注释）。
-    # ⚠ 判「是不是歌词」要用**原唱版 + 实际演唱版**两版歌词的并集（2026-10-09）：
-    #   实测《晚婚》她唱的是 Live 版（含改词句「身边有好多像我的人…」），只用
-    #   江蕙原版歌词逐句匹配时，改词句全被判成「非歌词语音」，拼出 28s 假 run
-    #   → 触发 WARN 标疑似，白白不出片。原唱归一化后 candidate 原名就是演唱版。
-    prof_lrc = lrc
-    if base != title:
-        lrc_v, _i2 = fetch_lrc(title, workdir, hint)
-        if lrc_v:
-            prof_lrc = lrc + "\n" + lrc_v
-    prof = lyric_locate.speech_profile(entries, prof_lrc, loc["start"], loc["end"])
+    # ⚠ 歌词必须是**实际演唱版本**：2026-10-09《晚婚》用江蕙原版歌词逐句匹配时，
+    #   Live 改词句「身边有好多像我的人…」全被判成非歌词语音，拼出 28s 假 run。
+    prof = lyric_locate.speech_profile(entries, lrc, loc["start"], loc["end"])
     item["nonlyric_ratio"] = prof["nonlyric_ratio"]
     item["nonlyric_max_run_s"] = prof["max_run_s"]
     item["nonlyric_runs"] = prof["runs"][:6]
@@ -888,6 +890,11 @@ def main():
             io.open(seg_json, "w", encoding="utf-8").write(json.dumps({
                 "version": 1, "date": date, "songs": [{
                     "seq": i + 1, "title_guess": it["title"],
+                    # fetch_title：实际演唱版本名（如「晚婚 (Live)」）—— 歌词/原曲时长/
+                    # DTW 对齐按这版抓；title_guess 保持曲库裸歌名（文件名/统计口径）。
+                    "fetch_title": it.get("sung_version") or it["title"],
+                    "artist": it.get("orig_artist"),        # 原唱歌手（画面标注）
+                    "cover_path": it.get("orig_cover_path"),  # 原唱封面（画面标注）
                     "start": it["rough_start"], "end": it["rough_end"], "lang": "zh",
                     "confidence": 0.9, "start_hms": it["rough_start_hms"],
                     "end_hms": it["rough_end_hms"], "title_source": "lyric-search",

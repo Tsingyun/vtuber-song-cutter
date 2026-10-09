@@ -1225,13 +1225,25 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     #    artist_hint：曲库里的原唱歌手，用于让搜索结果对准正确版本。
     #    ref_text：本片段的演唱转写，用于「歌词正文 vs 实际唱了什么」字面比对——
     #              同名不同歌的错版本（如《泡泡》牛佳钰版 vs 娃娃版）一测即出。
-    _hint = lookup_library_artist(seg["title_guess"])
+    #
+    #    ⚠ 演唱版本 vs 原唱标注（用户 2026-10-09 定稿）：fetch_title 是实际演唱
+    #    版本名（如「晚婚 (Live)」），歌词/原曲时长/DTW 对齐按它抓 —— 换成原唱版
+    #    会导致前奏时长不符（江蕙版《晚婚》前奏 ~59s 套进切点 → 前 59s 全说话）、
+    #    Live 改词句丢对齐。歌手名/封面由 segments 的 artist/cover_path 显式
+    #    注入原唱（auto_cut 从曲库取），与演唱版本解耦。
+    fetch_name = (seg.get("fetch_title") or seg["title_guess"] or "").strip()
+    _hint = lookup_library_artist(fetch_name)
     ref_text = ""
     if srt_entries:
         ref_text = "\n".join(t for (a, b, t) in srt_entries if cs - 2 <= a <= ce + 2)
     lrc, cover_path, linfo = lyrics_fetch.fetch_lyrics_and_cover(
-        seg["title_guess"], artist_hint=_hint, dur=ce - cs, ref_text=ref_text,
+        fetch_name, artist_hint=_hint, dur=ce - cs, ref_text=ref_text,
         cache_dir=os.path.join(workdir, "_media_cache"))
+    # 原唱封面显式覆盖（segments.cover_path，auto_cut 按曲库原唱抓取；缺失则回退抓取结果）
+    _orig_cov = (seg.get("cover_path") or "").strip() if isinstance(seg.get("cover_path"), str) else seg.get("cover_path")
+    if _orig_cov and os.path.exists(_orig_cov):
+        cover_path = _orig_cov
+        linfo["cover_source"] = "原唱封面(曲库:%s)" % (seg.get("artist") or "?")
     if _hint:
         log("  曲库歌手提示: %s" % _hint)
     src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
@@ -1277,8 +1289,11 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
 
     # 2.5 原曲分析（默认执行）：全曲 DTW 速度比 + 局部互相关校正锚点。
     #     产出 ①精确伴奏结束点（尾部切点 = 乐句结束 + 余韵）②歌词时间轴。
-    sync = timeline_sync.analyze(seg["title_guess"], artist, ffmpeg, src,
-                                 onset_abs, cs, ce, lrc or "", workdir, log=log)
+    #     ⚠ 用 fetch_name + 抓取到的演唱版歌手下载原曲 —— 她唱的是哪版就对齐哪版；
+    #       传原唱歌手会把原唱版伴奏下载来 DTW（编曲不同 → slope 跑飞 → 降级）。
+    sync = timeline_sync.analyze(fetch_name, linfo.get("artist") or artist,
+                                 ffmpeg, src, onset_abs, cs, ce, lrc or "",
+                                 workdir, log=log)
     if sync.get("ok"):
         corr = ("，互相关校正 %+.3fs" % -sync["med"]) if sync.get("corrected") else ""
         log("  原曲分析: slope=%.5f 残差RMS=%.3fs%s，锚点=%.3f" % (
