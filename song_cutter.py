@@ -1177,6 +1177,53 @@ def _pre_render_gate(dur, lrc, linfo, tl_src, cov, date, disp):
     return fail, warn
 
 
+def lyric_time_span(entries, lrc_text, t0, t1, line_thr=0.5):
+    """在 [t0, t1] 的转写里找「唱到的歌词」首句起点 / 末句终点。
+
+    给音乐边界检测当锚点（music_bounds.find_head / find_tail）。
+
+    ⚠ 必须**逐行歌词**匹配，不能拿整首歌词做 2-gram 全集去比对：那样歌后的
+    闲聊里只要出现几个常用字就算命中（实测晚婚末句被推到 7214s——她唱完
+    19s 后随口哼的半句「她难不能我」被算成末句），尾部切点会整个跑飞。
+
+    ⚠ 末句取的是该句转写的**结束**时间：歌声通常延续好几秒，只取开始时间
+    会让尾部切点提前十几秒，把尾奏切掉。
+    """
+    try:
+        from songcut import lyric_locate as LL
+    except Exception:
+        return None, None
+    lines = LL.lrc_lines(lrc_text or "")
+    if not lines:
+        return None, None
+    win = [(a, b, t) for (a, b, t) in entries
+           if t0 <= a <= t1 and (t or "").strip()]
+    if not win:
+        return None, None
+    grams_win = [(a, b, LL.grams(t)) for (a, b, t) in win]
+    hits = []
+    for _lt, tx in lines:
+        gl = LL.grams(tx)
+        if len(gl) < 2:
+            continue
+        best_r, best_a, best_b = 0.0, None, None
+        for i, (a, b, g) in enumerate(grams_win):
+            u = g
+            if i + 1 < len(grams_win) and grams_win[i + 1][0] - b < 2.0:
+                u = g | grams_win[i + 1][2]      # ASR 常把两句并成一句
+            if not u:
+                continue
+            r = len(gl & u) / float(len(gl))
+            if r > best_r:
+                best_r, best_a, best_b = r, a, b
+        if best_r >= line_thr and best_a is not None:
+            hits.append((float(best_a), float(best_b)))
+    if not hits:
+        return None, None
+    hits.sort()
+    return hits[0][0], hits[-1][1]
+
+
 def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_entries=None,
                 scheme_override=None):
     """切入点检测 → 波形精修 → 原曲分析（尾部切点/时间轴） → MP3 → 歌词/封面
@@ -1286,6 +1333,45 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     elif ref_text and linfo.get("lyrics_overlap") is not None:
         log("  歌词一致性: 与演唱内容字面重合 %.0f%%（OK）"
             % (linfo["lyrics_overlap"] * 100))
+
+    # 2.2 音乐边界精修（2026-10-10）：用**录播音频自身**的伴奏起点/终点覆盖切点。
+    #     旧链路 detect_entry 找的是「能量回升」，而说话也是能量、前奏却是轻声
+    #     （实测前奏比说话低 11dB）→ 系统性「切掉前奏 / 包进说话」。实测事故：
+    #     昨日青空前奏 26s 被切掉 23s；晚婚片头塞进 7s 说话。详见 music_bounds。
+    #     人工核定切点（cut_start_abs/cut_end_abs）时跳过，尊重人工。
+    if _ex_s is None or _ex_e is None:
+        try:
+            from songcut import music_bounds as MB
+            _tf, _tl = lyric_time_span(srt_entries or [], src_lrc,
+                                       min(cs, seg["start"]) - 5.0, ce + 5.0)
+            if _tf is not None and _tl is not None and _tl > _tf:
+                log("  歌词锚点: 首句 %.2f（%s） 末句尾 %.2f（%s）"
+                    % (_tf, sec_to_hms(_tf), _tl, sec_to_hms(_tl)))
+                _ph = MB.profile(ffmpeg, src, _tf - 52.0, _tf + 8.0,
+                                 tmp_dir=os.path.join(workdir, "_tmp"))
+                _nh, _hn = MB.find_head(_ph, _tf)
+                if _nh is not None and abs(_nh - cs) > 0.5:
+                    log("  音乐边界·头: %.2f → %.2f（%s，原切点 %+.2fs）"
+                        % (cs, _nh, _hn, _nh - cs))
+                    cs = _nh
+                else:
+                    log("  音乐边界·头: 维持 %.2f（%s）"
+                        % (cs, _hn or "未检出，与现切点一致"))
+                _pt = MB.profile(ffmpeg, src, _tl - 14.0, _tl + 62.0,
+                                 tmp_dir=os.path.join(workdir, "_tmp"))
+                _nt, _tn = MB.find_tail(_pt, _tl)
+                if _nt is not None and abs(_nt - ce) > 0.5:
+                    log("  音乐边界·尾: %.2f → %.2f（%s，原切点 %+.2fs）"
+                        % (ce, _nt, _tn, _nt - ce))
+                    ce = _nt
+                else:
+                    log("  音乐边界·尾: 维持 %.2f（%s）"
+                        % (ce, _tn or "未检出，与现切点一致"))
+            else:
+                log("  音乐边界: 歌词锚点不足（首句=%s 末句=%s）→ 维持波形精修切点"
+                    % (_tf, _tl))
+        except Exception as _e:
+            log("  音乐边界: 跳过（%s）" % (str(_e) or repr(_e))[:120])
 
     # 2.5 原曲分析（默认执行）：全曲 DTW 速度比 + 局部互相关校正锚点。
     #     产出 ①精确伴奏结束点（尾部切点 = 乐句结束 + 余韵）②歌词时间轴。
