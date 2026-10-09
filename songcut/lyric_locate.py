@@ -459,3 +459,50 @@ def locate(entries, lrc_text, hit_thr=0.45, gap=15.0, min_run=40.0, line_jac=0.7
             "matched_lines": matched, "lyric_lines": len(lines),
             "line_hit_ratio": round(matched / float(max(1, len(lines))), 3),
             "intro_s": round(lines[0][0], 2) if lines else 0.0}
+
+
+def extend_loc(entries, lrc_text, loc, hit_thr=0.45, tail_gap=45.0):
+    """延尾扩展：把 raw_end 之后「仍在唱同一首歌」的转写并入 span。
+
+    背景（2026-10-08《昨日青空》误杀）：locate 按 gap=15s 把命中句串成连续段，
+    主播唱完一遍后隔 ~30s 再加唱一遍副歌 → run 断裂，取最长段后 span 只算到
+    第一遍结尾（实测 115.5s / 原曲 278s = 42%），被 DUR_LOWER 硬拒；
+    实际上她完整唱了整首还多唱一遍副歌（转写 02:06:42~02:10:00 全是歌词）。
+
+    做法：从 raw_end 之后继续逐句扫描，命中判据与 locate 完全一致
+    （句级 2-gram 命中率 ≥ hit_thr），且与上一命中句的间隙 ≤ tail_gap（45s，
+    覆盖换气/间奏/说一句话的长度）→ 并入尾部。只延尾、不改 start、不重算
+    matched_lines（加唱的是重复段落，对应歌词行已计过）。闲聊句要达到 45% 的
+    2-gram 命中极难（实测 locate 全场误命中几乎为 0），故安全。
+    """
+    if not entries or not loc or not lrc_text:
+        return loc
+    end_s = loc.get("raw_end")
+    if not end_s:
+        return loc
+    lines = lrc_lines(lrc_text)
+    body = "\n".join(t for _t, t in lines)
+    if latin_ratio(body) >= LATIN_BODY_TH:
+        return loc          # 英文路径另有 _latin_locate，本函数不处理
+    lg = grams(body)
+    if len(lg) < 20:
+        return loc
+    last_end, new_end, added = float(end_s), float(end_s), 0
+    for a, b, t in entries:
+        if a <= end_s:
+            continue
+        if a - last_end > tail_gap:
+            break           # 已按时间升序；间隙超限则后面不可能再接上
+        g = grams(t)
+        p = len(g & lg) / float(len(g)) if len(g) >= 3 else None
+        if p is not None and p >= hit_thr:
+            last_end, new_end, added = float(b), float(b), added + 1
+    if new_end <= end_s:
+        return loc
+    out = dict(loc)
+    out["raw_end"] = round(new_end, 2)
+    out["end"] = out["raw_end"]
+    out["span_s"] = round(new_end - float(loc.get("raw_start") or loc.get("start") or new_end), 2)
+    out["hit_cues"] = int(loc.get("hit_cues") or 0) + added
+    out["extended_tail"] = added
+    return out

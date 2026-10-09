@@ -86,7 +86,11 @@ LIB_SCAN_RECALL = 0.30      # 曲库全量粗筛阈值：宁可多选几个，�
 # ⚠ 只统计**时长占比**与**最长连续段**，不逐句下结论 —— 逐句分类已被实测否决
 #   （FunASR 中文错字会把真唱段 16/16 句误判成说话，见 verify_candidate 闸门 4 注释）。
 NONLYRIC_RATIO_MAX = 0.55   # 窗口内非歌词语音时长占比上限
-NONLYRIC_RUN_MAX = 45.0     # 单段连续非歌词语音上限（秒）
+# 2026-10-09 由 45 → 60：《晚婚》真唱段「身边有好多像我的人，日子过得都很稳」被
+#   ASR 转成「生活也过得很稳」等错字，两句真歌词被判非歌词语音，拼出 27.8s 假 run
+#   → 超过旧 WARN 线 27s 被标疑似不出片。真唱的 run 上限实测可到 ~28s（错字场景）；
+#   纯 BGM 场景实测 ratio 60~100% / run 173s，ratio 仍是主力判据，run 60 只影响边界。
+NONLYRIC_RUN_MAX = 60.0     # 单段连续非歌词语音上限（秒）
 
 SYS_LYRIC = (
     "你是直播录播分析助手。任务：判断一段语音转写里是否存在主播完整演唱一首歌的段落，"
@@ -265,6 +269,25 @@ def fetch_lrc(title, workdir, artist_hint=None):
     return (lrc if (info.get("lyrics_source") not in (None, "none")) else None), info
 
 
+# ==== 原唱归一化（用户 2026-10-09 再次强调，多次强调的铁律）====
+# 无论主播演唱的是什么版本（Live/音综/翻唱），成片的**歌名、歌手、封面**必须
+# 标注**原唱**。实测事故（2026-10-08《晚婚》）：LLM 歌词检索返回「晚婚 (Live)」
+# → lookup_library_artist("晚婚 (Live)") 查不到曲库的「晚婚→江蕙」→ hint 为空
+# → 网易云按「晚婚 (Live)」搜出谭维维音综版 → 歌手/封面/时长全是音综版出片。
+_VER_PAT = re.compile(r"[\s]*[(（【\[][^)）】\]]*(?:live|翻唱|cover|伴奏|版|version)[^)）】\]]*[)）】\]][\s]*",
+                      re.IGNORECASE)
+
+
+def strip_version_suffix(title):
+    """剥掉歌名上的版本后缀：「晚婚 (Live)」→「晚婚」，其余原样返回。"""
+    t = (title or "").strip()
+    prev = None
+    while prev != t:
+        prev = t
+        t = _VER_PAT.sub("", t).strip()
+    return t or (title or "").strip()
+
+
 def build_candidates(entries, llm_win, workdir, use_llm=True, cfg=None):
     """把「LLM 摘出的唱词」和「转写提及的曲库歌名」汇成候选歌名列表。
 
@@ -435,14 +458,23 @@ def library_fallback(entries, workdir, log=print):
 def verify_candidate(cand, entries, workdir):
     """抓歌词 → 转写定位 → 重合率/时长核验。返回 (item, ok)。"""
     title = cand["name"]
-    hint = SC.lookup_library_artist(title)
-    lrc, info = fetch_lrc(title, workdir, hint)
-    item = {"title": title, "source": cand["src"], "artist_hint": hint or None,
+    # ---- 原唱归一化：剥版本后缀，用裸歌名查曲库原唱 hint，按裸歌名抓取元数据 ----
+    # （保证成片的歌手/封面/官方时长来自原唱版本，而非音综 Live/翻唱条目）
+    base = strip_version_suffix(title)
+    hint = SC.lookup_library_artist(base) or SC.lookup_library_artist(title)
+    lrc, info = fetch_lrc(base, workdir, hint)
+    if not lrc and base != title:
+        lrc, info = fetch_lrc(title, workdir, hint)   # 裸歌名抓不到歌词再回退原名
+    item = {"title": base, "source": cand["src"], "artist_hint": hint or None,
             "lyrics_source": info.get("lyrics_source"), "notes": []}
+    if base != title:
+        item["sung_version"] = title       # 她实际唱的版本（仅记录，出片一律标原唱）
     if not lrc:
         item["notes"].append("未检索到该歌名歌词")
         return item, False
-    loc = lyric_locate.locate(entries, lrc)
+    # locate 后做延尾扩展：唱完一遍后隔 ~30s 加唱重复副歌的场景，span 曾被截断
+    # 在第一遍结尾（《昨日青空》2026-10-08 误杀，115.5s/278s=42% 被硬拒）。
+    loc = lyric_locate.extend_loc(entries, lrc, lyric_locate.locate(entries, lrc))
     if not loc:
         item["notes"].append("歌词在整场转写中未找到匹配片段（本场很可能没唱这首）")
         return item, False
@@ -494,7 +526,16 @@ def verify_candidate(cand, entries, workdir):
 
     # ---- 闸门 4b：她同时在讲别的事（区分真唱 / 只放 BGM）----
     # 只看时长占比与最长连续段，不逐句判定（逐句已被实测否决，见上方注释）。
-    prof = lyric_locate.speech_profile(entries, lrc, loc["start"], loc["end"])
+    # ⚠ 判「是不是歌词」要用**原唱版 + 实际演唱版**两版歌词的并集（2026-10-09）：
+    #   实测《晚婚》她唱的是 Live 版（含改词句「身边有好多像我的人…」），只用
+    #   江蕙原版歌词逐句匹配时，改词句全被判成「非歌词语音」，拼出 28s 假 run
+    #   → 触发 WARN 标疑似，白白不出片。原唱归一化后 candidate 原名就是演唱版。
+    prof_lrc = lrc
+    if base != title:
+        lrc_v, _i2 = fetch_lrc(title, workdir, hint)
+        if lrc_v:
+            prof_lrc = lrc + "\n" + lrc_v
+    prof = lyric_locate.speech_profile(entries, prof_lrc, loc["start"], loc["end"])
     item["nonlyric_ratio"] = prof["nonlyric_ratio"]
     item["nonlyric_max_run_s"] = prof["max_run_s"]
     item["nonlyric_runs"] = prof["runs"][:6]
@@ -668,6 +709,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--chunk", type=float, default=30.0, help="自建转写分块秒数")
     ap.add_argument("--qc-strict", action="store_true", help="自检不通过则整体失败")
+    ap.add_argument("--pages", type=int, default=None,
+                    help="透传给 song_cutter 的渲染分页数（磁盘紧张时用 1）")
     args = ap.parse_args()
 
     date = args.date or yesterday()
@@ -855,6 +898,8 @@ def main():
                    "--date", date, "--workdir", workdir, "--no-kdocs"]
             if args.qc_strict:
                 cmd.append("--qc-strict")
+            if args.pages:
+                cmd.extend(["--pages", str(args.pages)])
             SC.log("调用出片：%s" % " ".join(cmd))
             p = subprocess.run(cmd, capture_output=True, text=True, cwd=workdir,
                                encoding="utf-8", errors="replace")
