@@ -1294,6 +1294,20 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     if _hint:
         log("  曲库歌手提示: %s" % _hint)
     src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
+    # segs.lrc_drop_lines：实况「删减版」时，官方歌词末尾若干行实际上没被唱到。
+    # ⚠ 只为对齐 QC 的 L02 参考文本，不是「漏行」豁免开关 —— 必须先用 ASR 证明确实
+    #   没有人声（2026-10-10《昨日青空》实测：官方 44 行，实况只唱 41 行；末 3 行
+    #   落点 7836~7866 本场 SenseVoice 0 字 + 上游 SRT 7810~7869 无条目 + 波形淡出到
+    #   数字零，三重证据）。若不剔除，L02 会把「实况没唱」误判成「漏行」并 BLOCK。
+    _drop = seg.get("lrc_drop_lines") or []
+    if _drop and src_lrc:
+        _set = {int(x) for x in _drop}
+        _ls = src_lrc.splitlines()
+        _keep = [l for i, l in enumerate(_ls, 1) if i not in _set]
+        if len(_keep) != len(_ls):
+            log("  歌词参考: 剔除实况未唱的 %d 行（原文 %d → %d 行，行号 %s）"
+                % (len(_ls) - len(_keep), len(_ls), len(_keep), sorted(_set)))
+            src_lrc = "\n".join(_keep)
     # ⚠ note 会显示在主画面底部（给观众看的文案），不是技术备注位。
     #   超长会被播放器缩到 9px + 省略号，虽不再溢出画面，但一整行术语压在画面底部观感很差。
     #   技术细节写 note_technical（不上屏）。这里硬拦，避免整片渲完才发现。
@@ -1350,6 +1364,21 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                 _ph = MB.profile(ffmpeg, src, _tf - 52.0, _tf + 8.0,
                                  tmp_dir=os.path.join(workdir, "_tmp"))
                 _nh, _hn = MB.find_head(_ph, _tf)
+                # 2.2.1 「假切入」剔除（2026-10-10）：find_head 按设计取窗口内**最早**的
+                #       合格音乐帧（为的是救回被说话打断的连续前奏），而「先放一小段伴奏 /
+                #       先试唱一句，再重新开始」与真前奏在音频特征上**同源**（都低平坦度 +
+                #       有节拍，score 都过阈值）→ 必然切进伪起点。实测：昨日青空 7575.02
+                #       （吞进 7580~7588 的说话 + 两段静音）、晚婚 6877.25（吞进试唱与
+                #       说话，片头多 30s 闲聊）。两例唯一稳定共性是「真起点前有一段
+                #       ≤ −55dB 的深静音谷」，且该谷紧邻 detect_entry 的回升点 → 取谷后起点。
+                if _nh is not None:
+                    _n2, _vn = MB.head_after_valley(
+                        ffmpeg, src, _nh, onset_abs, _tf,
+                        tmp_dir=os.path.join(workdir, "_tmp"))
+                    if _n2 is not None:
+                        log("  音乐边界·头: 假切入剔除 %.2f → %.2f（%s）"
+                            % (_nh, _n2, _vn))
+                        _nh, _hn = _n2, _vn
                 if _nh is not None and abs(_nh - cs) > 0.5:
                     log("  音乐边界·头: %.2f → %.2f（%s，原切点 %+.2fs）"
                         % (cs, _nh, _hn, _nh - cs))

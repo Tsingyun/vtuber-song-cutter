@@ -46,6 +46,11 @@ MAX_GAP_NONMUSIC = 15.0   # 起点到第一句歌词之间允许的最长连续�
 HEAD_PAD = 0.25      # 切点在伴奏起点前留的自然起手（秒）
 TAIL_KEEP = 1.8      # 伴奏结束后的余韵（秒）
 QUIET_DB = -45.0     # 尾部：跌到这个电平即视为歌曲已结束（dBFS）
+DEEP_SIL_DB = -55.0  # 「静音谷」判定：远低于轻声前奏（实测前奏 −34~−46dB，谷 −62~−112dB）
+VALLEY_MIN = 0.5     # 静音谷最短时长（秒）
+VALLEY_HOP = 0.05    # 静音谷细扫步长（秒）
+VALLEY_NEAR = 3.0    # 静音谷结束点距 onset 多远之内才认作「假切入分界」（秒）
+VALLEY_POST_MAX = 0.5   # 谷后 post 秒内仍静音的时间占比上限（排除歌间空档/长静场）
 SIL_MARGIN = 20.0    # 尾部回退：相对演唱段 RMS 的衰减量（dB）
 SIL_HOLD = 1.5       # 尾部回退：需持续这么久才算静音（秒）
 
@@ -162,6 +167,124 @@ def find_head(prof, t_first, back=48.0):
         return None, "窗口内未检出伴奏起点（%.0fs 内无合格音乐帧）" % back
     return round(float(ts[best]) - HEAD_PAD, 3), "伴奏起点 %.2f（音乐帧，前留 %.2fs）" % (
         ts[best], HEAD_PAD)
+
+
+def last_deep_valley(ffmpeg, src, t0, t1, tmp_dir=None):
+    """兼容壳：返回 (t0,t1) 内最后一段深静音谷的结束时刻（无则 None）。"""
+    vs = deep_valleys(ffmpeg, src, t0, t1, tmp_dir=tmp_dir)
+    return vs[-1][1] if vs else None
+
+
+def deep_valleys(ffmpeg, src, t0, t1, tmp_dir=None, post=20.0):
+    """(t0, t1) 内的深静音谷列表 [(start, end, min_db, post_sil_ratio)]，时间升序。
+
+    post_sil_ratio = 谷结束后 post 秒内「仍低于 DEEP_SIL_DB」的时间占比：
+      · 真起点前的谷 → 后面立刻进前奏，占比 ≈ 0
+      · 歌间空档/长时间静场 → 后面还是静音，占比高
+    调用方用它把「假切入分界」和「别的空档」区分开。
+
+    为什么必须补这一条（2026-10-10 二次复盘）
+    ---------------------------------------------------------------
+    主播的「假切入」实测形态（两首同时命中；下列数字为 0.05s 窗 RMS 独立取证）：
+
+      昨日青空：7574.60~7576.75 −79dB 静音 → 7576.8 起一小段伴奏 → 7580~7588 说话
+                → 7588.55~7589.40 −87dB 静音 → **7589.40 伴奏重来**（−37.8dB 渐强）
+                → 7602.4 起唱
+      晚婚    ：6892~6908「试唱一句 + 全部说话」→ 6907.25~6908.95 −93dB → 短暂一句
+                人声 → 6909.35~6910.30 −81dB → **6910.30 伴奏正式起**（前奏 18.8s
+                ≈ 官方 17.95s）→ 6929.08 起唱
+
+    伪起点（一小段伴奏 / 一句试唱）与真前奏在音频特征上**同源**——都是低平坦度
+    + 有节拍，`score = beat − 0.5×flat` 都过 SCORE_T。`find_head` 按设计取窗口内
+    **最早**的合格帧（为的是救回被说话打断的连续前奏），于是必然切进伪起点：
+    实测昨日青空给出 7575.02（吞进 7580~7588 的说话 + 两段静音）、晚婚给出
+    6877.25（吞进试唱与说话，成片片头多出 30s 闲聊）。
+
+    两例的唯一稳定共同点是：**真起点与伪起点之间隔着一段深静音谷**（−79~−93dB，
+    比轻声前奏还低 20dB 以上，是播放器暂停/切轨留下的空档）。阈值 −55dB 安全：
+    实测前奏最弱也有 −46dB，不会误伤。用法见 head_after_valley()。
+    """
+    t0 = max(0.0, float(t0))
+    dur = float(t1) - t0
+    if dur <= VALLEY_MIN:
+        return []
+    tmp_dir = tmp_dir or os.path.join(os.getcwd(), "_tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    wav = os.path.join(tmp_dir, "mbv_%d.wav" % (int(t0 * 100) % 1000000007))
+    try:
+        x = onset_v2.extract_mono(ffmpeg, src, t0, dur, wav)
+    finally:
+        try:
+            if os.path.exists(wav):
+                os.remove(wav)
+        except BaseException:
+            pass
+    sr = onset_v2.SR
+    y = np.asarray(x, dtype=np.float32)
+    if not len(y):
+        return []
+    w = max(1, int(VALLEY_MIN * sr))
+    hop = max(1, int(VALLEY_HOP * sr))
+    if len(y) < w:
+        return []
+    c = np.concatenate(([0.0], np.cumsum(y * y, dtype=np.float64)))
+    n_win = (len(y) - w) // hop + 1
+    idx = np.arange(n_win) * hop
+    rms = 20 * np.log10(np.sqrt(np.maximum(c[idx + w] - c[idx], 0.0) / w) + 1e-10)
+    sil = rms < DEEP_SIL_DB
+    npw = max(1, int(round(post / VALLEY_HOP)))
+    out, i = [], 0
+    while i < len(sil):
+        if not sil[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(sil) and sil[j + 1]:
+            j += 1
+        s = t0 + i * hop / float(sr)
+        e = t0 + (j * hop + w) / float(sr)
+        nxt = sil[j + 1: j + 1 + npw]
+        ratio = float(nxt.mean()) if len(nxt) else 0.0
+        out.append((round(s, 3), round(e, 3), round(float(rms[i:j + 1].min()), 1), round(ratio, 3)))
+        i = j + 1
+    return out
+
+
+def head_after_valley(ffmpeg, src, cand, onset, t_first, tmp_dir=None):
+    """「假切入」剔除：候选起点之后若还隔着深静音谷，返回谷后的真伴奏起点。
+
+    返回 ``(new_head, note)``；不适用时 ``(None, reason)``，调用方沿用原候选值。
+
+    为什么不能只靠 find_head（2026-10-10 二次复盘，实测两首）
+    ---------------------------------------------------------------
+      · 昨日青空：find_head → 7575.02，但 7574.60~7576.75 实测是 −79dB 静音，
+        真正的伴奏 7576.75 才起；其后 7580~7588 是说话，7588.55~7589.40 又一
+        段 −87dB 静音，7589.40 伴奏**重来**并接到 7602.4 的起唱。
+      · 晚婚：find_head → 6877.25，而 6892~6908 是「试唱一句 + 说话」，
+        6907.25~6908.95（−93dB）+ 6909.35~6910.30（−81dB）两段深谷之后，
+        6910.3 伴奏才正式起（前奏 18.8s ≈ 官方 17.95s）。
+
+    两例的共同点：**真起点前必有一段 ≤ −55dB 的深静音谷**（播放器暂停/切轨），
+    比最弱的轻声前奏（−34~−46dB）低 20dB 以上，故 −55dB 不会误伤。
+    伪起点与真前奏在音频特征上同源（低平坦度 + 有节拍，score 都过 SCORE_T），
+    find_head 又按设计取**最早**合格帧，因此必然切进伪起点。
+
+    上界取 ``onset``（detect_entry 的「伴奏回升点」）：语义就是「不要早于紧邻
+    回升点的那段静音谷」。``onset`` 缺失时退回 ``t_first``（第一句歌词时刻），
+    此时晚婚这类「锚点被说话行带偏」的情况会搜不到谷 → 不改动，安全降级。
+    """
+    cand = float(cand)
+    up = onset if (onset is not None and onset > cand) else float(t_first)
+    if up - cand <= 1.0:
+        return None, "候选起点距上界仅 %.2fs，无搜索空间" % (up - cand)
+    vs = [v for v in deep_valleys(ffmpeg, src, cand, up, tmp_dir=tmp_dir)
+          if v[3] < VALLEY_POST_MAX and abs(up - v[1]) <= VALLEY_NEAR]
+    if not vs:
+        return None, "未检出紧邻起点的静音谷"
+    v = min(vs, key=lambda z: abs(up - z[1]))
+    new = round(v[1] + HEAD_PAD, 3)
+    return new, ("静音谷 %.2f~%.2f（谷底 %.0fdB）后伴奏起点 %.2f"
+                 % (v[0], v[1], v[2], new))
 
 
 def find_tail(prof, t_last, fwd=60.0):
