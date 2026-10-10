@@ -565,14 +565,34 @@ def ffprobe_json(ffprobe, path):
 
 
 def find_video(date):
+    """定位当天录播（排除压缩残留，必要时回退到录播根目录）。
+
+    两个坑（2026-10-11 实测）：
+    ① 日期目录可能残留上游压缩**中断**的半成品，形如
+       `<name>_compressed.mp4.part.mp4` —— 后缀确实是 `.mp4`，会被旧版选中，
+       但 moov atom 缺失、ffprobe 直接报 `Invalid data`，整条链路随即崩掉。
+       ⇒ 必须按 `.part` 排除（与 transcript_hub.find_video 一致）。
+    ② 上游压缩流水线中断时，**原始录播（flv）会留在录播根目录**而没被搬进
+       日期子目录 ⇒ 日期目录只剩 .part 残件。此时需回退到根目录按场次日期匹配。
+    """
+    exts = (".mp4", ".flv", ".mkv")
     d = os.path.join(REC_ROOT, date)
-    vids = [os.path.join(d, f) for f in os.listdir(d)
-            if f.lower().endswith((".mp4", ".flv", ".mkv"))]
+    vids = []
+    if os.path.isdir(d):
+        vids = [os.path.join(d, f) for f in os.listdir(d)
+                if f.lower().endswith(exts) and ".part" not in f.lower()]
+    if not vids and os.path.isdir(REC_ROOT):
+        ymd = re.sub(r"\D", "", str(date))
+        vids = [os.path.join(REC_ROOT, f) for f in os.listdir(REC_ROOT)
+                if f.lower().endswith(exts) and ".part" not in f.lower()
+                and ymd in re.sub(r"\D", "", f)]
+        if vids:
+            log("提示：日期目录无可用录播（多为压缩中断残留），回退录播根目录下的原始文件")
     if not vids:
-        raise FileNotFoundError("日期目录下没有录播文件：" + d)
+        raise FileNotFoundError("日期目录下没有可用录播文件：" + d)
     vids.sort(key=os.path.getsize, reverse=True)
     if len(vids) > 1:
-        log("警告：日期目录有多场录播，取最大的一场（建议后续按场次细分）")
+        log("警告：有多场录播候选，取最大的一场（建议后续按场次细分）")
     return vids[0]
 
 
