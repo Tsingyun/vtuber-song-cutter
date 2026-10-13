@@ -1315,19 +1315,24 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         log("  曲库歌手提示: %s" % _hint)
     src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
     # segs.lrc_drop_lines：实况「删减版」时，官方歌词末尾若干行实际上没被唱到。
-    # ⚠ 只为对齐 QC 的 L02 参考文本，不是「漏行」豁免开关 —— 必须先用 ASR 证明确实
-    #   没有人声（2026-10-10《昨日青空》实测：官方 44 行，实况只唱 41 行；末 3 行
-    #   落点 7836~7866 本场 SenseVoice 0 字 + 上游 SRT 7810~7869 无条目 + 波形淡出到
-    #   数字零，三重证据）。若不剔除，L02 会把「实况没唱」误判成「漏行」并 BLOCK。
+    # ⚠ 不是「漏行」豁免开关 —— 必须先用 ASR 证明确实没有人声（2026-10-10《昨日青空》
+    #   实测：官方 44 行，实况只唱 41 行；末 3 行落点 7836~7866 本场 SenseVoice 0 字 +
+    #   上游 SRT 7810~7869 无条目 + 波形淡出到数字零，三重证据）。
+    # ⚠⚠ 必须**同时剔除「渲染用歌词轴 lrc」与「QC 参考文本 src_lrc」**：
+    #   2026-10-13《恋爱困难少女》实测，原实现只剔 src_lrc（QC 参考）→ 未唱的 8 行
+    #   （L52 歌中台词「你先吃我突然有个会要开」+ L53~L59 制作人员 credits）照样进
+    #   CTC 对齐、照样渲染进成片 → QC L02 报「源 51 行 / 成片 59 行，多 8 行」BLOCK，
+    #   且 L05 尾部 8 行全部 0.0s（CTC 把匹配不上的行压成零时长）。
     _drop = seg.get("lrc_drop_lines") or []
-    if _drop and src_lrc:
+    if _drop and lrc:
         _set = {int(x) for x in _drop}
-        _ls = src_lrc.splitlines()
+        _ls = lrc.splitlines()
         _keep = [l for i, l in enumerate(_ls, 1) if i not in _set]
         if len(_keep) != len(_ls):
-            log("  歌词参考: 剔除实况未唱的 %d 行（原文 %d → %d 行，行号 %s）"
+            log("  歌词剔除: 实况未唱的 %d 行（原文 %d → %d 行，行号 %s）"
                 % (len(_ls) - len(_keep), len(_ls), len(_keep), sorted(_set)))
-            src_lrc = "\n".join(_keep)
+            lrc = "\n".join(_keep)
+            src_lrc = lrc          # QC 参考文本与渲染轴保持一致，否则 L02 必然报「多 N 行」
     # ⚠ note 会显示在主画面底部（给观众看的文案），不是技术备注位。
     #   超长会被播放器缩到 9px + 省略号，虽不再溢出画面，但一整行术语压在画面底部观感很差。
     #   技术细节写 note_technical（不上屏）。这里硬拦，避免整片渲完才发现。
