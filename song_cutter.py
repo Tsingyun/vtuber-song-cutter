@@ -1420,6 +1420,30 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                         log("  音乐边界·头: 假切入剔除 %.2f → %.2f（%s）"
                             % (_nh, _n2, _vn))
                         _nh, _hn = _n2, _vn
+                elif onset_abs is not None and cs < onset_abs - 1.0:
+                    # 2.2.2 find_head **失败**时的兜底（2026-10-13 新增）。
+                    #   find_head 在「首句歌词之前存在长段人声+伴奏」时必然返回 None
+                    #   （人声压过 beat → 帧判 non-music → g_non > MAX_GAP_NONMUSIC），
+                    #   旧实现此分支整段跳过 → 保留**波形精修**切点。而波形精修是能量
+                    #   启发式，其自身日志会打「未找到覆盖块，取粗起点前最后活动沿」——
+                    #   那个「最后活动沿」可能正是起唱前的说话尾音（实测 2026-10-13
+                    #   《刻在我心底的名字》：精修点 5241.55 落在她说「嗯」的 5242~5244
+                    #   里，而成片 A04 因此报片头 12.5s 静音）。
+                    #   此时管线**已经**算出正确值：`切入点检测` 的 onset（
+                    #   实测 5252.430，静音谷 5248.61~5252.60），它是紧邻硬静音谷的
+                    #   伴奏回升点 → 直接对 onset 再跑一次 head_after_valley 取谷后起点。
+                    #   判据与 2.2.1 完全一致（≤ −55dB 深谷 + 紧邻 onset），只是把
+                    #   「候选」换成波形精修点，不再依赖 find_head 的产出。
+                    _n2, _vn = MB.head_after_valley(
+                        ffmpeg, src, cs, onset_abs, _tf,
+                        tmp_dir=os.path.join(workdir, "_tmp"))
+                    if _n2 is not None:
+                        log("  音乐边界·头: find_head 未检出 → 切入点静音谷兜底 "
+                            "%.2f → %.2f（%s）" % (cs, _n2, _vn))
+                        _nh, _hn = _n2, _vn
+                    else:
+                        log("  音乐边界·头: find_head 未检出，且切入点静音谷兜底不适用"
+                            "（%s）→ 维持 %.2f" % (_vn, cs))
                 if _nh is not None and abs(_nh - cs) > 0.5:
                     log("  音乐边界·头: %.2f → %.2f（%s，原切点 %+.2fs）"
                         % (cs, _nh, _hn, _nh - cs))
@@ -1427,9 +1451,16 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                 else:
                     log("  音乐边界·头: 维持 %.2f（%s）"
                         % (cs, _hn or "未检出，与现切点一致"))
-                _pt = MB.profile(ffmpeg, src, _tl - 14.0, _tl + 62.0,
+                # 尾部特征窗：末句往前 14s 到往后 150s。为什么不是 62s（2026-10-13）：
+                #   末句歌词与她「实际唱完」之间可以隔很久（末段副歌重复 / 加唱 / 长尾奏），
+                #   2026-10-13《刻在我心底的名字》末句尾 5491.75、唱到 5558、伴奏 5567 才停
+                #   → 62s 窗刚够不到静音边界，find_tail 只能拿「最后一个像音乐的帧」交差，
+                #   把 78.8s 真演唱切掉。窗口放到 150s 后静音边界（5567.25）落在窗内。
+                _pt = MB.profile(ffmpeg, src, _tl - 14.0, _tl + 150.0,
                                  tmp_dir=os.path.join(workdir, "_tmp"))
-                _nt, _tn = MB.find_tail(_pt, _tl)
+                _nt, _tn = MB.find_tail(_pt, _tl, fwd=144.0,
+                                        ffmpeg=ffmpeg, src=src,
+                                        tmp_dir=os.path.join(workdir, "_tmp"))
                 if _nt is not None and abs(_nt - ce) > 0.5:
                     log("  音乐边界·尾: %.2f → %.2f（%s，原切点 %+.2fs）"
                         % (ce, _nt, _tn, _nt - ce))

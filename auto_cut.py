@@ -861,6 +861,25 @@ def main():
     if args.limit:
         verified_all = verified_all[:args.limit]
 
+    # 闸门 4b WARN → needs_review：不出片，但**必须留在报告里**（2026-10-14 修）。
+    #   旧实现直接从 verified_all 里静默滤掉，只写 singing.note（且仅当**全部**都是
+    #   needs_review 时才写）⇒ 单首被滤时报告 songs / outputs / rejected 三处都查不到，
+    #   看起来像「本场没唱这首」。实测 2026-10-13《One more time, One more chance》
+    #   核验通过（重合率 0.52）却整首消失，误导「本场只唱了一首」。
+    review = [it for it in verified_all if it.get("needs_review")]
+    if review:
+        rep["singing"]["review"] = [{
+            "title": it["title"],
+            "window": "%s~%s" % (it.get("rough_start_hms"), it.get("rough_end_hms")),
+            "overlap": it.get("overlap"),
+            "why": ("闸门 4b：非歌词语音占比 %s（接近 BGM 阈值）→ 标为待人工确认，本次不出片"
+                    % it.get("gate4_speech")),
+        } for it in review]
+        for it in review:
+            SC.log("  ⚠ %s 核验通过但被闸门 4b 标为待人工确认，本次不出片（%s~%s，重合率 %.2f）"
+                   % (it["title"], it.get("rough_start_hms"), it.get("rough_end_hms"),
+                      it.get("overlap") or 0))
+
     auto_list = [it for it in verified_all if not it.get("needs_review")]
     if auto_list:
         verified_all = auto_list
@@ -937,7 +956,9 @@ def main():
     elif verified_all and args.no_cut:
         SC.log("--no-cut：跳过出片")
 
-    rep["songs"] = verified_all
+    # 报告里的 songs 除了本次出片/出镜的条目，还要带上被 needs_review 闸门拦下的
+    # 条目（标 needs_review 字段），否则它们在三处都查不到、会被读成「本场没唱」。
+    rep["songs"] = verified_all + [it for it in review if it not in verified_all]
     rep["elapsed_s"] = round(time.time() - t_begin, 1)
     p = write_report(rep_dir, date, rep)
     SC.log("=== 全自动歌切结束：唱歌环节=%s，核验通过 %d 首，出片 %d 个 ==="

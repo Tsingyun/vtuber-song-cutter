@@ -287,11 +287,38 @@ def head_after_valley(ffmpeg, src, cand, onset, t_first, tmp_dir=None):
                  % (v[0], v[1], v[2], new))
 
 
-def find_tail(prof, t_last, fwd=60.0):
+def find_tail(prof, t_last, fwd=60.0, ffmpeg=None, src=None, tmp_dir=None):
     """从「末句歌词」向后找伴奏结束点。返回 (abs_time, note)。
 
-    优先用音乐性判定；判不出（人声扰乱 beat）则回退到能量衰减判定。
+    语义（第 6 条）：**只要还有声音就仍在同一首歌里，跌进静音才算结束**。
+    末句之后最后一个「像音乐」的帧**不等于**歌曲结束——人声会压过 beat 让帧判不出
+    音乐性（尾奏里、末段副歌里、加唱副歌里都会发生）→ 旧实现拿 `last_music` 当结束点
+    会**提前截断**（2026-10-13 实测切掉 78.8s 真演唱）。
+
+    静音判据用**细粒度深静音**（`deep_valleys`，0.05s 步长、≤ DEEP_SIL_DB）而不是
+    逐秒 3s 窗 rms，两个理由（2026-10-13 实测复核）：
+      · 3s 窗把「间奏轻声留白」（本场 5509.5~5513 实测 −45~−54dB，只比 QUIET_DB
+        低一点）判成静音 → 尾点落到间奏里，切掉后面整段末副歌；
+      · 反过来，真静音只有 ~2s 且**紧跟说话**时（本场 5567.25~5569.25），3s 窗平均
+        被说话抬到 −36.7dB → 又测不出静音。
+      而 −55dB 的深静音谷比最弱轻声前奏（实测 −46dB）低 9dB 以上，两头都稳。
+
+    取 `[t_last, t_last+fwd]` 内**最早**的深静音谷（谷本身已要求 ≥ VALLEY_MIN 秒）：
+    谷结束 + TAIL_KEEP 即尾点。窗口内找不到深静音（她一路唱/说下去）→ 返回 ``None``，
+    由调用方保留波形静音点或走人工核定，**绝不提前截断**。
+    未给 ffmpeg/src（纯离线）时回退到旧的逐秒特征判定。
     """
+    if ffmpeg and src:
+        try:
+            vs = deep_valleys(ffmpeg, src, float(t_last), float(t_last) + float(fwd),
+                              tmp_dir=tmp_dir)
+        except Exception:
+            vs = []
+        if vs:
+            v = min(vs, key=lambda z: z[1])
+            return round(float(v[1] + TAIL_KEEP), 3), (
+                "深静音谷 %.2f~%.2f（谷底 %.0fdB）后结束 + %.1fs 余韵"
+                % (v[0], v[1], v[2], TAIL_KEEP))
     if not prof:
         return None, "无特征数据"
     flags = _music_flags(prof)
@@ -306,15 +333,30 @@ def find_tail(prof, t_last, fwd=60.0):
     #    一旦跌进静音就停止——否则会把歌后说话、甚至下一首歌的伴奏当成尾奏
     #    （晚婚实测：末句 7167s，7191s 起是说话，7204s 是下一首的伴奏）。
     last_music = None
+    brk = None
     for i in range(i2, hi_i + 1):
         if rms[i] <= QUIET_DB:
+            brk = i
             break
         if flags[i]:
             last_music = i
+    if brk is not None:
+        t = ts[brk] + TAIL_KEEP
+        return round(float(t), 3), "静音起点 %.2f（跌至 %.0fdB 以下）+ %.1fs 余韵" % (
+            ts[brk], QUIET_DB, TAIL_KEEP)
     if last_music is not None:
-        t = ts[last_music] + TAIL_KEEP
-        return round(float(t), 3), "伴奏结束 %.2f（音乐性判定）+ %.1fs 余韵" % (
-            ts[last_music], TAIL_KEEP)
+        # 窗口内一直有声（没有跌进静音）→ 说明末句之后**还有内容**：要么尾奏里人声
+        # 压过 beat（判不出音乐性，帧 flags=False），要么她在唱末段副歌/加唱，要么
+        # 已经是歌后说话。此时「最后一个像音乐的帧」**不能**当结束点
+        # ——2026-10-13《刻在我心底的名字》实测：末句尾 5491.75，此后到 5567 她仍在
+        # 唱末段副歌（短窗 ASR 全是官方 L41 歌词），但 flags 在 5505.75 后再没有 True
+        # → 旧实现返回 5507.55，把 78.8s 真演唱整段切掉（成片 267.0s vs 官方 320.2s）。
+        # 按第 6 条语义（「只要 rms > −45dB 就仍在同一首歌里，静音才结束」）应当继续
+        # 向后找静音；窗口不够就交给调用方扩窗（song_cutter 已把尾部特征窗放到末句
+        # +150s）。此处返回 None 并说明，让调用方保留波形静音点而不是提前截断。
+        return None, ("窗口内未见静音（末段 %s~%s 始终有声）→ 尾部不截断，"
+                      "改由波形静音点/人工核定决定"
+                      % (ts[i2], ts[hi_i]))
     # ② 回退：能量相对演唱段衰减 SIL_MARGIN dB 并持续 SIL_HOLD 秒
     ref = np.median([p[1] for p in prof[max(0, i2 - 8): i2 + 1]]) if i2 else -20.0
     thr = ref - SIL_MARGIN
