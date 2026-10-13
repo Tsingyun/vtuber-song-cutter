@@ -1323,16 +1323,32 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     #   （L52 歌中台词「你先吃我突然有个会要开」+ L53~L59 制作人员 credits）照样进
     #   CTC 对齐、照样渲染进成片 → QC L02 报「源 51 行 / 成片 59 行，多 8 行」BLOCK，
     #   且 L05 尾部 8 行全部 0.0s（CTC 把匹配不上的行压成零时长）。
+    # ⚠⚠ 行号口径 = **非空行**序号（与 segments 里行号的推导方式一致）。
+    #   2026-10-13《屑屑》实测：源歌词含空行（#22/#54），按「原始行号」剔 [53,54,55]
+    #   会把真唱末句「有一段旋律 在我没洗的脑袋循环」+「音乐制作」误剔、却留下
+    #   「贝斯/混音」两条 credits —— 空行使两种编号错位，剔错后成片末句字幕整句消失。
     _drop = seg.get("lrc_drop_lines") or []
     if _drop and lrc:
         _set = {int(x) for x in _drop}
         _ls = lrc.splitlines()
-        _keep = [l for i, l in enumerate(_ls, 1) if i not in _set]
-        if len(_keep) != len(_ls):
-            log("  歌词剔除: 实况未唱的 %d 行（原文 %d → %d 行，行号 %s）"
-                % (len(_ls) - len(_keep), len(_ls), len(_keep), sorted(_set)))
+        _ne = 0
+        _keep, _dropped = [], []
+        for _l in _ls:
+            if _l.strip():
+                _ne += 1
+                if _ne in _set:
+                    _dropped.append(_l)
+                    continue
+            _keep.append(_l)
+        if _dropped:
+            log("  歌词剔除: 实况未唱的 %d 行（原文 %d → %d 行，非空行号 %s）"
+                % (len(_dropped), len(_ls), len(_keep), sorted(_set)))
+            for _l in _dropped:
+                log("    - %s" % _l)
             lrc = "\n".join(_keep)
             src_lrc = lrc          # QC 参考文本与渲染轴保持一致，否则 L02 必然报「多 N 行」
+        else:
+            log("  ⚠ 歌词剔除: 行号 %s 未命中任何非空行，未剔除任何内容" % sorted(_set))
     # ⚠ note 会显示在主画面底部（给观众看的文案），不是技术备注位。
     #   超长会被播放器缩到 9px + 省略号，虽不再溢出画面，但一整行术语压在画面底部观感很差。
     #   技术细节写 note_technical（不上屏）。这里硬拦，避免整片渲完才发现。
