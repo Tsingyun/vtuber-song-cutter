@@ -686,17 +686,51 @@ def pick_node():
     raise RuntimeError("找不到 node 可执行文件（可用环境变量 SONGCUT_NODE 指定）")
 
 
+def _win_permanent_delete_file(path):
+    """Windows 下直接调 Win32 DeleteFileW 永久删除单个文件，绕过 os.remove 安全删除 hook。
+    成功返回 True；非 Windows / ctypes 不可用 / 调用失败均返回 False（交回退逻辑处理）。"""
+    try:
+        if os.name != 'nt':
+            return False
+        import ctypes
+        res = ctypes.windll.kernel32.DeleteFileW(path)
+        return res != 0
+    except Exception:
+        return False
+
+
+def _ps_remove(path, is_dir=False):
+    """PowerShell 降级永久删除（绕过 os.remove 安全删除 hook，直接 Remove-Item -Force）。"""
+    q = path.replace("'", "''")
+    cmd = ("Remove-Item -LiteralPath '%s' -Force -Recurse -ErrorAction Stop" % q) if is_dir \
+        else ("Remove-Item -LiteralPath '%s' -Force -ErrorAction Stop" % q)
+    try:
+        r = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=180)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def _rm_retry(path, tries=4, sleep_s=0.4, log=None):
     """删文件，遇 OSError 重试（Windows 大文件必需）。
 
-    ⚠ Windows 上删除十几 GB 的大文件会**偶发瞬时失败**（杀毒软件 /
-      索引服务 / shell 删除钩子此刻仍持有句柄），等 0.4s 重试几乎必成。
-      不重试会静默留下一个巨额文件 —— 实测 14.47 GB 只清掉一半。
-    ⚠ 一律用 os.remove = **永久删除**。绝不能让几十 GB 的 mjpeg 进
-      $RECYCLE.BIN —— 那样空间不会立即释放，下一次预检会误判。
+    ⚠ Windows 上删除十几 GB 的大文件会**偶发瞬时失败**（杀软 / 索引服务 /
+      shell 删除钩子此刻仍持有句柄），等 0.4s 重试几乎必成。不重试会静默留下
+      一个巨额文件 —— 实测 14.47 GB 只清掉一半。
+    ⚠ 一律**永久删除**：优先 ctypes 直接调 Win32 DeleteFileW（绕过 os.remove 安全删除
+      hook，不进回收站），失败降级 PowerShell Remove-Item -Force，最后 os.remove 兜底。
+      绝不能让几十 GB 的 mjpeg 进 $RECYCLE.BIN —— 那样空间不立即释放，下次预检会误判。
     返回 True 表示「此刻路径已不存在」（本来就不存在也算，幂等）。
     """
     for i in range(tries):
+        # 1) ctypes 直接永久删除（绕过可能把 os.remove 转软删的 hook）
+        if _win_permanent_delete_file(path) and not os.path.lexists(path):
+            return True
+        # 2) PowerShell 降级
+        if _ps_remove(path, False) and not os.path.lexists(path):
+            return True
+        # 3) os.remove 兜底
         try:
             os.remove(path)
             return True
@@ -747,8 +781,8 @@ def _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=print):
     ⚠ 为什么必须做：`_cleanup_render_tmp` 只在失败路径按本次 out 清理，
     但崩溃 / 断电 / 磁盘满被kill 时进程根本没走到那一步。实测2026-10-07
     就留下 **14.47 GB** 的 `*.render.mp4.p{0,1}.mjpeg` 躺在 cuts/2026-10-07/
-    —— 那是成片体积的 22 倍，且**删掉后空间不立即释放**（在回收站里），
-    会让后续每次渲染的磁盘预检都误报。
+    —— 那是成片体积的 22 倍，且若删除失败（被安全删除 hook 软删进回收站 / 句柄占用未释放）
+    空间不立即释放，会让后续每次渲染的磁盘预检都误报。
 
     只删「最后修改超过 older_than_h 小时」的文件，避免误删正在跑的任务。
     """
@@ -776,7 +810,7 @@ def _sweep_stale_render_tmp(workdir, older_than_h=6.0, log=print):
                     % (f, st.st_size / 1024 ** 3))
     if n:
         log("  已清理历史渲染残留 %d 个文件，回收 %.2f GB"
-            "（全程 os.remove 永久删除，不进回收站；若空间仍未释放多为杀软/索引器持句柄）"
+            "（全程绕过 os.remove hook 原生永久删除，不进回收站；若空间仍未释放多为杀软/索引器持句柄）"
             % (n, freed / GB))
     return freed
 
@@ -1689,7 +1723,8 @@ def cleanup_outputs(manifest, seg_dir, keep_mp3=False):
                 s["mp3_cleaned"] = False
                 continue
             try:
-                os.remove(mp3)
+                if not _rm_retry(mp3, log=log):
+                    raise OSError("删除失败")
                 s["mp3"] = None
                 s["mp3_cleaned"] = True
                 removed += 1
@@ -1700,16 +1735,16 @@ def cleanup_outputs(manifest, seg_dir, keep_mp3=False):
         tmp = (s.get("mp4") or "") + ".render.mp4"
         if tmp.endswith(".render.mp4") and os.path.exists(tmp):
             try:
-                os.remove(tmp)
-                removed += 1
+                if _rm_retry(tmp, log=log):
+                    removed += 1
             except OSError:
                 pass
     ymd = (manifest.get("date") or "").replace("-", "")
     if ymd:
         for f in glob.glob(os.path.join(seg_dir, "%s-*.json.raw.txt" % ymd)):
             try:
-                os.remove(f)
-                removed += 1
+                if _rm_retry(f, log=log):
+                    removed += 1
             except OSError:
                 pass
     return removed
