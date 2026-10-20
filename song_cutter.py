@@ -712,6 +712,84 @@ def _ps_remove(path, is_dir=False):
         return False
 
 
+RECYCLE_JUNK_MARKS = ("_render_tmp", ".render.mp4")
+
+
+def _purge_recycle_render_junk(base_dir, log=None):
+    """把回收站里属于本项目渲染产物（`_render_tmp` / `*.render.mp4`）的条目**永久删掉**。
+
+    ⚠ 为什么非要这一步（2026-10-19 实测）：`_rm_retry` 已按设计走 ctypes
+      `DeleteFileW` → `Remove-Item -Force` → `os.remove` 三步永久删除，注释里也
+      写死了「绝不能让几十 GB 的 mjpeg 进 $RECYCLE.BIN」。但这台机器上仍有删除钩子
+      把 mjpeg 帧塞进了回收站 —— 累计堆到 **178.7 GB**，其中 **140.6 GB** 是本项目
+      的 mjpeg 帧与分段 mp4。回收站占用**不算进** `shutil.disk_usage().free`，
+      于是预检读到 free=19.4 GB（真实可用 160 GB），连 `--pages 1` 都被
+      「危险区阈值」拒掉，渲染死在起跑线上。
+      更阴的是：原路径确实不存在，`_rm_retry` 全部返回 True，日志老老实实打印
+      「回收 33.74 GB」——**光看日志永远看不出问题**。
+
+    只删原路径命中 RECYCLE_JUNK_MARKS 的条目，**绝不碰用户文件**
+    （同机回收站里还有 21.5 GB 用户的切片原始视频、7 GB 安装包）。
+    返回**实测**释放字节数（磁盘 free 前后差，比累加 $I 里的大小准得多）。
+    """
+    if os.name != "nt":
+        return 0
+    import glob as _glob
+    import struct as _struct
+    drive = os.path.splitdrive(os.path.abspath(base_dir))[0]
+    if not drive:
+        return 0
+    root = drive + os.sep + "$RECYCLE.BIN"
+    if not os.path.isdir(root):
+        return 0
+    try:
+        _free0 = shutil.disk_usage(base_dir).free
+    except OSError:
+        return 0
+    killed = 0
+    for sid in os.listdir(root):
+        d = os.path.join(root, sid)
+        if not os.path.isdir(d):
+            continue
+        # $I 存元数据、$R 存内容，两者除首两字符外同名
+        for ifile in _glob.glob(os.path.join(d, "$I*")):
+            try:
+                b = io.open(ifile, "rb").read()
+                if len(b) < 28:
+                    continue
+                ver = _struct.unpack("<Q", b[0:8])[0]
+                if ver != 2:                     # Vista+ 才有路径长度字段
+                    continue
+                plen = _struct.unpack("<I", b[24:28])[0]
+                path = b[28:28 + plen * 2].decode("utf-16-le", "ignore").rstrip("\x00")
+            except Exception:
+                continue
+            low = (path or "").lower()
+            if not any(m in low for m in RECYCLE_JUNK_MARKS):
+                continue
+            rfile = os.path.join(d, "$R" + os.path.basename(ifile)[2:])
+            try:
+                if os.path.isdir(rfile):
+                    shutil.rmtree(rfile, ignore_errors=True)
+                elif os.path.exists(rfile):
+                    _rm_retry(rfile, log=log)
+                _rm_retry(ifile, log=log)
+                if not os.path.lexists(rfile):
+                    killed += 1
+            except Exception:
+                pass
+    if not killed:
+        return 0
+    try:
+        freed = max(0, shutil.disk_usage(base_dir).free - _free0)
+    except OSError:
+        freed = 0
+    if log:
+        log("  [DISK] 回收站渲染残留：永久清除 %d 项，实测释放 %.1f GB"
+            % (killed, freed / GB))
+    return freed
+
+
 def _rm_retry(path, tries=4, sleep_s=0.4, log=None):
     """删文件，遇 OSError 重试（Windows 大文件必需）。
 
@@ -969,6 +1047,14 @@ def render_player_video(workdir, job, ffmpeg=None):
         log("  ⚠ [DISK] 历史残留扫描失败（可用空间账会偏保守）：%r" % (_e,))
 
     _dir = os.path.dirname(os.path.abspath(job["out"])) or "."
+    # 回收站里积压的历史渲染残留也要清掉并算进可用额度：删除钩子会把 _rm_retry 的
+    # 永久删除变成软删，free 因此长期虚低（实测虚低 140 GB，直接掐死 --pages 1）。
+    try:
+        _purge_recycle_render_junk(_dir, log=log)
+    except Exception as _e:
+        # 同样不许静默：清不掉就等于可用空间账偏保守，得让人看见
+        log("  ⚠ [DISK] 回收站残留清理失败（可用空间账会偏保守）：%r" % (_e,))
+
     _tot, _used, _free = shutil.disk_usage(_dir)
     log("[DISK] Available: %.1f GB" % (_free / GB))
 
