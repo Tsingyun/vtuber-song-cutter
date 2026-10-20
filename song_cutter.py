@@ -1347,6 +1347,23 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         linfo["cover_source"] = "原唱封面(曲库:%s)" % (seg.get("artist") or "?")
     if _hint:
         log("  曲库歌手提示: %s" % _hint)
+    # segments 可显式指定原曲官方时长（秒）——G3 闸门与 manifest.orig_duration_s 都以它为先。
+    # ⚠ 2026-10-19 修：G3 的报错文案一直写着「请联网核实后写入 segments 的
+    #   orig_duration_s」，但代码只读 linfo（缓存/歌词站），补了 segments 仍被同一句拦住。
+    #   真实案例《雪の轍》：缓存给的是 274.0s 原版，而她放的是 203.2s 高田詩緒 Remix，
+    #   若按缓存值出片，QC D01 会算成 193.1/274.0=0.70 判 BLOCK。
+    #   这里统一归一化进 linfo，让下游（闸门/清单/日志）只有一个口径。
+    _seg_orig = seg.get("orig_duration_s")
+    try:
+        _seg_orig = float(_seg_orig) if _seg_orig else None
+    except (TypeError, ValueError):
+        _seg_orig = None
+    if _seg_orig:
+        _od_old = linfo.get("netease_duration_ms")
+        linfo["netease_duration_ms"] = int(round(_seg_orig * 1000))
+        if _od_old and abs(_od_old / 1000.0 - _seg_orig) > 1.5:
+            log("  ⚠ 原曲时长以 segments 为准：%.1fs（歌词站/缓存给的是 %.1fs）"
+                % (_seg_orig, _od_old / 1000.0))
     src_lrc = lrc or ""          # 抓取原文快照：QC 用它做「逐字一致」比对（拦截漏行/翻唱版）
     # segs.lrc_drop_lines：实况「删减版」时，官方歌词末尾若干行实际上没被唱到。
     # ⚠ 不是「漏行」豁免开关 —— 必须先用 ASR 证明确实没有人声（2026-10-10《昨日青空》
