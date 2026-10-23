@@ -577,23 +577,73 @@ def find_video(date):
     """
     exts = (".mp4", ".flv", ".mkv")
     d = os.path.join(REC_ROOT, date)
+    ymd = re.sub(r"\D", "", str(date))
     vids = []
     if os.path.isdir(d):
-        vids = [os.path.join(d, f) for f in os.listdir(d)
+        names = os.listdir(d)
+        vids = [os.path.join(d, f) for f in names
                 if f.lower().endswith(exts) and ".part" not in f.lower()]
-    if not vids and os.path.isdir(REC_ROOT):
-        ymd = re.sub(r"\D", "", str(date))
-        vids = [os.path.join(REC_ROOT, f) for f in os.listdir(REC_ROOT)
-                if f.lower().endswith(exts) and ".part" not in f.lower()
-                and ymd in re.sub(r"\D", "", f)]
-        if vids:
+        if any(f.lower().endswith(exts) and ".part" in f.lower() for f in names):
+            log("提示：日期目录里存在 .part（上游压缩进行中），该场只能用根目录下的原始文件")
+    root_vids = []
+    if os.path.isdir(REC_ROOT):
+        root_vids = [os.path.join(REC_ROOT, f) for f in os.listdir(REC_ROOT)
+                     if f.lower().endswith(exts) and ".part" not in f.lower()
+                     and ymd in re.sub(r"\D", "", f)]
+    if root_vids:
+        if not vids:
             log("提示：日期目录无可用录播（多为压缩中断残留），回退录播根目录下的原始文件")
+        else:
+            log("提示：录播根目录另有 %d 个当天原始文件，一并纳入候选"
+                "（日期目录里可能只存了当天另一场）" % len(root_vids))
+    vids = vids + root_vids
     if not vids:
         raise FileNotFoundError("日期目录下没有可用录播文件：" + d)
-    vids.sort(key=os.path.getsize, reverse=True)
-    if len(vids) > 1:
-        log("警告：有多场录播候选，取最大的一场（建议后续按场次细分）")
-    return vids[0]
+
+    def _dur(p):
+        try:
+            return float(ffprobe_json(CFG.ffprobe(), p).get("format", {})
+                         .get("duration", 0) or 0)
+        except Exception:
+            return 0.0
+
+    scored = sorted(((_dur(p), os.path.getsize(p), p) for p in vids),
+                    key=lambda x: (x[0], x[1]), reverse=True)
+    for _du, _sz, _p in scored:
+        log("  录播候选 %.1fs / %dMB：%s" % (_du, _sz // 1048576, os.path.basename(_p)))
+    if len(scored) > 1:
+        log("警告：有多场录播候选，取最长的一场（%.1fs）：%s"
+            % (scored[0][0], os.path.basename(scored[0][2])))
+    return scored[0][2]
+
+
+def match_srts_to_video(srts, src):
+    """当天多场时，只保留与所选录播同一场的 SRT（按「场次标题」字面匹配）。
+
+    同一自然日可能有多场（如凌晨 0 点续场 + 晚上主场），各场 SRT 的时间轴
+    **各自从 0 开始**。若拿别场的 SRT 对所选录播定位，时间轴完全错位，
+    会把那场的内容按错误的时间切出来（2026-10-24 实测：10-23 有
+    「超级鸡马 0 点场」与「先唱唱聊聊 20 点场」两场，前者只有 2313s）。
+    """
+    if len(srts) <= 1:
+        return list(srts)
+    vbase = os.path.basename(src)
+    keep = []
+    for s in srts:
+        b = os.path.splitext(os.path.basename(s))[0]
+        b = re.sub(r"^\d{8}[-_]?", "", b)          # 去掉日期前缀 20261023-
+        b = re.sub(r"\s*\d{4}年.*$", "", b)          # 去掉「 2026年10月23日20点场」
+        b = re.sub(r"\s*\d+点场.*$", "", b)
+        title = b.strip()
+        if title and title in vbase:
+            keep.append(s)
+    if keep:
+        log("当天 %d 场转写，按录播标题匹配保留 %d 份：%s"
+            % (len(srts), len(keep), "；".join(os.path.basename(x) for x in keep)))
+        return keep
+    log("⚠ 当天 %d 场转写，无法按标题匹配所选录播，全部保留（时间轴可能错位，需人工复核）"
+        % len(srts))
+    return list(srts)
 
 
 def sanitize(name):
@@ -1987,6 +2037,7 @@ def main():
     src = find_video(args.date)
     vinfo = ffprobe_json(ffprobe, src)
     vdur = float(vinfo["format"]["duration"])
+    srts = match_srts_to_video(srts, src)
     v = next(s for s in vinfo["streams"] if s["codec_type"] == "video")
     log("视频源：%s（%sx%s @%s，时长 %.0fs）" % (
         os.path.basename(src), v["width"], v["height"], v.get("avg_frame_rate"), vdur))

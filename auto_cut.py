@@ -752,7 +752,7 @@ def main():
     SC.log("录播：%s（%.0fs / %dMB）" % (os.path.basename(src), vinfo["duration_s"], vinfo["size_mb"]))
 
     # ── 2. 转写 ────────────────────────────────────────────────
-    srts = [] if args.asr else find_upstream_srt(date)
+    srts = [] if args.asr else SC.match_srts_to_video(find_upstream_srt(date), src)
     if not srts:
         tag = os.path.splitext(os.path.basename(src))[0][:14]
         out_dir = SC.SRT_DIR or os.path.join(workdir, "transcript")
@@ -781,6 +781,13 @@ def main():
     verified_all, llm_singing = [], False
     for srt_path in srts:
         entries = SC.parse_srt(srt_path)
+        # 本支录播可能只是该场的前半段（上游尚未合并/压缩完）⇒ 转写尾部超出视频的部分无处可切，丢弃
+        _vdur = float(vinfo.get("duration_s") or 0)
+        if _vdur and entries and entries[-1][1] > _vdur + 5:
+            _n0 = len(entries)
+            entries = [e for e in entries if e[0] <= _vdur]
+            SC.log("⚠ 转写跨度 %.0fs > 录播 %.0fs（本支录播只是该场前半段）→ 截断 %d→%d 句"
+                   % (entries[-1][1] if entries else 0, _vdur, _n0, len(entries)))
         tag = os.path.splitext(os.path.basename(srt_path))[0][:14]
         SC.log("--- 场次 %s：%d 句转写 ---" % (tag, len(entries)))
         win, singing = ([], False) if args.no_llm else llm_windows(
