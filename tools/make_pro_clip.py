@@ -95,6 +95,33 @@ def slice_lrc(text, start, dur):
     return "\n".join(lines) + "\n"
 
 
+def build_live(mode, d):
+    """把 prepare_live.py 产出的 live.json 转成播放器可用的 live 配置。
+
+    目录必须转成绝对路径：播放器页在 renderer/player/ 下，相对路径会被浏览器
+    解析到 renderer/player/_tmp/... —— 图片全部 404，而画面只是「什么都没有」，
+    不会报错（又是一个静默失效）。
+    """
+    if not mode or mode == "none":
+        return None
+    jp = os.path.join(d, "live.json")
+    if not os.path.isfile(jp):
+        raise SystemExit("缺 %s —— 先跑 tools/prepare_live.py" % jp)
+    with open(jp, encoding="utf-8") as f:
+        info = json.load(f)
+    cfg = {"mode": mode, "t0": 0.0, "face": info.get("face") or {"cx": .5, "cy": .5}}
+    for k in ("head", "body", "wide"):
+        s = info.get(k)
+        if not s:
+            continue
+        s = dict(s)
+        s["dir"] = os.path.abspath(s["dir"]).replace("\\", "/")
+        cfg[k] = s
+    print("[clip] live=%s  head=%s  wide=%s" %
+          (mode, (cfg.get("head") or {}).get("n", 0), (cfg.get("wide") or {}).get("n", 0)))
+    return cfg
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--audio", required=True, help="整首 mp3")
@@ -104,6 +131,9 @@ def main():
     ap.add_argument("--start", type=float, default=40.0)
     ap.add_argument("--dur", type=float, default=12.0)
     ap.add_argument("--bg", default="spec", choices=["daw", "spec", "vocal", "none"])
+    ap.add_argument("--live", default="", choices=["", "none", "lens", "strip", "behind"],
+                    help="直播画面融合方式（素材由 tools/prepare_live.py 生成）")
+    ap.add_argument("--live-dir", default="_tmp/live_seq", help="含 live.json 的序列目录")
     ap.add_argument("--out", required=True)
     ap.add_argument("--res", type=int, default=1)
     ap.add_argument("--bitrate", type=int, default=12000000)
@@ -162,6 +192,7 @@ def main():
         "out": seg_vid,
         "bg": args.bg,
         "proAnalysis": ana,
+        "live": build_live(args.live, args.live_dir),
     }
     with open(job_p, "w", encoding="utf-8") as f:
         json.dump(job, f, ensure_ascii=False)

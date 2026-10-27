@@ -284,6 +284,11 @@ async function cleanupArtifacts() {
            '--disable-background-timer-throttling',
            // 允许页面内手动 gc()：4K 长片每 256 帧压一次，避免 Blob/ArrayBuffer 堆积
            '--js-flags=--expose-gc',
+           /* 直播画面融合层要读成千上万张本地 jpg 序列（tools/prepare_live.py）。
+              file:// 文档的默认 origin 是 opaque，任何 file:// 图片都会把 canvas
+              标记为 tainted ⇒ toBlob 直接 SecurityError。这个 flag 让所有 file URL
+              同源；封面/水印/贴纸仍走 dataURL 注入（更稳），两条路并存。 */
+           '--allow-file-access-from-files',
            '--enable-gpu'],
   };
   /* 页面入口：job.page 可指定同目录下的另一份播放器（如 index_v10.html）。
@@ -317,6 +322,7 @@ async function cleanupArtifacts() {
     artImage: job.artImage || null,  // dataURL（右侧装饰层，与封面互不干扰）
     proAnalysis: job.proAnalysis || null,   // 真实音频分析（tools/analyze_music.py），供 pro_bg.js
     bg: job.bg || '',                        // 专业背景层方案：daw | spec | vocal | ''
+    live: job.live || null,                  // 直播画面融合层（tools/prepare_live.py 产出的图片序列）
     lrcOffset: (job.lrcOffset == null ? null : Number(job.lrcOffset)),  // 歌词时间偏移（测试片段用整份 LRC + 偏移）
     scheme: (job.scheme == null ? null : Number(job.scheme)),  // 标题装饰方案 0~4（自动匹配/手动覆盖）
     bitrate: BITRATE,           // 成片视频码率(bps)：4K 走 B站不二压区间 16~18.5 Mbps

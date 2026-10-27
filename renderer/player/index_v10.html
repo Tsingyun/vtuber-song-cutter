@@ -788,6 +788,7 @@
 
 <script src="mp4-muxer.js"></script>
 <script src="pro_bg.js"></script>
+<script src="live_bg.js"></script>
 <script>
 "use strict";
 /* ==================================================================
@@ -2087,6 +2088,8 @@ function updateHalo(dt){
 }
 function drawHalo(){
   if(!haloOn) return;                       // v9 的开关是摆设，v10 真正生效
+  /* 竖幅直播层是矩形且占满封面位，这圈频谱环会直接横穿画面 ⇒ 由它申请关闭 */
+  if(window.LIVEBG && window.LIVEBG.hidesHalo && window.LIVEBG.hidesHalo()) return;
   const ccx = COVER_X+COVER_S/2, ccy = COVER_Y+COVER_S/2;
   const R0 = COVER_S/2 + 26;
   ctx.save();
@@ -2152,6 +2155,13 @@ function drawCover(now){
   ctx.fillStyle = shd;
   ctx.beginPath(); ctx.ellipse(ccx, ccy+sz*0.54, sz*0.62, sz*0.15, 0, 0, 6.284); ctx.fill();
 
+  /* ④ 封面本体 / 直播圆窗（同一位置二选一）——
+     环境光①②、唱片纹②、落影③ 都已经画好，圆窗照样吃这三层，
+     所以这里只替换「物件本身」，不是换掉整个 drawCover。 */
+  if(window.LIVEBG && window.LIVEBG.takesCover()){
+    LIVEBG.fg({ ctx, t: now/1000, cover: { x: COVER_X, y: COVER_Y, s: COVER_S }, BRAND, en: haloAvg });
+    return;                                   // ⑤ 是方形的封面边框，圆窗不适用
+  }
   /* ④ 封面本体（圆角 6：深色版更硬朗） */
   ctx.imageSmoothingQuality = 'high';
   ctx.save();
@@ -3144,6 +3154,7 @@ function loop(now){
   updateHalo(dt);
   drawBackground(now, dt);
   if(window.PROBG) PROBG.draw({ ctx, t: Math.max(0, audio.currentTime + offset), LY, PAL, BRAND, INK, rgba });
+  if(window.LIVEBG) LIVEBG.bg({ ctx, t: Math.max(0, audio.currentTime + offset), W, H, LY, en: haloAvg });
   if(SHOW_ART) drawArtLayer();
   drawCover(now);
   drawColumnRule(Math.max(0, audio.currentTime + offset));
@@ -3492,6 +3503,20 @@ renderCacheBar();
         if(bgm) PROBG.mode = bgm;
         console.log('[setup] proBg mode=' + PROBG.mode + ' data=' + PROBG.ok);
       }
+      /* 直播原始画面融合层：图片序列（tools/prepare_live.py 产出）经 job.live 注入。
+         mode 优先级：job.live.mode（成片流水线）> ?live=（抽帧/测试）> 空（不启用）。 */
+      if(window.LIVEBG){
+        const lj = meta.live || {};
+        let lm = String(lj.mode || '');
+        if(!lm){ try{ lm = new URLSearchParams(location.search).get('live') || ''; }catch(e){} }
+        if(lm && lm !== 'none'){
+          const lok = LIVEBG.set(Object.assign({}, lj, { mode: lm }));
+          console.log('[setup] live mode=' + LIVEBG.mode + ' ok=' + lok +
+                      ' head=' + (lj.head ? lj.head.n : 0) + ' wide=' + (lj.wide ? lj.wide.n : 0));
+          /* 预热 2s：离线渲染起步时缓存是空的，头 120 帧全靠同步回落会明显掉帧 */
+          try{ LIVEBG.warm(0, 90); }catch(e){}
+        } else { LIVEBG.mode = ''; }
+      }
       if(meta.artImage){
         const im2 = new Image();
         await new Promise((res,rej)=>{ im2.onload=res; im2.onerror=()=>rej(new Error('装饰立绘解码失败')); im2.src = meta.artImage; });
@@ -3562,6 +3587,7 @@ renderCacheBar();
     drawBackground(now, dt);
     /* 专业背景层：必须夹在底色与封面之间 —— 在歌词（含卡拉OK高亮）之下。 */
     if(window.PROBG) PROBG.draw({ ctx, t: HL.vT, LY, PAL, BRAND, INK, rgba });
+    if(window.LIVEBG) LIVEBG.bg({ ctx, t: HL.vT, W, H, LY, en: haloAvg });
     drawCover(now);
     drawColumnRule(HL.vT);
     drawHalo();
