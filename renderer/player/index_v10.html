@@ -2303,7 +2303,18 @@ var WM = {
   MASK_FADE:  0.20,   // ← 遮罩：顶部渐入带高度（比例）
   MASK_BOTTOM:0.78,   // ← 遮罩：底部渐出起点（比例，→1 渐隐到 0）
   MASK_RIGHT: 0.92,   // ← 遮罩：右缘渐出起点（0.9=最右 10% 渐隐；1=关闭）
+  /* v10 深底专用：原图实测是「白色线稿」（alpha>60 的像素 RGB 均值 [211,219,227]），
+     v9 米白纸上 16% alpha = 淡墨人影；v10 近黑底上用 screen 合成会把白线读成
+     「负片发光的脸」（2026-10-28 用户反馈诡异）。深底只有两条出路：
+       glow —— 不画具象图形，只留无形状的暖/冷柔光场（默认，已采用）
+       ink  —— 线稿反相成墨黑，叠在柔光上
+     ink 实测否决：近黑底上「暗形 vs 更暗底」的差值不足 8/255，读作一块边缘可见的
+     深色脏斑而不是人影（1920 宽对照帧 WM.INK=0.55）。深底没有中间态可选。
+     URL ?wm=ink 可临时切回，仅供对照抽帧。 */
+  MODE:       'glow',
+  INK:        0.55,   // ← ink 模式不透明度（0.4–0.7）
 };
+try{ const _wmq = new URLSearchParams(location.search).get('wm'); if(_wmq) WM.MODE = _wmq; }catch(e){}
 (function(){
   const im = new Image();
   im.onload = () => { WM.img = im; WM.ok = true; wmSpr = null; };   // 重载时失效缓存
@@ -2334,16 +2345,41 @@ function wmSprite(){
   wmSpr = c;
   return wmSpr;
 }
+/* 墨黑线稿：保留水印的 alpha 形，把 RGB 统一压成近底色 —— 反相消除「白线」语义。
+   只在 WM.MODE==='ink' 时使用；合成一次后常驻缓存。 */
+let wmInkSpr = null;
+function wmInkSprite(){
+  if(wmInkSpr) return wmInkSpr;
+  const spr = wmSprite(); if(!spr) return null;
+  const c = document.createElement('canvas');
+  c.width = spr.width; c.height = spr.height;
+  const g = c.getContext('2d');
+  g.drawImage(spr, 0, 0);
+  g.globalCompositeOperation = 'source-in';        // 保留目标 alpha，整块换色
+  g.fillStyle = '#04060A'; g.fillRect(0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'source-over';
+  wmInkSpr = c;
+  return wmInkSpr;
+}
+/* 歌词视口的柔光场：无形状、无面孔，只提供「空气感」与左右配重。
+   半径/亮度由频谱能量 haloAvg 驱动（离线渲染完全确定性），呼吸周期 9.2s。 */
+function drawLyricAtmos(tms){
+  if(WM.MODE === 'none') return;                    // 调试用：完全不加柔光，供 A/B 抽帧对照
+  const h = LY.h, e = haloAvg || 0;
+  const br = 1 + Math.sin(tms/9200)*0.07 + e*0.10;
+  const a  = 0.098 + e*0.090;
+  _blob(LY.x + LY.w - h*0.11, LY.y + h*0.30, h*0.80*br, PAL.vibrant, a);          // 暖琥珀：主光源
+  _blob(LY.x + LY.w - h*0.40, LY.y + h*0.70, h*0.52*br, BRAND.iceDeep, a*0.38);   // 冷蓝：仅做色温对冲
+  _blob(LY.x + LY.w*0.06,     LY.y + h*0.52, h*0.46*br, PAL.soft1,    a*0.22);    // 左缘补配重
+}
 function drawWatermark(){
-  const spr = wmSprite(); if(!spr) return;
+  if(WM.MODE !== 'ink') return;                     // glow 模式：柔光已在 clip 外铺好，此处无事可做
+  const spr = wmInkSprite(); if(!spr) return;
   const h = LY.h * WM.HEIGHT, w = h * spr.width / spr.height;   // 锁定原图宽高比，不拉伸
   const dx = LY.x + LY.w - w - WM.RIGHT_PAD;
   const dy = LY.y + LY.h * WM.TOP_RATIO;
   ctx.save();
-  /* 深底适配：水印原图是按「白纸上的淡墨」做的，直接画会变成一块暗斑。
-     screen 把暗部当透明、亮部当叠加，在近黑底上反而读作「隐约的亮纹」。 */
-  ctx.globalCompositeOperation = 'screen';
-  ctx.globalAlpha = WM.ALPHA * 0.62;                            // 不透明度
+  ctx.globalAlpha = WM.INK;
   /* ctx.filter 的半径单位是设备像素、不随 CTM 缩放 → 必须乘 OUT_SCALE，
      否则 4K 输出时水印模糊会只有 1080P 的一半强度 */
   if(WM.BLUR > 0) ctx.filter = 'blur(' + (WM.BLUR*OUT_SCALE) + 'px)';
@@ -2696,6 +2732,9 @@ function drawLyrics(now, dt){
     const bt = i===idx ? 0 : (i < anchor ? 0 : blurLvOf(Math.abs(i - anchor) || 1));
     bl[i] = (bl[i]===undefined ? bt : bl[i]) + (bt - (bl[i]===undefined ? bt : bl[i])) * Math.min(1, dt * (i===idx ? 12 : 5.5));
   }
+  /* 柔光场必须在 clip 之外：它铺满整个视口，若画在 clip 内，
+     亮度会在视口边界处被硬切出一道矩形边缘（实测 1920 宽下清晰可见）。 */
+  drawLyricAtmos(t * 1000);
   ctx.save();
   rr(vx-48, vy-46, vw+80, vh+92, 12); ctx.clip();      // 左缘放宽：容纳当前行品牌色标记
   drawWatermark();                                     // 背景水印：置于全部歌词内容之下

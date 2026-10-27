@@ -27,7 +27,9 @@ const has = n => process.argv.includes('--' + n);
   page.on('pageerror', e => console.error('[pageerror]', e.message));
   page.on('console', m => { if (m.type() === 'error') console.error('[console.error]', m.text()); });
 
-  const url = 'file:///' + path.join(job.playerDir, job.page || 'index.html').replace(/\\/g, '/') + '?render=1&res=' + RES;
+  const EXTRA_Q = argOf('q') || '';                 // 追加 query（如 wm=ink），便于同页多方案对照
+  const url = 'file:///' + path.join(job.playerDir, job.page || 'index.html').replace(/\\/g, '/')
+            + '?render=1&res=' + RES + (EXTRA_Q ? '&' + EXTRA_Q : '');
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction('window.HL && HL.ready', null, { timeout: 60000 });
   await page.setInputFiles('#mediaFile', job.audio);
