@@ -119,6 +119,42 @@ def hms(t):
     return "%02d:%02d:%02d" % (int(t // 3600), int((t % 3600) // 60), int(t % 60))
 
 
+# ── 唱歌环节关键词扫描（2026-10-27 事故后加，见 RULES 第 49 条）──────────────
+# 背景：LLM 分块可能整场报 singing=False、0 窗口（2026-10-27 实唱《Innocence》
+# 231s，GLM 6 个块全部漏判），而该歌又不在曲库里 ⇒ 曲库兜底也救不回。
+# 这条通道只读**转写文本**，不依赖 LLM、不依赖曲库、不依赖音频层，成本近乎为零，
+# 用来给「LLM 报无演唱」打一个**反向红旗**：关键词成簇出现就必须人工复核该区间。
+SING_KW = ("我们来唱歌", "我唱歌了", "开始唱", "唱首歌", "唱一首", "点歌",
+           "全民K歌", "K歌", "放伴奏", "伴奏起", "歌词下回来", "歌词太复杂",
+           "前奏", "清唱", "再唱一遍", "跟唱", "唱两句")
+
+
+def scan_sing_sections(entries, merge_gap=600.0):
+    """在整场转写里找「唱歌环节关键词」成簇的区间。返回 [{"start","end","hits"}]。
+
+    hits 是 (t, 原文) 列表，供人工一眼复核。单点也会返回（宁可多报，不可漏报）。
+    """
+    hits = [(a, b, tx) for (a, b, tx) in entries if any(k in tx for k in SING_KW)]
+    if not hits:
+        return []
+    out = []
+    cur = None
+    for a, b, tx in hits:
+        if cur and a - cur["end"] <= merge_gap:
+            cur["end"] = b
+            cur["hits"].append((a, tx[:40]))
+        else:
+            if cur:
+                out.append(cur)
+            cur = {"start": a, "end": b, "hits": [(a, tx[:40])]}
+    if cur:
+        out.append(cur)
+    for s in out:
+        s["start_hms"] = hms(s["start"])
+        s["end_hms"] = hms(s["end"])
+    return out
+
+
 def probe_video(ffprobe, path):
     info = SC.ffprobe_json(ffprobe, path)
     v = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), {})
@@ -778,7 +814,7 @@ def main():
         SC.log("复用上游转写 %d 份：%s" % (len(srts), "；".join(os.path.basename(s) for s in srts)))
 
     # ── 3~6. 找窗口 / 定歌名 / 定区间 / 核验 ─────────────────────
-    verified_all, llm_singing = [], False
+    verified_all, llm_singing, kw_all = [], False, []
     for srt_path in srts:
         entries = SC.parse_srt(srt_path)
         # 本支录播可能只是该场的前半段（上游尚未合并/压缩完）⇒ 转写尾部超出视频的部分无处可切，丢弃
@@ -790,6 +826,10 @@ def main():
                    % (entries[-1][1] if entries else 0, _vdur, _n0, len(entries)))
         tag = os.path.splitext(os.path.basename(srt_path))[0][:14]
         SC.log("--- 场次 %s：%d 句转写 ---" % (tag, len(entries)))
+        # 唱歌环节关键词扫描（第 49 条）：与 LLM 完全独立的文本通道，成本 ≈ 0
+        for _s in scan_sing_sections(entries):
+            _s["tag"] = tag
+            kw_all.append(_s)
         win, singing = ([], False) if args.no_llm else llm_windows(
             cfg, entries, srt_path=srt_path, workdir=workdir)
         llm_singing = llm_singing or singing
@@ -903,6 +943,31 @@ def main():
         rep["singing"]["note"] = "检测到演唱/候选但未能匹配到可核验的歌名，未出片，建议人工复核"
     else:
         rep["singing"]["note"] = "未检测到唱歌环节"
+
+    # 关键词通道（第 49 条）：LLM 报「无演唱」时它是唯一的反向红旗。
+    # 演唱段在音频层可能几乎不可见（人声压过伴奏 / 清唱），曲库也可能没收录这首歌，
+    # 因此**不能**用「LLM 说没有 + 音频层没有长音乐带」去定性「本场没唱」。
+    if kw_all:
+        rep["singing"]["kw_sections"] = [{
+            "window": "%s~%s" % (s["start_hms"], s["end_hms"]),
+            "n_hits": len(s["hits"]),
+            "sample": s["hits"][0][1],
+        } for s in kw_all]
+        SC.log("唱歌环节关键词：%d 段（%s）" % (
+            len(kw_all), "；".join("%s~%s(%d)"
+                                  % (s["start_hms"], s["end_hms"], len(s["hits"]))
+                                  for s in kw_all[:6])))
+        if not llm_singing:
+            SC.log("⚠ LLM 报 singing=False，但转写里有 %d 段唱歌环节关键词 ⇒ "
+                   "必须逐句复核这些区间后再定性（第 49 条：LLM 可能整场漏判英文/外语歌）"
+                   % len(kw_all))
+            # 追加而不是覆盖：rejected 里的 mention 噪声不能把这条红旗顶掉
+            _n = (rep["singing"].get("note") or "").strip()
+            rep["singing"]["note"] = (
+                (_n + "；" if _n else "")
+                + "⚠ LLM 整场报无演唱（0 窗口），但转写在 %s 等 %d 段出现唱歌环节关键词 "
+                  "⇒ 不能据此定性「本场没唱」，需人工逐句复核（第 49 条）"
+                % (kw_all[0]["start_hms"], len(kw_all)))
 
     # ── 7. 出片 ────────────────────────────────────────────────
     if verified_all and not args.no_cut:
