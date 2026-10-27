@@ -1234,10 +1234,23 @@ def render_player_video(workdir, job, ffmpeg=None):
         _rm_retry(job["out"], log=log)
         raise RuntimeError("渲染中止：%s（已清理临时文件）" % abort)
     if rc != 0 or not os.path.exists(job["out"]):
-        tail = ((_err_txt or "") + (_out_txt or "")).strip()[-400:]
+        # ⚠ stderr 才是真正的死因（[fatal] / [pagecrash] / [browserclosed]），而旧代码把
+        #   「stderr + stdout 拼接后的最后 400 字符」写进异常 —— stdout 几万字符时 stderr 被整段
+        #   挤掉，日志只剩 render 进度，等于「查不出」。这里先完整落盘再报错。
+        _diag = os.path.join(ROOT, "_tmp", "render_fail_%s.log" % time.strftime("%Y%m%d_%H%M%S"))
+        try:
+            os.makedirs(os.path.dirname(_diag), exist_ok=True)
+            with io.open(_diag, "w", encoding="utf-8", newline="") as _f:
+                _f.write(u"=== rc=%s\n=== STDERR (%d chars) ===\n%s\n=== STDOUT tail ===\n%s\n"
+                         % (rc, len(_err_txt or ""), (_err_txt or "")[-30000:], (_out_txt or "")[-6000:]))
+            log("  [render] 失败诊断已写入：%s" % _diag)
+        except Exception as _e:
+            _diag = "(写入失败 %r)" % (_e,)
+            log("  [render] 诊断写入失败：%r" % (_e,))
+        tail = ((_err_txt or "").strip()[-1200:] or (_out_txt or "").strip()[-600:])
         _cleanup_render_tmp(job["out"])
         _rm_retry(job["out"], log=log)
-        raise RuntimeError("渲染失败 rc=%s：%s" % (rc, tail))
+        raise RuntimeError("渲染失败 rc=%s：%s\n（完整诊断：%s）" % (rc, tail, _diag))
 
     # 成功也要收尾：cjs 正常分支会删，但异常分支可能留下 mjpeg / 分段 mp4
     _cleanup_render_tmp(job["out"])

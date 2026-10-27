@@ -446,18 +446,31 @@ def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=Fa
                 flick.append((s + k, float(d[k]), float(nb), round(m, 4)))
 
     nb_block = [b for b in black if b[2] == "黑帧"]
-    if nb_block:
-        sev, ok = BLOCK, False
-    elif black:
-        sev, ok = WARN, True
-    else:
+    # 片头淡入豁免：v10 起播放器有 1.15s 黑场淡入（f0 亮度 4.0 → f4 10.2，单调上升）。
+    # 判据 = 「全部暗帧都落在片头 1.6s 内」且「亮度序列单调不减」。真正「首帧未预热」的长相是
+    # 「持续黑 → 突然跳到正常亮度」，不满足单调性 ⇒ 照样 BLOCK，豁免不会掩盖真缺陷。
+    _intro = sorted([b for b in black if b[0] < int(fps * 1.6)], key=lambda b: b[0])
+    _iv = [b[1] for b in _intro]
+    _fade_in = (bool(black) and len(_intro) == len(black) and len(_iv) >= 2
+                and all(_iv[i] <= _iv[i + 1] + 1e-6 for i in range(len(_iv) - 1)))
+    if nb_block and _fade_in:
         sev, ok = PASS, True
-    det = "抽样 %d 帧：黑帧 %d，偏暗 %d" % (got, len(nb_block), len(black) - len(nb_block))
-    if black:
-        det += "；例：" + ", ".join("f%d(亮度%.1f)" % (f, m) for f, m, _ in black[:5])
+        det = ("片头 %d 帧淡入（亮度 %.1f→%.1f 单调上升，播放器入场设计），片身 0 黑帧"
+               % (len(_intro), _iv[0], _iv[-1]))
+    else:
+        if nb_block:
+            sev, ok = BLOCK, False
+        elif black:
+            sev, ok = WARN, True
+        else:
+            sev, ok = PASS, True
+        det = "抽样 %d 帧：黑帧 %d，偏暗 %d" % (got, len(nb_block), len(black) - len(nb_block))
+        if black:
+            det += "；例：" + ", ".join("f%d(亮度%.1f)" % (f, m) for f, m, _ in black[:5])
     out.append(Finding("V03", "画面", "无黑帧", sev, ok, det,
                        {"黑帧阈值": TH["black_block"], "偏暗阈值": TH["black_warn"],
-                        "抽样帧": got},
+                        "抽样帧": got, "片头淡入帧数": len(_intro),
+                        "片头亮度序列": [round(v, 1) for v in _iv]},
                        "黑帧 → 渲染首帧未预热/素材未加载；定位到帧号后用 shot_frame.cjs 复现"))
 
     nw = len([1 for v in frames.values() if v is not None and len(v) >= 2])

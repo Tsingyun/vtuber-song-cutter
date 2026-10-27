@@ -227,7 +227,9 @@ async function cleanupArtifacts() {
         recvBytes += buf.length; got++;
         if (tFrame && got % 600 === 0) {
           const el = (Date.now() - tFrame) / 1000;
-          console.log(`[render] ${got} 帧 ${(got / el).toFixed(1)} fps ${(recvBytes / 1048576).toFixed(0)} MB`);
+          const _mu = process.memoryUsage();
+          console.log(`[render] ${got} 帧 ${(got / el).toFixed(1)} fps ${(recvBytes / 1048576).toFixed(0)} MB`
+                      + ` | node rss ${(_mu.rss / 1048576).toFixed(0)}MB heap ${(_mu.heapUsed / 1048576).toFixed(0)}MB`);
         }
         /* 多实例（两阶段）：每实例自身有序，按帧号路由到对应段的 JPEG 落盘流。
            单实例：按帧号重排后喂给 ffmpeg stdin，用「领先上限」做背压防内存爆。 */
@@ -235,7 +237,14 @@ async function cleanupArtifacts() {
         if (Number.isFinite(idx)) {
           if (TWO_PHASE) {
             const p = Math.min(PAGES - 1, Math.floor(idx / SEG_PER));
-            partStreams[p].write(buf);
+            /* 背压：流没吃下就挂住这条 HTTP 响应，页面会 await 到 drain 再发下一帧。
+               原实现无条件 write + 立刻 ack ⇒ 磁盘跟不上时 JPEG Buffer 在 Node 堆里累积爆掉。 */
+            if (!partStreams[p].write(buf)) {
+              partStreams[p].once('drain', () => {
+                try { res.writeHead(200); res.end('OK'); } catch (e) {}
+              });
+              return;
+            }
             res.writeHead(200); res.end('OK');
             return;
           }
@@ -273,6 +282,8 @@ async function cleanupArtifacts() {
            '--disable-renderer-backgrounding',
            '--disable-backgrounding-occluded-windows',
            '--disable-background-timer-throttling',
+           // 允许页面内手动 gc()：4K 长片每 256 帧压一次，避免 Blob/ArrayBuffer 堆积
+           '--js-flags=--expose-gc',
            '--enable-gpu'],
   };
   /* 页面入口：job.page 可指定同目录下的另一份播放器（如 index_v10.html）。
@@ -313,6 +324,9 @@ async function cleanupArtifacts() {
     const browser = await chromium.launch(LAUNCH);
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     page.on('pageerror', e => console.error('[pageerror]', e.message));
+    /* pageerror 只捕 JS 抛错，捕不到 renderer 进程被杀（OOM/GPU 崩）——那才是 4K 长片最常见的死法 */
+    page.on('crash', () => console.error('[pagecrash] 渲染实例的 renderer 进程崩溃（多为内存/GPU 超限）'));
+    browser.on('disconnected', () => console.error('[browserclosed] Chromium 连接断开'));
     page.on('console', m => { if (m.type() === 'error') console.error('[console.error]', m.text()); });
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForFunction('window.HL && HL.ready', null, { timeout: 60000 });
@@ -355,18 +369,31 @@ async function cleanupArtifacts() {
     }
     const rs = await Promise.all(handles.map(async (h, p) => {
       const [s, e] = segOf(p);
-      return await h.page.evaluate(async ({ s, e, up, q }) => {
-        // 歌词排版有跨帧累积状态，每个实例都必须从 f0 顺序快进到自己的起点（绘制仅 0.3 ms/帧）
-        for (let i = 0; i < s; i++) window.__frame(i);
-        for (let i = s; i < e; i++) {
-          window.__frame(i);
-          const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', q));
-          if (!blob) return { ok: false, error: 'toBlob 返回 null @' + i };
-          const resp = await fetch(up + '?i=' + i, { method: 'POST', body: blob });
-          if (!resp.ok) return { ok: false, error: 'HTTP ' + resp.status + ' @' + i };
-        }
-        return { ok: true, n: e - s };
-      }, { s, e, up: frameUrlBase, q: JQ });
+      try {
+        return await h.page.evaluate(async ({ s, e, up, q }) => {
+          // 歌词排版有跨帧累积状态，每个实例都必须从 f0 顺序快进到自己的起点（绘制仅 0.3 ms/帧）
+          for (let i = 0; i < s; i++) window.__frame(i);
+          for (let i = s; i < e; i++) {
+            window.__frame(i);
+            const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', q));
+            if (!blob) return { ok: false, error: 'toBlob 返回 null @' + i };
+            /* ⚠ 别把 Blob 直接当 fetch body：Chrome 的 Blob 存储在 renderer 里**单独记账**，
+               不占普通 JS 堆，长片会一路累积到配额上限，然后整页报
+               net::ERR_BLOB_OUT_OF_MEMORY + 「TypeError: Failed to fetch」——而且 pageerror
+               抓不到（网络层错误），表现成「随机崩在某个百分比」。转 ArrayBuffer 后 Blob
+               立刻无引用可回收，ArrayBuffer 走普通堆，配额与高压 GC 都正常生效。 */
+            const buf = await blob.arrayBuffer();
+            const resp = await fetch(up + '?i=' + i, { method: 'POST', body: buf });
+            if (!resp.ok) return { ok: false, error: 'HTTP ' + resp.status + ' @' + i };
+            if ((i & 255) === 0 && typeof window.gc === 'function') { try { window.gc(); } catch (err) {} }
+          }
+          return { ok: true, n: e - s };
+        }, { s, e, up: frameUrlBase, q: JQ });
+      } finally {
+        /* 本段渲完立刻关掉这个实例：两页并行时另一页还在跑，早关能提前释放整份
+           renderer 堆（4K canvas + 字形 sprite + Blob 存储都在里面）。 */
+        try { await h.browser.close(); } catch (err) {}
+      }
     }));
     const bad = rs.find(r => !r.ok);
     result = bad || { ok: true, frames: total, dur: total / 60 };

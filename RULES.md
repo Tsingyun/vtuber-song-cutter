@@ -552,3 +552,27 @@
 | **自检** | `python tools/selftest_player.py --page index_v10.html [--res 2]`。自包含（现场 ffmpeg 合成 6s 音频/封面/歌词，不碰录播、不联网），校验 12 项：进程退出码 / `[pageerror]` / `[console.error]` / 成片存在 / 分辨率 / 帧率 / 时长 / 编码器路径。**全项 PASS ≠ 画面好看，但等于「链路没坏」**——任何改动 player 或 render_song 之后都必须先跑它 |
 | **改动 v10 的方式** | 用**幂等 Python 脚本**做整块替换（`_tmp/build_v10.py` + `patch_v10_r2/r3/r4.py` 的记录可查），每条替换断言命中 1 次，MISS/AMBIG 立即退出。绝不逐条手改 3500 行 HTML |
 | **v10 实测成本** | 4K 12s：v10 56.1s vs v9 54.9s（+2%）；1080p 纯绘制 v9 306fps → v10 230fps（多 4 个绘制层，+0.9ms/帧）。深色画面 JPEG 压缩率更高，编码端反而省时间 |
+
+## 45. 4K 长片渲染会撞 **`ERR_BLOB_OUT_OF_MEMORY`**：Blob 走独立配额，必须转 ArrayBuffer 再 POST（2026-10-27 实测）
+
+| 项 | 内容 |
+|---|---|
+| **症状** | 渲染到 73%（10200/13930 帧）突然 rc=5，Python 只报 `渲染失败 rc=5：] 4200 帧 24.7 fps 9627 MB …` —— **日志里看不到任何错误**，像是随机崩在某个百分比 |
+| **真因** | 每帧 `cv.toBlob()` 产出的 JPEG Blob 被**直接塞进 `fetch` body**。Chrome 的 Blob 存储在 renderer 里**单独记账**（不占普通 JS 堆，也不受 `--js-flags` 堆上限约束），长片一路累积到配额上限后整页报 `net::ERR_BLOB_OUT_OF_MEMORY`，紧接着 `fetch` 抛 `TypeError: Failed to fetch` |
+| **为什么 pageerror 抓不到** | 它是**网络层**错误，`page.on('pageerror')` / `console.error` 只在 chrome 控制台里有一条 `Failed to load resource`。**不落 stderr 就完全无声** |
+| **为什么这次才炸** | v10 深色画面 + 颗粒让 JPEG 从 v9 的 2.03~2.12 MB/帧涨到 **2.30 MB/帧**（+10%），Blob 累积提前撞顶。同条件 v9 在 10-25 三首（238/334/263s）都侥幸过了 |
+| **修法** | `const buf = await blob.arrayBuffer();` 再 `fetch(up, {body: buf})`。Blob 立刻无引用可回收，ArrayBuffer 走普通堆、受高压 GC 管辖。配 `--js-flags=--expose-gc` + 每 256 帧 `window.gc()`，并在 `finally` 里**该段渲完立刻 `browser.close()`**（两页并行时能提前释放一整份 renderer 堆） |
+| **验证** | 同片同参数重渲：13930 帧跑完，段编码 + concat 182.3s，成片 507.7 MB / 18.02 Mbps |
+| **代价** | 耗时 1354.8s（v9 同长度约 860s）。其中约 300s 来自「段完即关」⇒ 后半段只剩单实例（12 fps vs 双实例 26 fps）；ArrayBuffer 拷贝与 gc 各占十几秒。**安全优先，暂不优化**；真要提速就把 `finally` 里的 close 挪回 `Promise.all` 之后（Blob 已修的前提下大概率安全，但需再验一次） |
+| **可诊断性（同批修复）** | `song_cutter.render_player_video` 失败时原来只把「stderr+stdout 拼接后的最后 400 字符」写进异常 —— stdout 几万字符时 **stderr 被整段挤掉**。现在改成：完整 stderr（≤30k 字符）+ stdout 尾部落盘到 `_tmp/render_fail_<时间戳>.log`，异常消息里带 stderr 尾部 1200 字符。**排渲染失败先看这个文件，别再看主日志** |
+
+## 46. QC `V03 无黑帧` 要区分「片头单调淡入」与「真黑屏」（2026-10-27）
+
+| 项 | 内容 |
+|---|---|
+| **误报** | v10 起播放器有 1.15s 黑场淡入。首次出整片 QC 直接 **BLOCK**：`抽样 120 帧：黑帧 2，偏暗 5；例：f0(亮度4.0), f1(5.0), f2(6.2), f3(8.3), f4(10.2)` |
+| **为什么不该改播放器** | 淡入是刻意的电影感开场，不是缺陷。改它等于为了判据牺牲设计 |
+| **也不该无脑豁免前 2s** | V03 的本意是抓「渲染首帧未预热/素材未加载 → 黑屏」，那种长相是**持续黑 → 突然跳到正常亮度**。无脑豁免会把它一起放过 |
+| **判据（已落地 `songcut/qc.py`）** | 只有同时满足 ①全部暗帧都落在片头 `fps×1.6` 帧内 ②**亮度序列单调不减** 才判 PASS 并写明「片头 N 帧淡入（亮度 a→b 单调上升）」。任一不满足走原逻辑（黑帧→BLOCK / 偏暗→WARN） |
+| **复验** | 同一成片复跑：`V03 PASS 片头 7 帧淡入（亮度 4.0→13.1 单调上升，播放器入场设计），片身 0 黑帧`，整片 `BLOCK=0 WARN=2 PASS=23 passed=True` |
+| **通用原则** | 判据撞上「刻意设计」时，**给判据加正交特征**（这里是单调性），不要给设计让路，也不要直接豁免时间窗 |
