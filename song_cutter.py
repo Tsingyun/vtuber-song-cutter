@@ -1414,6 +1414,39 @@ def lyric_time_span(entries, lrc_text, t0, t1, line_thr=0.5):
     return hits[0][0], hits[-1][1]
 
 
+# 源文件仍在录制时，切点终点距「文件当前尾部」至少应有的余量（秒）。
+# 小于它说明源可能还在增长，尾奏/尾句可能尚未落盘 —— 只告警，不阻断。
+LIVE_TAIL_MARGIN = 20.0
+
+
+def assert_src_covers(ffprobe_path, src, ce, tag="源文件"):
+    """切点终点是否已经落盘（2026-10-27 实测，见 RULES 43）。
+
+    对**仍在录制**的 flv 用 `-ss` 读到超过真实尾部时，ffmpeg 的表现是
+    **返回码 0、输出静默截断甚至 0 字节**，一个字都不报错：
+        ss=尾部-3s  → 只要到 7.16s（应为 15s），rc=0
+        ss=尾部+30s → 0 字节，rc=0
+    主链原来只判 `rc != 0`，会一路把这当成正常结果继续渲染 ⇒ 必须显式校验。
+
+    返回 (src_dur, margin)，读不出时长时返回 (None, None) 不阻断。
+    """
+    try:
+        info = ffprobe_json(ffprobe_path, src)
+        dur = float(info.get("format", {}).get("duration", 0) or 0)
+    except Exception as exc:
+        log("  ⚠ 无法读取%s时长（%s）→ 跳过落盘校验" % (tag, str(exc)[:80]))
+        return None, None
+    if dur <= 0:
+        return None, None
+    if dur + 1e-6 < ce:
+        raise RuntimeError(
+            "%s当前只录到 %.1fs，而切点终点在 %.1fs（差 %.1fs）——"
+            "文件可能仍在录制，尾奏/尾句还没写进磁盘。"
+            "请等这首歌录完，或把 cut_end_abs 前移到已落盘区间再切。"
+            % (tag, dur, ce, ce - dur))
+    return dur, dur - ce
+
+
 def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_entries=None,
                 scheme_override=None):
     """切入点检测 → 波形精修 → 原曲分析（尾部切点/时间轴） → MP3 → 歌词/封面
@@ -1683,6 +1716,12 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         log("  原曲分析: 不可用（%s）→ 尾部/时间轴走降级链" % sync.get("reason", "?"))
     dur = ce - cs
 
+    # 2.7 落盘校验：源还在录制时，读取越过真实尾部会「静默截断 / 空文件」(rc=0)
+    _sdur, _smargin = assert_src_covers(ffprobe, src, ce)
+    if _smargin is not None and _smargin < LIVE_TAIL_MARGIN:
+        log("  ⚠ 源文件疑似仍在录制：总长 %.1fs，切点距文件尾仅 %.1fs（<%.0fs）"
+            % (_sdur, _smargin, LIVE_TAIL_MARGIN))
+
     # 3. 提取 MP3（192k，尾部 1.2s 淡出防硬切/爆音）
     rc, _, err = run([ffmpeg, "-y", "-v", "error", "-ss", "%.3f" % cs, "-i", src,
                       "-t", "%.3f" % dur, "-vn",
@@ -1692,6 +1731,23 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                       "-id3v2_version", "3", out_mp3])
     if rc != 0:
         raise RuntimeError("MP3 提取失败：%s" % err[-300:])
+    # 提取结果长度复核（ffmpeg 越过源尾部时 rc=0 但输出被静默截断，只能靠长度发现）
+    _msz = os.path.getsize(out_mp3) if os.path.exists(out_mp3) else 0
+    _mdur = 0.0
+    if _msz >= 10240:
+        try:
+            _mdur = float(ffprobe_json(ffprobe, out_mp3)
+                          .get("format", {}).get("duration", 0) or 0)
+        except Exception:
+            _mdur = 0.0
+    if _msz < 10240 or (_mdur and _mdur < dur - 1.5):
+        raise RuntimeError(
+            "MP3 只提取到 %.1fs / %d 字节（期望 %.1fs）—— 源文件尾部尚未落盘"
+            "（仍在录制？）或切点越过文件尾。已中止，避免产出废片。"
+            % (_mdur, _msz, dur))
+    if _mdur and abs(_mdur - dur) > 1.5:
+        log("  ⚠ MP3 时长 %.1fs 与切点跨度 %.1fs 不符（差 %+.1fs）"
+            % (_mdur, dur, _mdur - dur))
 
     # 3.2 片头静音保障：确保开头 ~1s 静音（不足则插入），避免"一进来就是伴奏"
     head_pad = _ensure_head_silence(ffmpeg, out_mp3)
