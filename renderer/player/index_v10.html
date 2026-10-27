@@ -787,6 +787,7 @@
 <video id="video" preload="metadata" style="display:none"></video>
 
 <script src="mp4-muxer.js"></script>
+<script src="pro_bg.js"></script>
 <script>
 "use strict";
 /* ==================================================================
@@ -3142,6 +3143,7 @@ function loop(now){
   ctx.clearRect(0,0,W,H);
   updateHalo(dt);
   drawBackground(now, dt);
+  if(window.PROBG) PROBG.draw({ ctx, t: Math.max(0, audio.currentTime + offset), LY, PAL, BRAND, INK, rgba });
   if(SHOW_ART) drawArtLayer();
   drawCover(now);
   drawColumnRule(Math.max(0, audio.currentTime + offset));
@@ -3455,6 +3457,10 @@ renderCacheBar();
       if(meta.footerRight != null) $('footerRight').value = meta.footerRight;
       if(meta.bitrate != null) HL.bitrate = Number(meta.bitrate) || null;   // 成片视频码率(bps)，缺省 18 Mbps
       if(meta.lrc != null){ $('lyricsText').value = meta.lrc; parseLyrics(meta.lrc); }
+      /* 歌词时间偏移：测试片段用「整份 LRC + offset」而不是切歌词 ——
+         只有整份 LRC 才存在 t<0 的已唱行，预览里才会像正片一样有上文（切掉的歌词
+         会让当前行顶到第 1 行，画面看着像「刚开头」）。offset 与 pro_bg 的 A.off 同值。 */
+      if(meta.lrcOffset != null){ offset = Number(meta.lrcOffset) || 0; }
       if(meta.cover){
         const im = new Image();
         await new Promise((res,rej)=>{ im.onload=res; im.onerror=()=>rej(new Error('封面图解码失败')); im.src = meta.cover; });
@@ -3473,6 +3479,19 @@ renderCacheBar();
       }
       if(meta.mark != null && String(meta.mark) !== ''){ BRAND_MARK = String(meta.mark); }
       if(meta.badge != null){ $('badgeText').value = String(meta.badge); }
+      /* 专业背景层：真实音频分析（tools/analyze_music.py 产出）经 job.proAnalysis 注入。
+         mode 优先级：job.bg（成片流水线）> ?bg=（抽帧/测试）> none（保持现状）。 */
+      if(window.PROBG){
+        if(meta.proAnalysis){
+          const okp = PROBG.set(meta.proAnalysis);
+          console.log('[setup] proAnalysis frames=' + (meta.proAnalysis.nframes||0) +
+                      ' bands=' + (meta.proAnalysis.nbands||0) + ' ok=' + okp);
+        }
+        let bgm = String(meta.bg || '');
+        if(!bgm){ try{ bgm = new URLSearchParams(location.search).get('bg') || ''; }catch(e){} }
+        if(bgm) PROBG.mode = bgm;
+        console.log('[setup] proBg mode=' + PROBG.mode + ' data=' + PROBG.ok);
+      }
       if(meta.artImage){
         const im2 = new Image();
         await new Promise((res,rej)=>{ im2.onload=res; im2.onerror=()=>rej(new Error('装饰立绘解码失败')); im2.src = meta.artImage; });
@@ -3541,6 +3560,8 @@ renderCacheBar();
        全部静止，成片 94% 的版面没有任何时间变化。这一行是 v10 的核心修复。 */
     updateHalo(dt);
     drawBackground(now, dt);
+    /* 专业背景层：必须夹在底色与封面之间 —— 在歌词（含卡拉OK高亮）之下。 */
+    if(window.PROBG) PROBG.draw({ ctx, t: HL.vT, LY, PAL, BRAND, INK, rgba });
     drawCover(now);
     drawColumnRule(HL.vT);
     drawHalo();

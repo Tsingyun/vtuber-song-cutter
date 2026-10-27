@@ -293,7 +293,8 @@ async function cleanupArtifacts() {
   if (!fs.existsSync(pagePath)) {
     throw new Error('播放器页面不存在：' + pagePath);
   }
-  const url = 'file:///' + pagePath.replace(/\\/g, '/') + '?render=1&res=' + RES;
+  const BGQ = job.bg ? ('&bg=' + encodeURIComponent(job.bg)) : '';   // 专业背景层方案切换
+  const url = 'file:///' + pagePath.replace(/\\/g, '/') + '?render=1&res=' + RES + BGQ;
 
   // 3. 注入音频 + 元数据 + 歌词 + 封面
   const meta = {
@@ -314,6 +315,9 @@ async function cleanupArtifacts() {
     sticker: readAsset(job.sticker, path.join(playerDir, 'assets', 'sticker.png')),
     watermark: readAsset(job.watermark, path.join(playerDir, 'assets', 'watermark.png')),
     artImage: job.artImage || null,  // dataURL（右侧装饰层，与封面互不干扰）
+    proAnalysis: job.proAnalysis || null,   // 真实音频分析（tools/analyze_music.py），供 pro_bg.js
+    bg: job.bg || '',                        // 专业背景层方案：daw | spec | vocal | ''
+    lrcOffset: (job.lrcOffset == null ? null : Number(job.lrcOffset)),  // 歌词时间偏移（测试片段用整份 LRC + 偏移）
     scheme: (job.scheme == null ? null : Number(job.scheme)),  // 标题装饰方案 0~4（自动匹配/手动覆盖）
     bitrate: BITRATE,           // 成片视频码率(bps)：4K 走 B站不二压区间 16~18.5 Mbps
   };

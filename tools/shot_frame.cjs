@@ -40,6 +40,7 @@ const has = n => process.argv.includes('--' + n);
     badge: job.badge, mark: job.mark,
     lrc: job.lrc, cover: job.cover, scheme: job.scheme, bitrate: job.bitrate,
     sticker: null, watermark: null, artImage: job.artImage,
+    proAnalysis: job.proAnalysis || null, bg: job.bg || '',
   };
   // 贴图用 dataURL（file:// 图会污染 canvas）
   for (const [k, f] of [['sticker', 'assets/sticker.png'], ['watermark', 'assets/watermark.png']]) {
