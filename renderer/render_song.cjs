@@ -275,7 +275,14 @@ async function cleanupArtifacts() {
            '--disable-background-timer-throttling',
            '--enable-gpu'],
   };
-  const url = 'file:///' + path.join(playerDir, 'index.html').replace(/\\/g, '/') + '?render=1&res=' + RES;
+  /* 页面入口：job.page 可指定同目录下的另一份播放器（如 index_v10.html）。
+     缺省 index.html ⇒ 旧行为完全不变；两版共用 fonts/ 与 assets/，不必复制 18MB 字体。 */
+  const PAGE = job.page || 'index.html';
+  const pagePath = path.join(playerDir, PAGE);
+  if (!fs.existsSync(pagePath)) {
+    throw new Error('播放器页面不存在：' + pagePath);
+  }
+  const url = 'file:///' + pagePath.replace(/\\/g, '/') + '?render=1&res=' + RES;
 
   // 3. 注入音频 + 元数据 + 歌词 + 封面
   const meta = {

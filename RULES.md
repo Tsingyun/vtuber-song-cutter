@@ -540,3 +540,15 @@
 | **代码护栏（本次已加）** | `song_cutter.assert_src_covers(ffprobe, src, ce)`：提取前校验 `源时长 ≥ 切点终点`，不足即抛错并写明差多少秒；`尾距 < LIVE_TAIL_MARGIN(20s)` 时打「源文件疑似仍在录制」告警。提取后**再按 MP3 实际时长复核**（`< dur-1.5s` 或 `<10KB` 即中止）—— 静默截断只能靠长度发现，返回码不可信 |
 | **能边录边切的三个前提** | ① 这首歌**已经唱完**；② 切点终点 + 尾奏**已落盘**，且距文件尾留 **≥20s** 余量（录制器有写缓冲，刚写的不一定读得到）；③ 这首**没有跨段**——先看当天的 flv 有几个、这首歌的时间区间是否完整落在其中一段内。三条都满足就可以切，其余一律等录完 |
 | **更现实的阻塞点** | 歌切主链靠**上游 SRT** 定位歌曲（`detect_songs`）；上游转写流水线要等录播结束才跑 ⇒ 录制中**通常还没有 SRT**，也就没有切点。真要在录制中切，只能人工给 `cut_start_abs` / `cut_end_abs`（一旦给出即跳过全部自动边界检测），并自己写 `--lrc-override` |
+
+## 44. 播放器多版本并存：用 `--player-page` 切换，出片前用 `tools/selftest_player.py` 自检（2026-10-28）
+
+| 项 | 内容 |
+|---|---|
+| **现状** | `renderer/player/` 下并存两版：`index.html`（v9 明纸，**默认**）与 `index_v10.html`（v10 深夜电台）。两版共用 `fonts/`（18 MB）与 `assets/`，不复制、不各自维护 |
+| **切换** | 优先级 `--player-page <文件名>` > 环境变量 `SONGCUT_PLAYER_PAGE` > `index.html`。例：`python song_cutter.py --date X --player-page index_v10.html --force --no-kdocs`。页面不存在时**启动即报错并列出可选页面**，不会渲到一半才崩 |
+| **契约** | `job.page` 由 `song_cutter.py` 写入 `_render_job.json`，`render_song.cjs` 与 `tools/shot_frame.cjs` 都读它。新增版本 = 往 `renderer/player/` 丢一个 `.html`，**不需要改任何 Python/Node** |
+| **新版本必须遵守** | ① 只改绘制层，不动计算链（sprites/卡拉OK/滚动/导出）；② 全部动效是 `t` 的连续函数，禁止 `i===idx ? x : 0` 这类单帧阶跃；③ 任何随机数必须固定种子（`Math.random` 会让 P=2 的两页拼接处出现突变）；④ 深色主题必须让 `renderFrame()` 调 `updateHalo(1/fps)`，否则频谱驱动全部静止 |
+| **自检** | `python tools/selftest_player.py --page index_v10.html [--res 2]`。自包含（现场 ffmpeg 合成 6s 音频/封面/歌词，不碰录播、不联网），校验 12 项：进程退出码 / `[pageerror]` / `[console.error]` / 成片存在 / 分辨率 / 帧率 / 时长 / 编码器路径。**全项 PASS ≠ 画面好看，但等于「链路没坏」**——任何改动 player 或 render_song 之后都必须先跑它 |
+| **改动 v10 的方式** | 用**幂等 Python 脚本**做整块替换（`_tmp/build_v10.py` + `patch_v10_r2/r3/r4.py` 的记录可查），每条替换断言命中 1 次，MISS/AMBIG 立即退出。绝不逐条手改 3500 行 HTML |
+| **v10 实测成本** | 4K 12s：v10 56.1s vs v9 54.9s（+2%）；1080p 纯绘制 v9 306fps → v10 230fps（多 4 个绘制层，+0.9ms/帧）。深色画面 JPEG 压缩率更高，编码端反而省时间 |

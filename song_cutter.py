@@ -69,6 +69,9 @@ NODE_PATH_ENV = CFG.node_modules_path()
 
 _PLAYER_DIR = os.path.join(ROOT, "renderer", "player")
 _RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
+# 播放器页面：同目录下可并存多版（index.html = 明纸版，index_v10.html = 深夜电台版）。
+# 优先级：--player-page > 环境变量 SONGCUT_PLAYER_PAGE > index.html（保持历史行为）。
+PLAYER_PAGE = os.environ.get("SONGCUT_PLAYER_PAGE") or "index.html"
 
 # 画面底部注释行的字数上限：只放得下一句短句（中文 ≈40 字）
 NOTE_MAX_CHARS = 40
@@ -1846,6 +1849,7 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                               os.path.basename(out_mp4) + ".render.mp4")
     job = {
         "playerDir": _PLAYER_DIR,
+        "page": PLAYER_PAGE,
         "audio": out_mp3,
         "title": seg["title_guess"],
         "artist": artist,   # artist 已在上方按「segments 显式标注 > 歌词站」取值
@@ -2015,10 +2019,20 @@ def main():
     ap.add_argument("--scheme", type=int, default=None,
                     help="手动指定标题装饰方案 0~4（流光渐变/描边镂空/霓虹柔光/色块高亮/双色错位），"
                          "缺省则由歌曲意境自动匹配")
+    ap.add_argument("--player-page", default=None,
+                    help="播放器页面（renderer/player/ 下的文件名，默认 index.html）。"
+                         "index_v10.html = 深夜电台版；也可用环境变量 SONGCUT_PLAYER_PAGE 指定")
     args = ap.parse_args()
 
     global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC
-    global OUT_PAGES, AUTO_PAGES, GATE_IGNORE, GATE_ALLOW_NO_LRC
+    global OUT_PAGES, AUTO_PAGES, GATE_IGNORE, GATE_ALLOW_NO_LRC, PLAYER_PAGE
+    if getattr(args, "player_page", None):
+        PLAYER_PAGE = args.player_page
+    _pp = os.path.join(_PLAYER_DIR, PLAYER_PAGE)
+    if not os.path.exists(_pp):
+        raise SystemExit("播放器页面不存在：%s（可选：%s）" % (
+            _pp, ", ".join(sorted(f for f in os.listdir(_PLAYER_DIR)
+                                  if f.endswith(".html") and not f.startswith("_")))))
     GATE_IGNORE = bool(getattr(args, "ignore_gate", False))
     GATE_ALLOW_NO_LRC = bool(getattr(args, "allow_no_lrc", False))
     OUT_RES, OUT_BITRATE = args.res, args.bitrate

@@ -27,7 +27,7 @@ const has = n => process.argv.includes('--' + n);
   page.on('pageerror', e => console.error('[pageerror]', e.message));
   page.on('console', m => { if (m.type() === 'error') console.error('[console.error]', m.text()); });
 
-  const url = 'file:///' + path.join(job.playerDir, 'index.html').replace(/\\/g, '/') + '?render=1&res=' + RES;
+  const url = 'file:///' + path.join(job.playerDir, job.page || 'index.html').replace(/\\/g, '/') + '?render=1&res=' + RES;
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction('window.HL && HL.ready', null, { timeout: 60000 });
   await page.setInputFiles('#mediaFile', job.audio);
