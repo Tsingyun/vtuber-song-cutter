@@ -42,6 +42,7 @@
 })();
 </script>
 <script src="pv/pv_core.js"></script>
+<script src="pv/pv_bg.js"></script>
 <script src="pv/pv_type.js"></script>
 <script src="pv/pv_parts.js"></script>
 <script src="pv/pv_engine.js"></script>
@@ -156,6 +157,10 @@ window.__render = async () => {
 /* ---------------- 单帧预览（tools/pv_stills.cjs 用） ---------------- */
 window.__pvShot = async (cfg) => {
   if (!CFG) await setupFrom(cfg);
+  /* 人物层是「按镜头滑动装载」的：抽帧也必须走同一条装载路径，
+     否则非首镜的人物永远画不出来（会误判成「人物层没生效」）。 */
+  const pend = PV.ensureWindow ? PV.ensureWindow(cfg.t) : null;
+  if (pend) await pend;
   applyScale();
   PV.renderAt(ctx, cfg.t);
   return cv.toDataURL('image/png');

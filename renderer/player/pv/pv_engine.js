@@ -32,6 +32,11 @@
       inkRGB: ink, paperRGB: paper, accentRGB: accent, ghostARGB: ghostA, ghostBRGB: ghostB, voidRGB: voidc,
       ink: rgba(ink, 1), paper: rgba(paper, 1), accent: rgba(accent, 1),
       ghostA: rgba(ghostA, 1), ghostB: rgba(ghostB, 1),
+      /* 深底还是浅底，决定了「分离字与底」的手法完全不同：
+         浅底靠描边（暗边压在纸上），深底靠加粗 + 硬投影。
+         同一套 bag 用错底，会在字周围留一圈与背景同色的暗缝，笔画被吃掉 2~3px，
+         远看就成了「空心字」—— 这是用户判定「字体廉价」的直接来源。 */
+      deep: (paper[0] * 0.299 + paper[1] * 0.587 + paper[2] * 0.114) < 118,
       _dpr: dpr,
     };
   }
@@ -71,47 +76,55 @@
     }
     return null;
   }
-  /* 预载：**只载真的会被画到的帧**（有人物层的那些镜头）。
-     全量预载在 4K 下会把解码后的位图堆到 1GB 以上，而人物层只覆盖少数镜头；
-     又因为离线渲染是同步循环、没法 await，所以必须在 __setup 里就全部 decode 完，
-     否则渲染到那一帧时图还没解码完 —— 表现是人物一闪一闪，且每次跑闪的位置还不一样。 */
-  function preloadForShots(shots, log) {
-    const need = { head: new Set(), body: new Set(), wide: new Set() };
-    for (const sh of shots) {
-      if (!sh.fig || !sh.fig.seq) continue;
-      const s = ST.seq[sh.fig.seq];
-      if (!s) continue;
-      const a = Math.max(0, Math.floor((sh.t0 - 0.2) * s.fps));
-      const b = Math.min(s.n - 1, Math.ceil((sh.t1 + 0.2) * s.fps));
-      for (let i = a; i <= b; i++) need[sh.fig.seq].add(i);
+  /* 预载：**按镜头滑动装载，离开即释放**。
+     全曲人物镜头多起来之后，「一次性把所有用到的帧解码进内存」是行不通的：
+     232s × 8fps 的头窗 384² 就是 1.1GB，再加半身序列直接 OOM —— 而 4K 渲染
+     期间没有余量给 GC。改成窗口式之后，内存上限 = 单个镜头的帧数 × 序列数
+     （实测约 130MB），代价是每次换镜头要等一次解码（几十毫秒）。
+     因为离线渲染是同步循环，没法 await，所以装载由 __frame 返回 Promise 驱动
+     （render_song.cjs 会等它，见那边的 await）。 */
+  let _winKey = null, _winChain = Promise.resolve();
+
+  function spanOf(sh, name) {
+    const s = ST.seq[name];
+    if (!s) return null;
+    return [Math.max(0, Math.floor((sh.t0 - 0.9) * s.fps)),
+      Math.min(s.n - 1, Math.ceil((sh.t1 + 0.9) * s.fps))];
+  }
+
+  async function holdShot(sh) {
+    const want = {};
+    if (sh && sh.fig && sh.fig.seq && ST.seq[sh.fig.seq]) {
+      want[sh.fig.seq] = spanOf(sh, sh.fig.seq);
+      if (sh.fig.mode === 'duo' && ST.seq.head) want.head = spanOf(sh, 'head');
     }
-    let total = 0, bytes = 0;
-    for (const name of Object.keys(need)) {
+    let n = 0, bytes = 0;
+    for (const name of Object.keys(ST.seq)) {
       const s = ST.seq[name];
-      if (!s) continue;
-      const px = (s.w || s.size || 512) * (s.h || s.size || 512) * 4;
-      for (const i of need[name]) {
+      const w = want[name] || null;
+      const a = w ? w[0] : -1, b = w ? w[1] : -2;
+      // 释放：不在本镜窗口内的全部丢引用（decode 过的位图要能被回收）
+      for (let i = 0; i < s.frames.length; i++) {
+        if (i >= a && i <= b) continue;
+        if (s.frames[i]) s.frames[i] = null;
+      }
+      if (!w) continue;
+      for (let i = a; i <= b; i++) {
         if (s.frames[i]) continue;
         const im = new Image();
         im.src = seqPath(s, i);
         s.frames[i] = im;
-        total++; bytes += px;
+        n++;
+        bytes += (s.w || s.size || 512) * (s.h || s.size || 512) * 4;
       }
     }
-    if (log) log('preload ' + total + ' 帧 ≈ ' + (bytes / 1048576).toFixed(0) + ' MB 解码后');
-    return { total, bytes, need };
-  }
-
-  /* 等所有已排队的图解码完（同步渲染的前提） */
-  async function settleImages(sets) {
     const jobs = [];
-    for (const name of Object.keys(sets)) {
+    for (const name of Object.keys(want)) {
       const s = ST.seq[name];
-      if (!s) continue;
-      for (const i of sets[name]) {
+      const [a, b] = want[name];
+      for (let i = a; i <= b; i++) {
         const im = s.frames[i];
-        if (!im) continue;
-        if (im.complete && im.naturalWidth) continue;
+        if (!im || (im.complete && im.naturalWidth)) continue;
         jobs.push(new Promise(res => {
           if (im.decode) im.decode().then(res, res);
           else { im.onload = res; im.onerror = res; }
@@ -119,8 +132,19 @@
       }
     }
     await Promise.all(jobs);
-    return jobs.length;
+    return { n, bytes, jobs: jobs.length };
   }
+
+  /* 换镜头时返回 Promise（调用方必须等），同镜头返回 null（零开销） */
+  function ensureWindow(t) {
+    const sh = shotAt(t);
+    const key = sh ? String(sh.i) : 'none';
+    if (key === _winKey) return null;
+    _winKey = key;
+    _winChain = _winChain.then(() => holdShot(sh)).catch(() => {});
+    return _winChain;
+  }
+  PV.ensureWindow = ensureWindow;
 
 
   /* ---------------- 人物层 ----------------
@@ -128,21 +152,35 @@
      「文字压在人身上」只在 storyboard 明确标 overlap 时才发生（全片限次），
      否则「文字没有严重遮挡」这条验收过不去。 */
   const SAFE = { m: 76 };
+  const TAU = 6.283185307;
+
   function placeFigure(fig, bbox) {
-    const dpr = ST.dpr;
-    if (fig.mode === 'band') {
-      const h = (fig.h || 620) * (fig.scale || 1);
-      const w = h * ((fig.wRatio) || 0.752);
-      const x = (fig.side === 'r') ? PV.W - SAFE.m - w : SAFE.m;
+    const sc = fig.scale || 1;
+    const mode = fig.mode || 'disc';
+
+    /* 竖幅族（band / slab / ghost / crop）共用一个矩形框，差别只在尺寸与贴边方式：
+       band  = 3:4 竖幅，完整露出人；
+       slab  = 更高的整块，字从上面压过去；
+       ghost = 极大、极淡，当作「印在纸上的影子」；
+       crop  = 半边出画（日本 PV 里最常见的「被画框切掉的人」）。 */
+    if (mode !== 'disc' && mode !== 'duo') {
+      const h = (fig.h || 620) * sc;
+      const w = h * (fig.wRatio || 0.752);
       const y = (fig.y != null ? fig.y : 0.30) * PV.H;
-      return { x, y, w, h, kind: 'band' };
+      let x;
+      if (mode === 'crop') x = fig.side === 'r' ? PV.W - w * 0.54 : -w * 0.46;
+      else if (mode === 'ghost') x = fig.side === 'r' ? PV.W - w - 26 : 26;
+      else if (fig.fixed) x = fig.side === 'r' ? PV.W - w - 24 : 24;
+      else x = fig.side === 'r' ? PV.W - SAFE.m - w : SAFE.m;
+      return { x, y, w, h, kind: 'band', mode };
     }
-    const r = (fig.r || 168) * (fig.scale || 1);
+
+    const r = (fig.r || 168) * sc;
     if (fig.fixed) {
       // 满幅构图（密排墙等）没有空白可避：按 side 定点，让字直接从人身上过
       const x = fig.side === 'r' ? PV.W - r - 40 : r + 40;
       const y = (fig.y != null ? fig.y : 0.44) * PV.H;
-      return { x, y, r, kind: 'disc' };
+      return { x, y, r, kind: 'disc', mode };
     }
     // 候选锚点：四角 + 左右中
     const cxL = SAFE.m + r + 16, cxR = PV.W - SAFE.m - r - 16;
@@ -165,48 +203,157 @@
       const score = d + (c.x > PV.W / 2 ? 26 : 0) + (c.y > PV.H * 0.5 ? 8 : 0);
       if (score > bestScore) { bestScore = score; best = c; }
     }
-    return { x: best.x, y: best.y, r, kind: 'disc' };
+    return { x: best.x, y: best.y, r, kind: 'disc', mode };
+  }
+
+  /* 等比覆盖裁切：源图比例和框不一致时，宁可裁掉边缘也不要拉变形（拉变形一眼假）。 */
+  function drawCover(ctx, im, dx, dy, dw, dh, zoom) {
+    const iw = im.naturalWidth || im.width || 1;
+    const ih = im.naturalHeight || im.height || 1;
+    const z = zoom || 1;
+    const dr = dw / dh;
+    let sw, sh;
+    if (iw / ih > dr) { sh = ih / z; sw = sh * dr; } else { sw = iw / z; sh = sw / dr; }
+    const sx = (iw - sw) / 2, sy = (ih - sh) / 2;
+    ctx.drawImage(im, sx, sy, sw, sh, dx, dy, dw, dh);
+  }
+
+  /* 双色调（duotone）：直播截图直接贴上去永远是「贴了一张照片」，
+     因为它的色温、对比、噪点都和纸面无关。去饱和后压一个冷调阴影 + 提一个暖调高光，
+     画面立刻读作「印在纸上的她」，而不是贴纸。 */
+  function applyTone(g, w, h, S, fig) {
+    const tone = fig.tone;
+    if (!tone || tone === 'none') return;
+    g.globalCompositeOperation = 'saturation';
+    g.fillStyle = 'rgb(128,128,128)'; g.fillRect(0, 0, w, h);
+    if (tone === 'mono') { g.globalCompositeOperation = 'source-over'; return; }
+    /* 只提暖，不压暗：亮度交给 fig.a 控制。
+       早先在暗部叠一道 multiply，结果整张脸灰成一片（既不像纸上的印，也不像照片），
+       是这一版里最难看的一处。 */
+    g.globalCompositeOperation = 'screen';
+    g.globalAlpha = fig.toneHi == null ? 0.14 : fig.toneHi;
+    g.fillStyle = rgba(mix(S.accentRGB, S.inkRGB, 0.55), 1);
+    g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+  }
+
+  /* 羽化遮罩：把矩形人物块的边缘揉开。
+     硬边的照片贴上去永远读作「贴纸」—— 真正让人物「进画面」的不是调色，
+     而是边缘没有一条刀切一样的直线。遮罩烘焙一次，之后 destination-in 贴上去。 */
+  const _feather = {};
+  function featherSprite(k) {
+    const key = 'fe' + k.toFixed(3);
+    if (_feather[key]) return _feather[key];
+    const N = 256;
+    const c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, N, N);
+    g.globalCompositeOperation = 'destination-out';
+    const w = Math.max(1, Math.round(N * k));
+    const edges = [
+      [0, 0, w, N, 0, 0, 0, N],       // 左
+      [N - w, 0, w, N, N, 0, N, N],   // 右
+      [0, 0, N, w, 0, 0, N, 0],       // 上
+      [0, N - w, N, w, 0, N, N, N],   // 下
+    ];
+    for (const [x, y, ww, hh, gx0, gy0, gx1, gy1] of edges) {
+      const lg = g.createLinearGradient(gx0, gy0, gx1, gy1);
+      lg.addColorStop(0, 'rgba(0,0,0,1)');
+      lg.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = lg; g.fillRect(x, y, ww, hh);
+    }
+    g.globalCompositeOperation = 'source-over';
+    return (_feather[key] = c);
+  }
+
+  /* 带调色的人物位图：只有需要双色调时才走离屏，其余情况直接贴图（省一次拷贝） */
+  function figBitmap(im, dw, dh, S, fig, zoom) {
+    const k = Math.min(1, 760 / Math.max(dw, dh));
+    const ow = Math.max(4, Math.round(dw * k)), oh = Math.max(4, Math.round(dh * k));
+    const o = PV.offscreen('figTone', ow, oh, 1);
+    drawCover(o.ctx, im, 0, 0, ow, oh, zoom);
+    applyTone(o.ctx, ow, oh, S, fig);
+    if (fig.feather) {
+      // destination-in：只保留遮罩里的部分（遮罩中心实、边缘透）
+      o.ctx.globalCompositeOperation = 'destination-in';
+      o.ctx.drawImage(featherSprite(fig.feather), 0, 0, ow, oh);
+      o.ctx.globalCompositeOperation = 'source-over';
+    }
+    return o.c;
   }
 
   function drawFigure(ctx, fig, box, t, en, S) {
     S = S || ST.S;
     const name = fig.seq || 'head';
-    const s = ST.seq[name];
-    if (!s) return;
-    if (fig.layer === 'front' || fig.layer === 'behind' || fig.layer === 'avoid') { /* 由调用时机决定 */ }
-    const im = getFrame(name, t + (fig.tOff || 0));
+    if (!ST.seq[name]) return;
+    const t0 = t + (fig.tOff || 0);
+    const im = getFrame(name, t0);
     if (!im) return;
+
+    /* 呼吸 + 漂移：完全静止的贴图会读作「贴上去的」。幅度必须小到说不出哪里在动，
+       但一旦去掉就立刻变呆 —— 这是「她在画面里」和「一张截图」的全部差别。 */
+    const mo = fig.motion == null ? 1 : fig.motion;
+    const ph = (fig.ph || 0) * TAU;
+    const br = 1 + 0.009 * mo * Math.sin(t * 0.72 + ph);
+    const ox = Math.sin(t * 0.23 + ph) * 7 * mo;
+    const oy = Math.cos(t * 0.19 + ph * 1.7) * 5 * mo;
+
     const a = (fig.a == null ? 1 : fig.a) * (1 + en * 0.06);
     ctx.save();
     ctx.globalAlpha = clamp(a, 0, 1);
     ctx.imageSmoothingQuality = 'high';
 
     if (box.kind === 'disc') {
-      const { x, y, r } = box;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283185307); ctx.clip();
+      const x = box.x + ox, y = box.y + oy, r = box.r * br;
+      ctx.save();
+      ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip();
       const D = r * 2 * 1.10;                    // 源图显示边长 = 直径×1.10（脸占 69%，边缘交给头发）
-      const fx = ST.face.cx, fy = ST.face.cy;
-      ctx.drawImage(im, x - fx * D, y - fy * D, D, D);
+      if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, D, D, S, fig, 1.10), x - D / 2, y - D / 2, D, D);
+      else drawCover(ctx, im, x - D / 2, y - D / 2, D, D, 1.10);
       /* 内缘暗角：贴图而不是现算径向渐变（逐帧极坐标渐变会引入 ±1 的抖动差） */
       ctx.drawImage(PV.fadeSprite('discVig', S.voidRGB, [[0, 0], [0.52, 0], [0.94, 0.16], [1, 0.58]], false),
         x - r, y - r, r * 2, r * 2);
+      ctx.restore();
+
+      // 环：只有 disc 有，极细一圈；粗环会变成「头像框」
+      ctx.globalAlpha = 0.20 + en * 0.14;
+      ctx.strokeStyle = S.ink; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(x, y, r + 0.8, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = clamp(a, 0, 1);
+
+      /* duo：主窗旁边一个更小的「前一刻」，读作同一口气的延续，不是特效。
+         两张脸同时出现时，小窗必须更淡更远，否则会变成画中画 UI。 */
+      if (box.mode === 'duo') {
+        const im2 = getFrame(name, t0 - 0.62);
+        /* 小窗**竖着叠在主窗下方**：横着放会横跨画面中段，把整行歌词劈成两半
+           （实测 137.5s 的两个圆正好压在句子中间）。竖排之后这一对只占画面一侧，
+           文字可以独占另一侧 —— 也正是日本 PV 里「同一口气的前后两格」的排法。 */
+        const r2 = r * 0.38, x2 = x + r * 0.16, y2 = y + r * 1.14;
+        if (im2 && y2 + r2 < PV.H - 12) {
+          ctx.save();
+          ctx.globalAlpha = clamp(a * 0.5, 0, 1);
+          ctx.beginPath(); ctx.arc(x2, y2, r2, 0, TAU); ctx.clip();
+          drawCover(ctx, im2, x2 - r2, y2 - r2, r2 * 2, r2 * 2, 1.12);
+          ctx.restore();
+          ctx.globalAlpha = clamp(a * 0.30, 0, 1);
+          ctx.strokeStyle = S.ink; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(x2, y2, r2, 0, TAU); ctx.stroke();
+        }
+      }
     } else {
-      const { x, y, w, h } = box;
-      ctx.drawImage(im, x, y, w, h);
+      const w = box.w * br, h = box.h * br;
+      const x = box.x + ox - (w - box.w) / 2, y = box.y + oy - (h - box.h) / 2;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+      if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, w, h, S, fig, 1), x, y, w, h);
+      else drawCover(ctx, im, x, y, w, h, 1);
       /* 底部压暗：只在 55%~100% 这一段渐变，用 1×256 的竖直贴图拉伸 */
       ctx.drawImage(PV.fadeSprite('bandVig', S.voidRGB, [[0, 0], [1, 0.55]], true),
         x, y + h * 0.55, w, h * 0.45);
-    }
-    ctx.restore();
-
-    // 环：只有 disc 有，极细一圈；粗环会变成「头像框」
-    if (box.kind === 'disc') {
-      ctx.save();
-      ctx.globalAlpha = 0.20 + en * 0.14;
-      ctx.strokeStyle = S.ink; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.arc(box.x, box.y, box.r + 0.8, 0, 6.283185307); ctx.stroke();
       ctx.restore();
     }
+    ctx.restore();
   }
 
   /* ---------------- 纸底 ---------------- */
@@ -217,10 +364,25 @@
     const key = (pal.paper || '') + '|' + (pal.paper2 || '') + '|' + (pal.void || '');
     if (_paperKey === key && _paperC) return _paperC;
     const o = PV.offscreen('paperBase', PV.W, PV.H, 1);
+    const c1 = S.paperRGB;
+    const c2 = pal.paper2 ? PV.hex(pal.paper2) : mix(S.paperRGB, S.voidRGB, 0.55);
+    /* 两道交叉的梯度：只有一道时，暗部会读作「一条斜的黑」，看起来像加了蒙版；
+       交叉之后角落各自有不同的明度，才像一张有落差的纸。 */
     const g = o.ctx.createLinearGradient(0, 0, PV.W * 0.35, PV.H);
-    g.addColorStop(0, rgba(S.paperRGB, 1));
-    g.addColorStop(1, rgba(pal.paper2 ? PV.hex(pal.paper2) : mix(S.paperRGB, S.voidRGB, 0.55), 1));
+    g.addColorStop(0, rgba(mix(c1, c2, 0.25), 1));
+    g.addColorStop(0.52, rgba(c1, 1));
+    g.addColorStop(1, rgba(c2, 1));
     o.ctx.fillStyle = g; o.ctx.fillRect(0, 0, PV.W, PV.H);
+    const g2 = o.ctx.createLinearGradient(PV.W, 0, PV.W * 0.10, PV.H);
+    g2.addColorStop(0, rgba(mix(c1, c2, 0.55), 0.55));
+    g2.addColorStop(0.6, rgba(c1, 0));
+    g2.addColorStop(1, rgba(mix(c2, S.voidRGB, 0.35), 0.45));
+    o.ctx.fillStyle = g2; o.ctx.fillRect(0, 0, PV.W, PV.H);
+    // 顶部一道极淡的「光从上面来」，给纸面一点方向性
+    const g3 = o.ctx.createLinearGradient(0, 0, 0, PV.H * 0.55);
+    g3.addColorStop(0, rgba(mix(c1, [255, 255, 255], 0.10), 0.35));
+    g3.addColorStop(1, rgba(c1, 0));
+    o.ctx.fillStyle = g3; o.ctx.fillRect(0, 0, PV.W, PV.H * 0.55);
     _paperKey = key; _paperC = o.c;
     return _paperC;
   }
@@ -231,10 +393,14 @@
        反转镜头的字变了色、纸还是深色 —— 反转事件等于没发生。 */
     const pal = (shot && shot.pal) || ST.sb.palette || {};
     ctx.drawImage(paperCanvas(S, pal), 0, 0, PV.W, PV.H);
-    // 环境光：极缓漂移的一团暖光，避免大面积死黑（死黑会让白字显得廉价）
+    /* 环境光：两团方向相反、周期互质的柔光缓慢漂移。
+       一团光会读作「画面中间亮了一块」；两团互相穿过才有「空气在动」的错觉，
+       而死黑给人的廉价感恰恰来自「没有空气」。 */
     const ph = t / 23;
-    PV.blob(ctx, PV.W * (0.30 + 0.06 * Math.sin(ph * 6.283)), PV.H * 0.36,
-      PV.H * 0.86, S.accentRGB, 0.052 + 0.018 * Math.sin(ph * 4.1));
+    PV.blob(ctx, PV.W * (0.30 + 0.10 * Math.sin(ph * 6.283)), PV.H * 0.34,
+      PV.H * 0.92, S.accentRGB, 0.078 + 0.022 * Math.sin(ph * 4.1));
+    PV.blob(ctx, PV.W * (0.78 + 0.07 * Math.cos(t / 31 * 6.283)), PV.H * 0.72,
+      PV.H * 0.78, S.ghostARGB, 0.052 + 0.016 * Math.cos(t / 26 * 6.283));
     if (shot && shot.wash != null) {
       PV.rect(ctx, 0, 0, PV.W, PV.H, S.accent, shot.wash * 0.10);
     }
@@ -290,7 +456,16 @@
       g.alpha = 1; g.vis = 1; g.clip = null;
 
       const charAxis = g.t0 != null;          // sync 镜头里 t0 已被整块覆写成 shot.t0，天然无错相
-      const inT0 = (charAxis ? g.t0 : shot.t0) - LEAD + (charAxis ? 0 : STAG * idx);
+      /* 首词必须跟着镜头一起出现。
+         逐词时间轴是「唱到才长出来」，但镜头的起点来自整行的 t0，往往比第一个词的
+         唱点早 0.2~0.6s —— 于是每句开头都有一小段只剩一个字母的空画面（实测 50.5s
+         整屏一根竖条）。只钳第一个词：后面的词仍然严格跟随演唱。 */
+      /* 逐词揭示不能完全跟着唱点走：源词时间轴的间隔常到 1.2~1.5s（"I need you now"
+         四个词铺了 4 秒），于是整句大部分时间画面上只有一个词，读作「卡住了」。
+         规则：每个词最多只比**前一个词**晚 0.26s 出场 —— 句子在开头 1 秒内搭好，
+         之后靠 size/颜色/保持动作继续动，而不是靠「一个字一个字蹦」。 */
+      const gT0 = charAxis ? Math.min(g.t0, shot.t0 + 0.10 + (g.wi || 0) * 0.26) : g.t0;
+      const inT0 = (charAxis ? gT0 : shot.t0) - LEAD + (charAxis ? 0 : STAG * idx);
       const e = clamp((t - inT0) / EN_DUR, 0, 1);
       if (e <= 0) { g.vis = 0; continue; }
       re(g, e, rnd1[i], rnd2[i], enter);
@@ -353,6 +528,26 @@
     ctx.globalAlpha = 1;
   }
 
+  /* ---------------- 背景层次 ----------------
+     纸底之上、装饰之下的一层。任务只有一个：把「死黑」变成「纸」。
+     纹理全部来自 pv_bg.js 的烘焙场，这里只负责按编排稿顺序贴图。 */
+  function drawBG(ctx, list, t, start, S) {
+    if (!list || !list.length || !PV.BG) return;
+    const rel = t - (start || 0);
+    for (const d of list) {
+      const fn = PV.BG[d.k];
+      if (!fn) continue;
+      let dd = d;
+      // at/fade：和装饰同一套语义，背景也能逐层「搭」起来
+      if (d.at != null) {
+        const k = clamp((rel - d.at) / (d.fade == null ? 0.6 : d.fade), 0, 1);
+        if (k <= 0) continue;
+        if (k < 1) dd = Object.assign({}, d, { a: (d.a == null ? 1 : d.a) * k });
+      }
+      fn(ctx, dd, { S: S || ST.S, t, rel, seed: (start || 0) * 1000 | 0, shot: start });
+    }
+  }
+
   function drawDecor(ctx, list, t, start, S) {
     if (!list) return;
     S = S || ST.S;
@@ -403,6 +598,7 @@
 
     if (!shot) {                                   // 片头/片尾之外：只有纸底
       drawPaper(ctx, t, null);
+      drawBG(ctx, sb.meta && sb.meta.bgl, t, 0, S);
       PV.drawGrain(ctx, 0, 0, PV.W, PV.H, 0.5, ST.dpr);
       return;
     }
@@ -427,6 +623,7 @@
     }
 
     drawPaper(ctx, t, shot);
+    drawBG(ctx, shot.bgl, t, shot.t0, shot._S);
     drawDecor(ctx, shot.bg, t, shot.t0, shot._S);
 
     // 人物（后）
@@ -452,7 +649,9 @@
     drawPost(ctx, shot.post, t, en);
     if (!(shot.post || []).some(f => f.k === 'vignette')) {
       /* 默认暗角：让画面四周沉下去，是「电影感」最便宜也最有效的一步 */
-      PV.FX.vignette(ctx, { a: 0.60, r0: PV.H * 0.40, r1: PV.H * 1.02 }, { S });
+      /* 暗角 0.40 / r0 0.46：原来是 0.60，四角直接压成纯黑 ——
+         背景纹理全部被吃掉，等于白做。 */
+      PV.FX.vignette(ctx, { a: 0.40, r0: PV.H * 0.46, r1: PV.H * 1.10 }, { S });
     }
     PV.drawGrain(ctx, 0, 0, PV.W, PV.H, 0.55, ST.dpr);
 
@@ -547,8 +746,11 @@
     }
     ST.stats = { glyphs: total, shots: ST.shots.length };
 
-    const pre = preloadForShots(ST.shots, m => console.log('[pv] ' + m));
-    const settled = await settleImages(pre.need);
+    /* 只装载第一镜的帧；其余镜头在渲染循环里按需换装（见 holdShot）。
+       暖机渲染不需要人物层 —— 它只是为了把字形栅格/贴图/pattern 先跑一遍。 */
+    const sh0 = shotAt(0.001);
+    _winKey = sh0 ? String(sh0.i) : 'none';
+    const pre = await holdShot(sh0);
 
     /* 暖机渲染：把每个镜头的字形栅格、渐变、pattern 都先跑一遍。
        不做这一步，渲染循环里的「第 0 帧」会和后面所有帧不一样（约 100ms 的代价）。 */
@@ -558,7 +760,7 @@
     return {
       fonts: nf, glyphs: total, shots: ST.shots.length,
       seqs: Object.keys(ST.seq), dpr: ST.dpr,
-      preload: pre.total, settled, memMB: Math.round(pre.bytes / 1048576),
+      preload: pre.n, settled: pre.jobs, memMB: Math.round(pre.bytes / 1048576),
       missing: Object.keys(PV.FACES).filter(k => !document.fonts.check(PV.cssFace(k, 64), 'A字')),
     };
   };

@@ -31,17 +31,19 @@
   /* 细描边：只留轮廓，用于「字很轻」的段落 */
   T.outline = (ctx, g, bx, by, a, S) => {
     ctx.globalAlpha = a; ctx.strokeStyle = S.ink;
-    ctx.lineWidth = Math.max(1.4, g.size * (S.strokeW || 0.017));
+    ctx.lineWidth = Math.max(2.4, g.size * (S.strokeW || 0.032));
     ctx.lineJoin = 'miter'; ctx.miterLimit = 3;
     ctx.strokeText(g.c, bx, by);
     fillNarrow(ctx, g, bx, by, a, S);
   };
 
-  /* 粗描边：轮廓本身就是主体，文字 PV 最常见的一档 */
+  /* 粗描边：轮廓本身就是主体，文字 PV 最常见的一档。
+     连接方式用 round 而不是 miter —— 极粗描边配尖角，外轮廓会在 A / V / W 的尖上
+     炸出一根根刺（读作「渲染毛刺」，不是设计）。 */
   T.outlineThick = (ctx, g, bx, by, a, S) => {
     ctx.globalAlpha = a; ctx.strokeStyle = S.ink;
     ctx.lineWidth = Math.max(3, g.size * (S.strokeW || 0.052));
-    ctx.lineJoin = 'miter'; ctx.miterLimit = 2.4;
+    ctx.lineJoin = 'round'; ctx.miterLimit = 2;
     ctx.strokeText(g.c, bx, by);
     fillNarrow(ctx, g, bx, by, a, S);
   };
@@ -49,18 +51,76 @@
   /* 实心 + 反色描边：字与底拉开，是最「海报」的一档 */
   T.fillOutline = (ctx, g, bx, by, a, S) => {
     ctx.globalAlpha = a;
-    ctx.strokeStyle = S.paper; ctx.lineWidth = Math.max(3, g.size * 0.055);
+    // 深底上「反色描边」= 用底色描一圈，边缘被啃掉 3px 且颜色发脏；
+    // 改成同色描边，效果是笔画加厚，读作「墨压得重」。
+    ctx.strokeStyle = S.deep ? S.ink : S.paper;
+    ctx.lineWidth = Math.max(3, g.size * (S.deep ? 0.030 : 0.055));
     ctx.lineJoin = 'round'; ctx.strokeText(g.c, bx, by);
     ctx.fillStyle = S.ink; ctx.fillText(g.c, bx, by);
   };
 
-  /* 双线套印：故意留一点失配，读作「印歪了」，很廉价但很好用 —— 只用一次 */
+  /* 双线套印：故意留一点失配，读作「印歪了」。1.5px 级别是印刷感，
+     5px 以上就是廉价故障风 —— 所以位移量必须跟着字号走且封顶。 */
   T.double = (ctx, g, bx, by, a, S) => {
-    const d = Math.max(1.5, g.size * 0.020);
-    ctx.globalAlpha = a * 0.62; ctx.strokeStyle = S.ghostA;
-    ctx.lineWidth = Math.max(1.2, g.size * 0.013);
+    const d = Math.min(g.size * 0.020, 4.5);
+    ctx.globalAlpha = a * 0.55; ctx.strokeStyle = S.ghostA;
+    ctx.lineWidth = Math.max(1.2, g.size * 0.012);
+    ctx.lineJoin = 'round';
     ctx.strokeText(g.c, bx - d, by - d * 0.5);
     ctx.globalAlpha = a; ctx.strokeStyle = S.ink; ctx.strokeText(g.c, bx, by);
+    fillNarrow(ctx, g, bx, by, a, S);
+  };
+
+  /* 袋文字（二重縁）：墨字 → 留白圈 → 外墨线。日本同人 PV / サムネ 的招牌做法，
+     比「只描边」多一层留白，字因此能从任何底图上立起来。
+     三趟 stroke 的顺序不能换：先画最外圈，再用纸色把中间挖空，最后填字。 */
+  T.bag = (ctx, g, bx, by, a, S) => {
+    if (S.deep) {
+      // 深底：袋文字的「留白圈」颜色 = 底色，画上去等于把字擦细。
+      // 这里换成同色描边加粗，得到的是一支更重的字，而不是一圈空心。
+      const lw = Math.max(2, g.size * (S.heavyW == null ? 0.024 : S.heavyW));
+      ctx.globalAlpha = a; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+      ctx.strokeStyle = S.ink; ctx.lineWidth = lw * 2;
+      ctx.strokeText(g.c, bx, by);
+      ctx.fillStyle = S.ink; ctx.fillText(g.c, bx, by);
+      ctx.strokeText(g.c, bx, by);
+      return;
+    }
+    const gap = g.size * (S.bagGap == null ? 0.030 : S.bagGap);
+    const ring = g.size * (S.bagRing == null ? 0.015 : S.bagRing);
+    ctx.globalAlpha = a;
+    ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+    ctx.strokeStyle = S.ink; ctx.lineWidth = (gap + ring) * 2;
+    ctx.strokeText(g.c, bx, by);
+    ctx.strokeStyle = S.paper; ctx.lineWidth = gap * 2;
+    ctx.strokeText(g.c, bx, by);
+    ctx.fillStyle = S.ink; ctx.fillText(g.c, bx, by);
+  };
+
+  /* 上下双色：只压「字脚」那一小段。
+     早先的做法是把字的上半截整体换成灰调 —— 一条横切线穿过每个字的字腰，
+     读作「渐变贴图」而不是「印刷」，是这一版里最显廉价的一处。
+     现在改成在基线附近压一道 26% 高的暗部：墨在纸上会往笔画底部积一点，
+     这一道就有了「墨厚」的错觉，而且不改变字的整体明度。 */
+  T.twoTone = (ctx, g, bx, by, a, S) => {
+    ctx.globalAlpha = a;
+    ctx.fillStyle = S.ink; ctx.fillText(g.c, bx, by);
+    const top = by - g.size * 0.26, bh = g.size * 0.30;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx - g.size * 0.10, top, g.w + g.size * 0.20, bh); ctx.clip();
+    ctx.fillStyle = rgba(mix(S.inkRGB, S.voidRGB, 0.52), 1);
+    ctx.fillText(g.c, bx, by);
+    ctx.restore();
+  };
+
+  /* 硬投影：整字错位压在下面一层，没有模糊 —— 剪纸 / 版画的做法，不脏。
+     廉价感来自「模糊阴影」，所以这里坚决不用 shadowBlur。 */
+  T.shadowSolid = (ctx, g, bx, by, a, S) => {
+    const d = g.size * (S.shadowOff == null ? 0.032 : S.shadowOff);
+    ctx.globalAlpha = a * 0.85;
+    ctx.fillStyle = rgba(mix(S.voidRGB, S.accentRGB, S.deep ? 0.16 : 0.35), 1);
+    ctx.fillText(g.c, bx + d, by + d * 0.72);
+    ctx.globalAlpha = a; ctx.fillStyle = S.ink; ctx.fillText(g.c, bx, by);
   };
 
   /* 色差残影：青/品红各偏一点，只在重拍用 */
@@ -95,21 +155,25 @@
     ctx.restore();
   };
 
-  /* 荧光笔块：字底下压一道色块，色块本身就是构图元素 */
+  /* 下線：字底下压一道强调色细线（ルビ下線 / 手绘底线）。
+     它比「荧光笔块」高级的地方在于：只声明「这一段重要」，不改变字本身的明度，
+     而块状高亮会把字的中宫吃掉 —— 那是廉价短视频字幕的做法。 */
   T.marker = (ctx, g, bx, by, a, S) => {
-    const h = g.size * 0.62, y = by - h * 0.80;
-    ctx.globalAlpha = a * 0.88; ctx.fillStyle = S.accent;
-    ctx.fillRect(bx - g.size * 0.04, y, g.w + g.size * 0.08, h);
-    ctx.globalAlpha = a; ctx.fillStyle = S.paper; ctx.fillText(g.c, bx, by);
+    const t = Math.max(2, g.size * 0.062);
+    const y = by + g.size * 0.14;
+    ctx.globalAlpha = a * 0.92; ctx.fillStyle = S.accent;
+    ctx.fillRect(bx - g.size * 0.012, y, g.w + g.size * 0.024, t);
+    ctx.globalAlpha = a; ctx.fillStyle = S.ink; ctx.fillText(g.c, bx, by);
   };
 
-  /* 渐变切字：把字当蒙版，往字里灌一条渐变 —— 大字号时质感最好 */
-  T.stripe = (ctx, g, bx, by, a, S) => {
-    const gr = ctx.createLinearGradient(0, by - g.size, 0, by);
-    gr.addColorStop(0, S.stripeA || S.ink);
-    gr.addColorStop(1, S.stripeB || rgba(S.accentRGB, 1));
-    ctx.globalAlpha = a; ctx.fillStyle = gr; ctx.fillText(g.c, bx, by);
+  /* 强调色实心：关键字直接换颜色。最干净的一档，用在大字上比任何描边都醒目。 */
+  T.accent = (ctx, g, bx, by, a, S) => {
+    ctx.globalAlpha = a; ctx.fillStyle = S.accent; ctx.fillText(g.c, bx, by);
   };
+
+  /* 渐变切字：旧实现逐帧 createLinearGradient，既贵又不稳（见 twoTone 注释）。
+     现在整档改由 twoTone 承担，这里保留名字只做转发，老编排稿不会因此失效。 */
+  T.stripe = (ctx, g, bx, by, a, S) => T.twoTone(ctx, g, bx, by, a, S);
 
   /* 挖空：字是「洞」，露出底下的画 —— 与人物层配合时最有效 */
   T.knockout = (ctx, g, bx, by, a, S) => {

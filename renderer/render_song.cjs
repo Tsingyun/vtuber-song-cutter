@@ -391,7 +391,11 @@ async function cleanupArtifacts() {
           // 歌词排版有跨帧累积状态，每个实例都必须从 f0 顺序快进到自己的起点（绘制仅 0.3 ms/帧）
           for (let i = 0; i < s; i++) window.__frame(i);
           for (let i = s; i < e; i++) {
-            window.__frame(i);
+            /* 页面可以返回 Promise：人物层是「按镜头滑动装载」的，换镜头时要把那一镜
+               的直播帧解码完再画（否则会画到回落帧 = 人物闪）。v9/v10 的 __frame
+               返回 undefined，await undefined 无副作用。 */
+            const pend = window.__frame(i);
+            if (pend && typeof pend.then === 'function') await pend;
             const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', q));
             if (!blob) return { ok: false, error: 'toBlob 返回 null @' + i };
             /* ⚠ 别把 Blob 直接当 fetch body：Chrome 的 Blob 存储在 renderer 里**单独记账**，

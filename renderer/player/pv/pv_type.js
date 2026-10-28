@@ -17,19 +17,50 @@
     heavy:     { family: '"Dela Gothic One"', weight: 400, kind: 'gothic' },
     grotesk:   { family: '"Archivo Black"', weight: 400, kind: 'gothic' },
     condensed: { family: '"Anton"', weight: 400, kind: 'condensed' },
+    tall:      { family: '"Bebas Neue"', weight: 400, kind: 'condensed' },
     sans:      { family: '"Zen Kaku Gothic New"', weight: 900, kind: 'gothic' },
     sansMed:   { family: '"Zen Kaku Gothic New"', weight: 700, kind: 'gothic' },
     sansLt:    { family: '"Zen Kaku Gothic New"', weight: 500, kind: 'gothic' },
     mincho:    { family: '"Zen Old Mincho"', weight: 900, kind: 'serif' },
     minchoLt:  { family: '"Zen Old Mincho"', weight: 700, kind: 'serif' },
+    /* Didone：细横粗竖的高对比衬线，大字号才显出「印刷」的骨。
+       文字 PV 里「細明朝 × 極太ゴシック」的对撞靠它成立。 */
+    didone:    { family: '"Bodoni Moda"', weight: 900, kind: 'serif' },
+    didoneLt:  { family: '"Bodoni Moda"', weight: 400, kind: 'serif' },
+    didoneIt:  { family: '"Bodoni Moda"', weight: 700, kind: 'serif', italic: true },
     mono:      { family: '"IBM Plex Mono"', weight: 400, kind: 'mono' },
     monoB:     { family: '"IBM Plex Mono"', weight: 600, kind: 'mono' },
   };
   const FALLBACK = '"Noto Sans SC", "HarmonyOS Sans SC", sans-serif';
   PV.cssFace = (key, size) => {
     const f = PV.FACES[key] || PV.FACES.sans;
-    return f.weight + ' ' + size + 'px ' + f.family + ', ' + FALLBACK;
+    return (f.italic ? 'italic ' : '') + f.weight + ' ' + size + 'px ' + f.family + ', ' + FALLBACK;
   };
+
+  /* ---------------- 光学字距 ----------------
+     浏览器给的 kerning 是「排版正确」，但展示级大字号要的是「视觉正确」：
+     A/V/W/Y 这类斜边字并排时，字形外接框贴合、视觉却空出一块。
+     表里是额外收紧量（单位 em），只在字对首字母上起作用。
+     为什么要自己做：这些字对在 200px 以上时，默认间距一眼就能看出「软件默认感」，
+     而文字 PV 的字距本身就是设计语言的一部分。 */
+  const KERN = {
+    AV: -0.075, AW: -0.070, AY: -0.080, AT: -0.060, AP: -0.045, AF: -0.050,
+    LT: -0.075, LV: -0.070, LW: -0.070, LY: -0.090, Lu: -0.030,
+    PA: -0.055, FA: -0.055, TA: -0.060, Te: -0.045, To: -0.050, Tr: -0.040,
+    Va: -0.045, Ve: -0.045, Vo: -0.050, Wa: -0.040, We: -0.040, Wo: -0.045,
+    Ya: -0.060, Yo: -0.065, Ye: -0.055,
+    'r.': -0.075, 'r,': -0.075, '.,': -0.050, 'Y.': -0.080, 'V.': -0.070,
+    'o.': -0.020, 'e.': -0.020,
+  };
+  /* 展示级字号要整体收紧一点（optical sizing）：小字松、大字紧，是排版的常识。
+     阈值取 120px —— 低于它的都是正文尺度，收紧了反而糊。 */
+  const opticalTighten = size => (size > 120 ? -0.006 - Math.min(0.010, (size - 120) / 30000) : 0);
+  function kernAt(text, i, size) {
+    if (i <= 0 || i >= text.length) return 0;
+    const pair = text[i - 1] + text[i];
+    const k = KERN[pair];
+    return (k == null ? 0 : k) * size;
+  }
 
   const _mcache = new Map();
   /* 累计宽度（含 kerning）。key 里带 face 与 size，调用点尺寸种类有限，缓存不会爆 */
@@ -56,6 +87,10 @@
     const size = st.size || 120;
     // 负字距是「压紧」的性格，但超过 -0.09em 就会真的压字，全片统一封死
     const track = PV.clamp(st.track == null ? 0 : st.track, -0.09, 0.6) * size;
+    /* 纵向压缩：术力口文字 PV 的招牌手法之一（明朝体压到 70~85% 当显示体用）。
+       不做这个，抒情段只能靠「换字体」制造差异，而字体一共就那几把。 */
+    const sqz = PV.clamp(st.squeeze == null ? 1 : st.squeeze, 0.45, 1.4);
+    const tight = opticalTighten(size) * size;
     const text = st.text != null ? st.text : line.text;
     const pw = prefixWidths(ctx, text, face, size);
 
@@ -66,8 +101,10 @@
       ? line.words
       : [{ text: text, t0: line.t0 == null ? 0 : line.t0, t1: line.t1 == null ? 0 : line.t1 }];
     let wi = 0, wStart = 0;
+    let kernAcc = 0;
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
+      kernAcc += kernAt(text, i, size) + tight;      // 累积光学间距（含大字号整体收紧）
       // 推进词指针：按「词在串里的实际位置」滑动，不依赖 line.text 的长度（可能被 st.text 覆盖）
       while (wi < words.length - 1 && i >= wStart + words[wi].text.length) {
         wStart += words[wi].text.length;
@@ -79,9 +116,9 @@
       glyphs.push({
         c: ch, isSpace,
         i, wi: Math.min(wi, words.length - 1),
-        x: pw[i] + track * i, y: 0,
+        x: pw[i] + track * i + kernAcc, y: 0,
         w: Math.max(0, pw[i + 1] - pw[i]),
-        size, face,
+        size, face, sqz,
         t0: w.t0, t1: w.t1, wt0: w.t0, wt1: w.t1,
         rot: 0, sc: 1, sx: 1, sy: 1, alpha: 1, dx: 0, dy: 0, skew: 0,
         // 出场进度：由 parts 在每帧写入（0=未出现 1=完全出现）
@@ -114,7 +151,7 @@
       ctx.translate(cx, cy);
       if (g.rot) ctx.rotate(g.rot);
       if (g.skew) ctx.transform(1, 0, g.skew, 1, 0, 0);
-      const sx = g.sx * g.sc, sy = g.sy * g.sc;
+      const sx = g.sx * g.sc, sy = g.sy * g.sc * (g.sqz == null ? 1 : g.sqz);
       if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
       ctx.font = PV.cssFace(g.face, g.size);
       ctx.textAlign = 'left';
@@ -162,7 +199,7 @@
     for (const g of gs) {
       if (g.isSpace) continue;
       const [cx, cy] = PV.glyphCenter(g);
-      const hw = (g.w * g.sx) / 2, hh = (g.size * 0.72 * g.sy) / 2;
+      const hw = (g.w * g.sx) / 2, hh = (g.size * 0.72 * g.sy * (g.sqz == null ? 1 : g.sqz)) / 2;
       x0 = Math.min(x0, cx - hw); x1 = Math.max(x1, cx + hw);
       y0 = Math.min(y0, cy - hh); y1 = Math.max(y1, cy + hh);
     }
@@ -179,7 +216,7 @@
 
   /* ① 居中单行 */
   L.center = (ctx, gs, st) => {
-    const avail = st.availW || W * 0.82;
+    const avail = W * (st.availW || 0.82);
     const size = st.size || fitSize(ctx, st.text, st.face, avail, st.maxSize || 150, st.track);
     const g = PV.buildGlyphs(ctx, st.line, Object.assign({}, st, { size }));
     const tw = PV.glyphWidth(g);
@@ -257,33 +294,63 @@
     return { glyphs: out, bbox: bboxOf(out), size };
   };
 
-  /* ⑤ 分栏错位：两行，第二行右移，制造对位 */
+  /* ⑤ 分栏错位：两行，第二行贴右边界
+     为什么第二行要贴右：两行都左对齐时，读者只会读到「两行字」；
+     一行顶左、一行顶右，画面自动产生一条对角线的视线，这才是版面。 */
   L.split = (ctx, gs, st) => {
     const txt = st.text || st.line.text;
-    const words = txt.split(' ');
-    const half = Math.ceil(words.length / 2);
-    const r1 = words.slice(0, half).join(' ');
-    const r2 = words.slice(half).join(' ');
-    const out = [];
+    const words = txt.split(' ').filter(Boolean);
+    const face = st.face || 'sans';
+    const track = st.track || 0;
+
+    /* 切点按宽度挑：让两行宽度最接近。按词数对半分在长句上会把一行拉得极长，
+       另一行只剩两个词（读作「断句断错了」）。 */
+    const wOf = s => PV.measure(ctx, s, face, 100) + track * 100 * s.length;
+    let cut = Math.ceil(words.length / 2), best = Infinity;
+    for (let i = 1; i < words.length; i++) {
+      const d = Math.abs(wOf(words.slice(0, i).join(' ')) - wOf(words.slice(i).join(' ')));
+      if (d < best) { best = d; cut = i; }
+    }
+    const r1 = words.slice(0, cut).join(' ');
+    const r2 = words.slice(cut).join(' ');
+
     const availW = W * (st.availW || 0.84);
+    const maxw = Math.max(wOf(r1), wOf(r2));
     let size = st.size || 150;
-    const maxw = Math.max(
-      PV.measure(ctx, r1, st.face || 'sans', 100) + (st.track || 0) * 100 * r1.length,
-      PV.measure(ctx, r2, st.face || 'sans', 100) + (st.track || 0) * 100 * r2.length);
     if (maxw > 0) size = Math.min(size, (availW / maxw) * 100);
     size = Math.max(24, Math.round(size));
-    let k = 0;
-    [[r1, 0], [r2, st.shift || 0.14]].forEach(([rowTxt, sh], ri) => {
+
+    const out = [];
+    const pad = W * 0.085;
+    /* 右端限位：给了 cx/availW 说明右侧留给了人物，第二行「顶右」只能顶到版心右缘，
+       不能再顶到画布右缘 —— 否则末词会被圆窗整个盖掉（实测 "life" 只剩 "lif"）。 */
+    const xRight = (st.cx != null && st.availW)
+      ? Math.min(W - pad, st.cx + W * st.availW / 2)
+      : W - pad;
+    [[r1, 0, pad], [r2, 1, null]].forEach(([rowTxt, ri, fixedX]) => {
       if (!rowTxt) return;
       const g = PV.buildGlyphs(ctx, st.line, Object.assign({}, st, { size, text: rowTxt }));
-      const x = W * (0.09 + sh);
-      const y = H * (0.40 + ri * 0.20);
-      // 词时间：按原行 words 顺序切分
-      const wl = st.line.words.slice(ri ? half : 0, ri ? words.length : half);
+      const w = PV.glyphWidth(g);
+      // 第一行顶左、第二行顶右；宽度不够时退回左对齐，避免两行只剩一角
+      const x = (ri === 0) ? pad : Math.max(pad, xRight - w);
+      const y = H * (0.40 + ri * 0.21);
+      const wl = st.line.words.slice(ri ? cut : 0, ri ? words.length : cut);
+      const wiOff = ri ? cut : 0;
+      /* 词归属必须**按词的实字数**精确分配。原先用「平均每词几个字」估算
+         （rowTxt.length / wl.length），只要词长参差就会把一个词劈成两半：
+         实测「life」的 e 被算到下一个词，于是 22.48s 的帧上停在 "lif"，
+         读起来像渲染截断而不是「唱到哪儿长到哪儿」。*/
+      const sizes = wl.map(w => (w.text || '').replace(/\s/g, '').length || 1);
       let ci = 0;
       for (const q of g) {
-        const cand = wl[Math.min(Math.floor(ci / Math.max(1, (rowTxt.length / Math.max(1, wl.length)))), wl.length - 1)];
-        if (!q.isSpace && cand) { q.t0 = cand.t0; q.t1 = cand.t1; ci++; }
+        if (!q.isSpace) {
+          let k = 0, acc = 0;
+          while (k < sizes.length - 1 && ci >= acc + sizes[k]) { acc += sizes[k]; k++; }
+          const w = wl[Math.min(k, wl.length - 1)] || { t0: st.line.t0, t1: st.line.t1 };
+          q.wi = wiOff + Math.min(k, wl.length - 1);
+          if (w) { q.t0 = w.t0; q.t1 = w.t1; }
+          ci++;
+        }
         q.x += x; q.y = y;
       }
       out.push(...g);
@@ -293,11 +360,20 @@
 
   /* ⑥ 密排墙：整行重复铺满，用于副歌/间奏的「冲击块」 */
   L.dense = (ctx, gs, st) => {
-    const rows = st.rows || 7;
-    const size = st.size || Math.round(H * 0.115);
     const out = [];
     const txt = st.text || st.line.text;
-    const lh = size * (st.lead || 1.06);
+    const gap0 = Math.round(W * 0.045);
+    /* 密排墙的冲击力来自「行数 × 密度」，不是「字跑出画面」。
+       此前允许行宽到 2W，行首被推出一屏，首字母整块被切（Feel → eel），
+       读作渲染乱码而不是排版。现在先把字号收到「一行正好铺满」，再谈错位。 */
+    const fitW = fitSize(ctx, txt, st.face || 'sans', W - 2 * gap0, st.size || H, st.track);
+    const size = Math.max(28, Math.round(st.size ? Math.min(st.size, fitW) : fitW));
+    /* 行距 1.14：密排墙的字是「贴」不是「叠」。1.06 时上一行的降部会插进下一行的
+       中宫，远看是一团黑，近看认不出字 —— 而验收要求「文字没有严重遮挡或无法阅读」。
+       1.14 仍然读作密排，但每一行都完整。 */
+    const lh = size * (st.lead || 1.14);
+    // 行数按可用高度封顶，避免 size 偏大时上下两行被画布切掉
+    const rows = Math.max(3, Math.min(st.rows || 7, Math.floor((H * 0.94) / lh)));
     const top = (H - rows * lh) / 2 + size * 0.72;
     for (let r = 0; r < rows; r++) {
       const g = PV.buildGlyphs(ctx, st.line, Object.assign({}, st, { size, text: txt }));
@@ -308,14 +384,11 @@
          错位量必须按「溢出量」算，不能按行宽百分比：长句 tw 是 W 的两倍时，
          -tw*0.72 直接把行首推到画外一整屏，首字母全被切（读作乱码而不是排版）。
          规则：偶数行行首保留留白，奇数行才往左压，且最多压 0.28W。 */
-      const gap = Math.round(W * 0.045);
-      const over = Math.max(0, tw - (W - 2 * gap));
       const dir = r % 2 ? 1 : -1;
-      /* 错位量封顶在一个字符高（size*1.1）—— 再多就会切掉词首，整面墙读作乱码。
-         行超出画面时行尾自然会出血，那已经够了。 */
-      const x0 = over > 0
-        ? gap - (dir > 0 ? Math.min(over * 0.5, size * 1.1) : 0)
-        : (W - tw) / 2 + dir * (W - tw) * 0.26;
+      /* 行宽已被收进画面，错位只做「轻微左右浮动」：0.03W 以内，
+         既读得出跑马灯，又不会切掉任何一个词首。 */
+      const slack = Math.max(0, (W - tw) / 2);
+      const x0 = (W - tw) / 2 + dir * Math.min(W * 0.03, slack);
       for (const q of g) { q.x += x0; q.y = top + r * lh; }
       out.push(...g);
     }
@@ -503,6 +576,61 @@
     for (const q of ra.g) { q.x += W / 2; q.y = cy - lh / 2; all.push(q); }
     for (const q of rb.g) { q.x += W / 2; q.y = cy + lh / 2; all.push(q); }
     return { glyphs: all, bbox: bboxOf(all), size: sz };
+  };
+
+  /* ⑬ 大小混排（大小混植）：日本海报最常见的一招 —— 同一句里挑一个词放大，
+     其余的词缩到半号，基线共用。观众先读到「大词」，再读到整句。
+     这不是「强调」的替代品：强调是换样式，混排是换**字号秩序**，
+     所以它天然带有版面的说服力，且不依赖任何特效。
+
+     约束：大词只能是 1 个（两个大词 = 没有大词）；总宽超了整体等比缩，
+     绝不允许某一词单独缩 —— 那会把「秩序」变成「参差」。 */
+  L.mixed = (ctx, gs, st) => {
+    const words = (st.line.words && st.line.words.length)
+      ? st.line.words.map(w => w.text)
+      : String(st.text || st.line.text || '').split(' ').filter(Boolean);
+    if (!words.length) return L.center(ctx, gs, st);
+
+    const maxSize = st.size || 168;
+    const ratio = st.ratio == null ? 0.52 : st.ratio;
+    // 大词：默认取最长的一个（信息量最大），也可由导演层指定
+    let key = st.key != null ? st.key : 0;
+    if (st.key == null) {
+      let best = -1;
+      words.forEach((w, i) => { if (w.length > best) { best = w.length; key = i; } });
+    }
+    const gapEm = st.wordGap == null ? 0.30 : st.wordGap;
+    const availW = W * (st.availW || 0.84);
+
+    const build = (size) => {
+      const out = [];
+      let x = 0;
+      words.forEach((txt, k) => {
+        const sz = (k === key ? size : Math.max(18, size * ratio));
+        const g = PV.buildGlyphs(ctx, st.line, Object.assign({}, st, { size: sz, text: txt }));
+        const wref = st.line.words && st.line.words[k];
+        for (const q of g) {
+          // 逐词时间：折出来的子串没有自己的词条时退回原行的
+          if (wref) { q.t0 = wref.t0; q.t1 = wref.t1; }
+          q.wi = k;
+          q.x += x; q.y = 0;
+        }
+        out.push(...g);
+        x += PV.glyphWidth(g) + size * gapEm;
+      });
+      return { glyphs: out, width: x - size * gapEm };
+    };
+
+    let size = maxSize;
+    let r = build(size);
+    if (r.width > availW) {                       // 整体等比缩，保住大词与小词的比例
+      size = Math.floor(size * (availW / r.width));
+      r = build(size);
+    }
+    const cy = cyOf(st, 0.52);
+    const left = st.align === 'left' ? xOf(st, 0.085) : W / 2 - r.width / 2;
+    for (const q of r.glyphs) { q.x += left; q.y = cy; }
+    return { glyphs: r.glyphs, bbox: bboxOf(r.glyphs), size, key };
   };
 
   PV.bboxOf = bboxOf;

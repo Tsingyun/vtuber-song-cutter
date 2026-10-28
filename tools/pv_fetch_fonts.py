@@ -33,6 +33,15 @@ FAMILIES = [
      "https://raw.githubusercontent.com/google/fonts/main/ofl/zenoldmincho/OFL.txt"),
     ("IBM+Plex+Mono:wght@400;600", "ibmplexmono", "OFL_ibmplexmono.txt",
      "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/OFL.txt"),
+    # 文字 PV 的「高对比衬线」：细横粗竖的 Didone，大字号下有真正的印刷质感。
+    # 之前抒情段只能用 Zen Old Mincho（日文明朝，拉丁字形偏弱），换成这把才对得上
+    # 日本 PV 里「細明朝 × 極太ゴシック」的对比结构。
+    ("Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,700;0,6..96,900;1,6..96,700",
+     "bodonimoda", "OFL_bodonimoda.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/bodonimoda/OFL.txt"),
+    # 超窄全大写：版面上「一行顶满」的重体，和 Archivo Black 的浑厚形成体型反差
+    ("Bebas+Neue", "bebasneue", "OFL_bebasneue.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/OFL.txt"),
 ]
 
 CSS_URL = "https://fonts.googleapis.com/css2?family=%s&display=block"
