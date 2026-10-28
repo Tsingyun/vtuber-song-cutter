@@ -636,3 +636,25 @@
 | **取景倍数：源图显示边长 = 圆窗直径 × 1.10** | 1.02（源图刚好外接圆）时脸占 76%，脸颊直接贴住框边，读作「从照片上挖了个洞」；1.10 退到 69%，边缘交给头发和背景，主体完整、放大倍数也只有 1.10。内暗角要从 `0.46R` 起、`1.0R` 到 **0.62**，边缘才会「沉进背景」而不是硬切 |
 | **竖幅要申请关掉频谱环** | `strip` 是矩形且占满封面位，`drawHalo` 那圈 64 段频谱环（R0=306）会横穿画面 ⇒ `LIVEBG.hidesHalo()` 让 `drawHalo` 提前 return。圆窗模式相反：**环正好是它的外框，不新增任何装饰**（这是 lens 方案"不堆砌"的来源） |
 | **录制标记放窗内 / 竖幅内，不放窗下** | 圆窗下方 `cy+R+25` 会撞上「Innocence」巨题（标题顶部本来就压入封面下缘）。改成 `cy + R*0.875` 收进窗内底缘，并配一条 `0.62R→R` 的四级渐隐带保证可读。竖幅同理：`by + bh - 22` 左下角 |
+
+## 51. 文字 PV 引擎（`renderer/player/pv/` + `tools/pv_*.py`）：确定性是硬指标，八处「静默不画」全部踩过（2026-10-28）
+
+| 项 | 内容 |
+|---|---|
+| **架构** | 导演层 `tools/pv_direct.py`（音乐段落 + 逐词时间轴 → `storyboard.json`，可人工改）→ 排版层 `pv_type.js`（12 种构图）→ 部件层 `pv_parts.js`（treat/enter/hold/exit/decor/fx）→ 合成器 `pv_engine.js` → 渲染页 `index_pv.html`。页面**复用 v9/v10 的契约**（`HL.ready` → `setInputFiles` → `__setup` → `__frame(i)`），所以直接吃 `render_song.cjs` 的 ffmpeg/NVENC 链路，不另写编码器 |
+| **`meta.pvDur` 必须有** | PV 页时长由编排稿决定（样片只渲 66s，音频是整首 232s）。缺它页面退回「读音频时长」⇒ 尾部几十秒全是最后一镜的定格。`render_song.cjs` 已从 `job.pvDur || job.storyboard.meta.dur` 兜底 |
+| **字体必须先就位、再排构图** | 构图要 `measureText` 反推字号。`warmFonts` 写在预排之后 ⇒ 量到 fallback 的宽度，字号算错；且首帧字形栅格是空的 ⇒ **同一 t 连渲 3 次得 3 个不同 md5**。顺序固定为 `warmFonts → await document.fonts.ready → 预排 → 预载图 → 暖机渲一遍`。字体自托管（`pv_fonts/`，7.1MB / 5 族），CDN 抖动会让**部分帧**用 fallback |
+| **大面积渐变必须烘焙** | `createLinearGradient` / `createRadialGradient` 铺满画面时，Chromium 的 dither 相位随绘制次数变化 ⇒ 同一帧差 ±1~2。纸底、环境光团、圆窗内暗角、竖幅压暗全部改成「一次性离屏烘焙 + `drawImage`」；`PV.softSprite/fadeSprite` 是这两个工具 |
+| **每帧先铺底再上相机** | 相机 `zoom<1` 时纸底贴图缩进，露出的边框保留的是**上一帧**的像素（canvas 从不清空）⇒ 左边缘 6px 全高条带每次都不同。`renderAt` 开头 `fillRect` 整帧纸色 |
+| **`clip` 的坐标是「字形视觉框」** | 归一化到 cap 顶(0)~降部底(1)。按「基线±size」解释会让 `sliceUp` 只露出基线以下的降部 ⇒ 整行字变成几条细线。`sliceDown=[0,0,1,k]`、`sliceUp=[0,1-k,1,1]` |
+| **构图必须自己适配面积** | `justify` 的 `(targetW-tw)/(n-1)` 在长句上会算出 **−52px 负字距**，整行压成一团；`stack` 一行一个词，11 个词在 size=129 下排到 y=1668；`split`/`diagonal`/`band` 同理溢出。全部改为「按可用宽高反推字号」，且 `justify` **只许拉开、不许压紧**（超宽就缩字号）。再加一道 `fitShot()` 安全网（`bleed:true` 的构图跳过：`megaCrop/edge/dense`） |
+| **位置参数用 `frac` 归一化** | 导演层写的是比例（`x:0.085 / y:0.24 / cy:0.46`），排版层按像素用 ⇒ 整行字被塞进画面左上角 1 像素内（`cy:0.46` ⇒ y=0.46px）。`xOf/yOf/cyOf`：≤1.5 视作比例，否则视作像素 |
+| **冲击构图要 `sync`** | `dense/megaCrop/centerBig/band` 沿用逐词时间会「一格一格长出来」，读作卡顿。导演层打 `sync:true`，引擎把这些字形 `t0` 统一到镜头起点；`dense` 还要清空 `emphasis`（同一句重复七行，marker 会变成一片随机色块） |
+| **`hold` 参数传反 = 整屏不画** | 签名 `(g,t,ph,spec,amp)`，调用写成 `(…, breath, hold, 1)` ⇒ `spec` 收到数字、`amp` 收到对象 ⇒ `jitter` 里 `NaN` ⇒ **整面墙一个字都不画且零报错**（`alpha=1 / vis=1`，只是坐标 NaN）。`spec.amp` 是设计档位（0.8~2.2），必须再乘 `0.0075` 这个基准 |
+| **逐镜头调色板要传到纸色** | `drawPaper` 只读全局 `ST.sb.palette` ⇒ 反转镜头的字变了色、纸还是深色，**反转事件等于没发生**。改读 `shot.pal || ST.sb.palette`，`paperCanvas` 按 key 缓存两版 |
+| **人物层用图片序列 + 定点** | 逐帧渲染不能用 `<video>`（R50）。`prepare_live.py --head-fps 10 --head-out 448 --body-fps 10 --body-out 480x640` 把 66s 压到 79MB；`preloadForShots` 只载「真的用到人物层」的镜头 ±0.2s 并 `await img.decode()`，否则同步循环里人物一闪一闪且每次位置不同。满幅构图（`dense/megaCrop`）没有空白可避 ⇒ `fig.fixed` 按 `side` 定点、`layer:'front'` 让字从她身上过 |
+| **逐字错相只能有一个来源** | `applyParts` 里入场起点写成 `(g.t0 ?? shot.t0) - LEAD + STAG*idx`，而 `g.t0` 来自逐词轴、**已经按唱点错开** ⇒ 双重计时：34 字的行要多等 1.5s 才铺满，整句只有 3.6s，结果「唱完了字还没出齐」（t=24 的 diagonal 镜头只剩一两个笔画）。有逐字轴时 `STAG` 必须归零；`sync` 镜头因 `t0` 已被整块覆写而天然无错相 |
+| **`justify` 长句必须折两行** | 51 字符按 0.84W 塞成一行，字号掉到 **62px**（1080p 下就是一条小字幕，观感立刻回到卡拉OK）。判据：算出字号 < `maxSize*0.74` 且 ≥3 词 ⇒ 按词边界折行，切点评分要加「两行词数都 ≥ 总数 30%」硬约束（只看宽度差会把 7 词切成 2/5，读作「把词拆到下一行」）。折行后 `spread` 封顶 `size*0.30` |
+| **只描边的窄字是豆腐块** | `outline/outlineThick` 只 `strokeText`，笔画窄的字（`I l i 1 !`）描完轮廓就是一个空心矩形，读作缺字。判据 `g.w/g.size < 0.46`（Archivo Black 的 I≈0.35em，w/m/o 都 ≥0.7em），命中就补一层 `fillText` |
+| **`dense` 行错位按溢出量算** | 写成 `-tw*0.72` 时，长句 `tw≈2W` 会把行首推出画外一整屏，首字母全被切（读作乱码）。改成 `over = max(0, tw-(W-2*gap))`，偶数行行首保留 `gap` 留白，奇数行最多左移 `min(over*0.5, size*1.1)` |
+| **验收** | `node tools/pv_stills.cjs --sb … --live … --times …` 抽帧 + 同 t 双渲字节比较；`node _tmp/pv/det2.cjs <t> all`（临时诊断）三渲比 md5。**确定性不过时先按上面五条顺序查：字体顺序 → 渐变烘焙 → 每帧铺底 → 未初始化缓存 → 上一帧残留** |

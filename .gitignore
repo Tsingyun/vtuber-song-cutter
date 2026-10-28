@@ -55,3 +55,10 @@ reports/
 
 # agent 运行时目录
 .workbuddy/
+
+# ---- 开源方案研究用的 clone（129MB，含上游完整历史，不入库）----
+_ref/
+
+# JIZURA 引擎 bundle（2.2MB，由 tools/pv_probe.cjs 的上游 src/*.js 拼接生成）
+# 许可证与重生成说明保留在 renderer/pv/vendor/{JIZURA_LICENSE.txt,README.md}
+renderer/pv/vendor/*.js

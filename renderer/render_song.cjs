@@ -323,6 +323,13 @@ async function cleanupArtifacts() {
     proAnalysis: job.proAnalysis || null,   // 真实音频分析（tools/analyze_music.py），供 pro_bg.js
     bg: job.bg || '',                        // 专业背景层方案：daw | spec | vocal | ''
     live: job.live || null,                  // 直播画面融合层（tools/prepare_live.py 产出的图片序列）
+    /* 文字 PV 导演层的产物（tools/pv_direct.py）。只有 index_pv.html 读它；
+       其余页面忽略未知字段，所以传了也不影响 v9/v10。 */
+    storyboard: job.storyboard || null,
+    /* 文字 PV 的成片时长由编排稿决定（样片可能只渲一段），必须显式告诉页面；
+       否则 PV 页会退回「读音频时长」，音频是整首歌 ⇒ 尾巴全是最后一镜的定格。 */
+    pvDur: (job.pvDur != null) ? Number(job.pvDur)
+      : (job.storyboard && job.storyboard.meta && job.storyboard.meta.dur) || null,
     lrcOffset: (job.lrcOffset == null ? null : Number(job.lrcOffset)),  // 歌词时间偏移（测试片段用整份 LRC + 偏移）
     scheme: (job.scheme == null ? null : Number(job.scheme)),  // 标题装饰方案 0~4（自动匹配/手动覆盖）
     bitrate: BITRATE,           // 成片视频码率(bps)：4K 走 B站不二压区间 16~18.5 Mbps

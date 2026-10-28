@@ -60,6 +60,14 @@ def main():
     ap.add_argument("--dur", type=float, default=12.0)
     ap.add_argument("--out", required=True)
     ap.add_argument("--head-fps", type=int, default=30)
+    # 文字 PV 里人物层是「慢节奏插入」，不需要 30fps：8fps 足够读出表情与呼吸，
+    # 而解码后的常驻内存只有 30fps 的 27%（4K 渲染时这直接决定会不会 OOM）。
+    ap.add_argument("--body-fps", type=int, default=0, help="0 = 与 head-fps 相同")
+    # 输出尺寸：裁切在源分辨率做（保住细节），再降采样到实际显示尺寸。
+    # 文字 PV 的圆窗直径约 300 设计像素、半身竖幅约 560×746，1080p 下绰绰有余；
+    # 4K 时靠 1.10 倍的取景余量 + 平滑插值，不要为了锐度在这里堆 2K 图。
+    ap.add_argument("--head-out", type=int, default=0, help="0 = 不缩放（= head-s）")
+    ap.add_argument("--body-out", default="", help="WxH，空=不缩放")
     ap.add_argument("--wide-fps", type=int, default=15)
     # 头部裁切框（源分辨率 1920×1080 时的像素）。脸中心实测在源 (965, 372)，
     # 这里以它为裁切框几何中心 ⇒ 归一化圆心正好 (0.5, 0.5)，圆窗与源图同轴，
@@ -95,11 +103,15 @@ def main():
 
     if a.mode in ("all", "head"):
         d = os.path.join(a.out, "head")
-        files = extract(a.src, ss, a.dur, "fps=%d,crop=%d:%d:%d:%d" % (a.head_fps, hs, hs, hx, hy), d, "h_%05d.jpg", q=2)
+        hvf = "fps=%d,crop=%d:%d:%d:%d" % (a.head_fps, hs, hs, hx, hy)
+        if a.head_out:
+            hvf += ",scale=%d:%d:flags=lanczos" % (a.head_out, a.head_out)
+        files = extract(a.src, ss, a.dur, hvf, d, "h_%05d.jpg", q=2)
+        hsz = a.head_out or hs
         info["head"] = {"dir": d.replace("\\", "/"), "n": len(files), "fps": a.head_fps,
-                        "size": hs, "pattern": "h_%05d.jpg"}
+                        "size": hsz, "pattern": "h_%05d.jpg"}
         print("[live] head  %d 帧 %d×%d @%dfps  %.1f MB" %
-              (len(files), hs, hs, a.head_fps, sum(os.path.getsize(os.path.join(d, f)) for f in files) / 1e6))
+              (len(files), hsz, hsz, a.head_fps, sum(os.path.getsize(os.path.join(d, f)) for f in files) / 1e6))
 
     if a.mode in ("all", "wide"):
         d = os.path.join(a.out, "wide")
@@ -126,13 +138,17 @@ def main():
         d = os.path.join(a.out, "body")
         bw, bh = int(round(a.body_w * sc)), int(round(a.body_h * sc))
         bx, by = int(round(a.body_x * sc)), int(round(a.body_y * sc))
-        files = extract(a.src, ss, a.dur,
-                        "fps=%d,crop=%d:%d:%d:%d" % (a.head_fps, bw, bh, bx, by),
-                        d, "b_%05d.jpg", q=2)
-        info["body"] = {"dir": d.replace("\\", "/"), "n": len(files), "fps": a.head_fps,
-                        "w": bw, "h": bh, "pattern": "b_%05d.jpg"}
+        bfps = a.body_fps or a.head_fps
+        bvf = "fps=%d,crop=%d:%d:%d:%d" % (bfps, bw, bh, bx, by)
+        ow, oh = bw, bh
+        if a.body_out:
+            ow, oh = [int(x) for x in a.body_out.lower().split("x")]
+            bvf += ",scale=%d:%d:flags=lanczos" % (ow, oh)
+        files = extract(a.src, ss, a.dur, bvf, d, "b_%05d.jpg", q=2)
+        info["body"] = {"dir": d.replace("\\", "/"), "n": len(files), "fps": bfps,
+                        "w": ow, "h": oh, "pattern": "b_%05d.jpg"}
         print("[live] body  %d 帧 %d×%d @%dfps  %.1f MB" %
-              (len(files), bw, bh, a.head_fps, sum(os.path.getsize(os.path.join(d, f)) for f in files) / 1e6))
+              (len(files), ow, oh, bfps, sum(os.path.getsize(os.path.join(d, f)) for f in files) / 1e6))
 
     # 圆窗在「裁切图」里的圆心（归一化 0..1）：脸中心实测在源 (965, 372)
     cx = (a.face_x * sc - hx) / float(hs)

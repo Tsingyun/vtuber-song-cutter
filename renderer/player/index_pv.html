@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PV · 文字 PV 渲染页</title>
+<!--
+  术力口文字 PV 渲染页。与 v10 播放器共用同一套「页面契约」，因此可以直接复用
+  renderer/render_song.cjs 的 4K 渲染 + NVENC 编码链路（RULES 51）：
+      HL.ready → setInputFiles('#mediaFile') → __setup(meta) → __frame(i) × N
+  设计坐标系恒为 1920×1080，4K 靠画布放大 + setTransform。
+
+  ⚠ 这款页面**不依赖**音频解码来排版（时间轴全部来自 storyboard），
+    音频只用来取总时长；所以它能在没有 audio 元素的情况下抽单帧预览。
+-->
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="pv_fonts/fonts.css">
+<style>
+  html,body{margin:0;background:#07090C;color:#cfd6e0;font:13px/1.5 -apple-system,"Segoe UI",sans-serif}
+  #cv{display:block;width:100%;height:auto}
+  #wrap{max-width:100vw}
+  #hud{position:fixed;left:10px;bottom:8px;opacity:.45;font:11px ui-monospace,monospace;pointer-events:none}
+  #mediaFile{position:fixed;left:-9999px}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv" width="1920" height="1080"></canvas></div>
+<input id="mediaFile" type="file" accept="audio/*">
+<div id="hud"></div>
+
+<script>
+/* 确定性随机：必须在任何渲染代码之前播种。
+   PV 引擎自己用 seeded rng，但 JIZURA（可选通道）与部分 canvas 内部实现会读 Math.random，
+   统一压住才不会出现「同一帧两次渲染不一致」。 */
+(() => {
+  let a = 0x5a4e4b4f;
+  Math.random = () => {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+})();
+</script>
+<script src="pv/pv_core.js"></script>
+<script src="pv/pv_type.js"></script>
+<script src="pv/pv_parts.js"></script>
+<script src="pv/pv_engine.js"></script>
+<script>
+const cv = document.getElementById('cv');          // render_song.cjs 按名字取这个全局
+/* willReadFrequently：这块画布的唯一用途是「画完就导出成帧」，用 CPU 后备存储。
+   GPU 光栅化对同一份绘制指令会给出 ±1~2 的抖动（渐变 dither、tile 调度），
+   在 4K 长片里表现为「同一帧两次渲染 md5 不同」——确定性验收直接不过。
+   ?cpu=0 可关（只用于对比性能，正式渲染务必保持开启）。 */
+const WRF = new URLSearchParams(location.search).get('cpu') !== '0';
+const ctx = cv.getContext('2d', WRF ? { alpha: false, willReadFrequently: true } : { alpha: false });
+const VW = 1920, VH = 1080;
+const OUT_SCALE = (() => {
+  const v = parseInt(new URLSearchParams(location.search).get('res') || '1', 10);
+  return (v >= 1 && v <= 4) ? v : 1;
+})();
+if (OUT_SCALE !== 1) { cv.width = VW * OUT_SCALE; cv.height = VH * OUT_SCALE; }
+
+/* render_song.cjs 用 window.HL && HL.ready 当「页面就绪」的闸门 */
+const HL = window.HL = {
+  ready: true, phase: 'idle', fps: 60, dur: 0, total: 0, prog: 0, err: null,
+  bitrate: null, encCfg: null, q: 0,
+};
+
+const $ = id => document.getElementById(id);
+const HUD = $('hud');
+
+/* 画布尺寸一旦确定，后续所有绘制都用「设计坐标 + 整体缩放」 */
+function applyScale() {
+  const s = OUT_SCALE;
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+}
+
+let CFG = null;
+
+/* ---------------- 载体：读 meta / 直接注入 ---------------- */
+async function setupFrom(cfg) {
+  CFG = cfg;
+  applyScale();
+  PV.SCALE = OUT_SCALE;
+
+  // 时长：优先用注入值；否则从音频文件读真实时长（成片时长以音频为准）
+  let dur = Number(cfg.dur) || 0;
+  if (!dur) {
+    const f = $('mediaFile').files && $('mediaFile').files[0];
+    if (f) dur = await audioDuration(f);
+  }
+  if (!dur) throw new Error('无法确定时长：既没有 job.dur，也没有音频文件');
+
+  HL.fps = cfg.fps || 60;
+  HL.dur = dur;
+  HL.total = Math.ceil(dur * HL.fps);
+
+  const res = await PV.setupPV({
+    storyboard: cfg.storyboard, live: cfg.live || {},
+    ctx, fps: HL.fps, dur, dpr: OUT_SCALE,
+  });
+  HL.phase = 'ready';
+  return res;
+}
+
+function audioDuration(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('audio');
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => { URL.revokeObjectURL(url); res(a.duration); };
+    a.onerror = () => { URL.revokeObjectURL(url); rej(new Error('音频解码失败')); };
+    a.src = url;
+  });
+}
+
+/* ---------------- 页面契约 ---------------- */
+window.__setup = async (meta) => {
+  try {
+    if (!meta.storyboard) throw new Error('meta.storyboard 缺失：PV 页需要导演层产出的 storyboard');
+    const r = await setupFrom({
+      storyboard: meta.storyboard,
+      live: meta.live || {},
+      dur: meta.pvDur || meta.dur || 0,
+      fps: HL.fps,
+    });
+    console.log('[pv] setup 镜头 %d 字形 %d 字体 %d 序列 %s',
+      r.shots, r.glyphs, r.fonts, JSON.stringify(r.seqs));
+    if (r.missing.length) console.warn('[pv] 字体未就绪：%s', JSON.stringify(r.missing));
+    return { ok: true, dur: HL.dur, total: HL.total, lyrics: meta.storyboard.lines.length, pv: r };
+  } catch (e) {
+    console.error('[pv] setup 失败', e);
+    return { ok: false, error: String(e && e.message || e) };
+  }
+};
+
+window.__frame = (i) => {
+  const t = i / HL.fps;
+  HL.vT = t; HL.frame = i;
+  applyScale();
+  ctx.setTransform(OUT_SCALE, 0, 0, OUT_SCALE, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#07090C';
+  ctx.fillRect(0, 0, VW, VH);
+  PV.renderAt(ctx, t);
+  HL.prog = i;
+};
+
+/* 非 ffmpeg 编码路径（WebCodecs）不在这条页面上实现：
+   4K 与所有成片都走 render_song.cjs 的 ffmpeg 通道，别再维护第二套编码。 */
+window.__render = async () => {
+  throw new Error('PV 页只支持 --encoder ffmpeg（见 RULES 51）');
+};
+
+/* ---------------- 单帧预览（tools/pv_stills.cjs 用） ---------------- */
+window.__pvShot = async (cfg) => {
+  if (!CFG) await setupFrom(cfg);
+  applyScale();
+  PV.renderAt(ctx, cfg.t);
+  return cv.toDataURL('image/png');
+};
+window.__pvInfo = () => ({
+  scale: OUT_SCALE, total: HL.total, dur: HL.dur,
+  stats: PV.STAT ? PV.STAT() : null,
+  fonts: Array.from(document.fonts).filter(f => f.status === 'loaded').length,
+});
+
+/* 直接在浏览器里打开时：?t=12.3 抽一帧，方便目视（需要 window.__PVCFG 已注入） */
+window.addEventListener('DOMContentLoaded', () => {
+  HUD.textContent = 'PV page · ' + VW * OUT_SCALE + '×' + VH * OUT_SCALE;
+  const t = parseFloat(new URLSearchParams(location.search).get('t') || '');
+  if (window.__PVCFG && isFinite(t)) {
+    setupFrom(window.__PVCFG).then(() => { applyScale(); PV.renderAt(ctx, t); });
+  }
+});
+</script>
+</body>
+</html>

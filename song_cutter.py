@@ -1850,6 +1850,44 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                           force=scheme_override)
     log("  装饰方案: %d %s（%s）" % (dec["scheme"], dec["name"], dec["reason"]))
 
+    # 3.95 文字 PV 编排稿（仅当 --player-page 指到 index_pv.html）
+    # 为什么放在主链：PV 页吃的是「每句用哪种构图/入场/字体/强调」的编排稿 + 显式时长，
+    # 这两样播放器自己算不出来 —— 必须由「音乐分析 → 逐词轴 → 导演层」这条离线链产出。
+    # 失败不阻断出片：PV 页会退回单行居中兜底，比整首废掉好。
+    pv_story = None
+    if "pv" in (PLAYER_PAGE or "").lower():
+        pv_prep = os.path.join(render_tmp_dir(workdir, date), "pv")
+        os.makedirs(pv_prep, exist_ok=True)
+        _lp = lrc_snap if (lrc_snap and os.path.exists(lrc_snap)) else None
+        if not _lp:
+            _lp = os.path.join(pv_prep, "aligned.lrc")
+            io.open(_lp, "w", encoding="utf-8", newline="").write(lrc or "")
+        _pvcmd = [sys.executable, os.path.join(ROOT, "tools", "pv_prepare.py"),
+                  "--audio", out_mp3, "--lrc", _lp, "--outdir", pv_prep,
+                  "--dur", "%.3f" % (ce - cs),
+                  "--title", seg["title_guess"], "--artist", artist,
+                  "--vocal", seg.get("vocal") or CFG.path("streamer", "name", default=""),
+                  "--date", date, "--source", seg.get("source") or "",
+                  "--ffmpeg", ffmpeg]
+        if seg.get("pv_reuse"):
+            _pvcmd.append("--reuse")
+        log("  文字 PV 编排：音乐分析 → 逐词时间轴 → 编排稿（首次约 1~2 min）")
+        if subprocess.call(_pvcmd) == 0:
+            try:
+                _sbp = os.path.join(pv_prep, "storyboard.json")
+                pv_story = json.load(io.open(_sbp, encoding="utf-8"))
+                # 编排稿留一份在成片目录：它是「人工调重点句 + 重渲」的唯一入口
+                _pvkeep = os.path.join(out_dir, "pv")
+                os.makedirs(_pvkeep, exist_ok=True)
+                shutil.copy2(_sbp, os.path.join(_pvkeep, base + ".storyboard.json"))
+                log("  文字 PV 编排稿: %d 个镜头 → %s"
+                    % (len(pv_story.get("shots") or []), os.path.join(_pvkeep, base + ".storyboard.json")))
+            except (OSError, ValueError) as e:
+                log("  ⚠ 编排稿读入失败（改用兜底版式）：%s" % e)
+                pv_story = None
+        else:
+            log("  ⚠ 文字 PV 编排失败 → 播放器改用单行居中兜底版式")
+
     # 4. 播放器离线渲染（4K60 逐帧，WebCodecs 硬编/软编自动选型）
     import base64
     cover_data = None
@@ -1881,6 +1919,10 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "lrc": lrc,
         "cover": cover_data,
         "artImage": _art_dataurl(),
+        # 文字 PV：编排稿 + 显式时长。pvDur 必须给 —— 否则 PV 页退回读音频时长，
+        # 样片/局部段落时尾部会变成「最后一镜定格」。
+        "storyboard": pv_story,
+        "pvDur": (round(ce - cs, 3) if pv_story else None),
         "scheme": dec["scheme"],          # 标题装饰（自动匹配/手动覆盖）
         "res": OUT_RES,                   # 1=1920×1080，2=3840×2160
         "bitrate": OUT_BITRATE,           # 成片视频码率(bps)
@@ -2034,7 +2076,9 @@ def main():
                          "缺省则由歌曲意境自动匹配")
     ap.add_argument("--player-page", default=None,
                     help="播放器页面（renderer/player/ 下的文件名，默认 index.html）。"
-                         "index_v10.html = 深夜电台版；也可用环境变量 SONGCUT_PLAYER_PAGE 指定")
+                         "index_v10.html = 深夜电台版；index_pv.html = 术力口文字 PV 版"
+                         "（会自动生成编排稿 storyboard；可用 --player-page 或环境变量 "
+                         "SONGCUT_PLAYER_PAGE 指定）")
     args = ap.parse_args()
 
     global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC
