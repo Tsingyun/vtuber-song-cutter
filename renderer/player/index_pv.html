@@ -135,9 +135,23 @@ window.__setup = async (meta) => {
   }
 };
 
-window.__frame = (i) => {
+/* 人物层的装载计数：只有真的换过镜头才 +1。成片渲染收尾会读它，
+   用来确认「每个该有人的镜头都装载过」——这是那次「成片里一个人都没有」
+   唯一能被自动发现的信号（画面、时长、码率、帧数全都正常）。 */
+let FIG_SHOTS = 0;
+window.__frame = async (i, opts) => {
   const t = i / HL.fps;
+  const fast = !!(opts && opts.fast);
   HL.vT = t; HL.frame = i;
+  /* 人物层是按镜头滑动装载的：**成片逐帧推进也必须走这条路径**。
+     早先只有预览接口 __pvShot 调了 ensureWindow，于是抽帧里人物好好的、
+     4K 成片一个都没有（13931 帧、232.17s、18.1Mbps、色彩全对）。
+     同镜头调用返回 null 是零开销；换镜头才 await。
+     快进阶段（fast）不装载：那里只为推排版状态，逐镜解码会白烧几分钟。 */
+  if (!fast) {
+    const pend = PV.ensureWindow ? PV.ensureWindow(t) : null;
+    if (pend) { await pend; FIG_SHOTS++; }
+  }
   applyScale();
   ctx.setTransform(OUT_SCALE, 0, 0, OUT_SCALE, 0, 0);
   ctx.globalAlpha = 1;
@@ -160,13 +174,13 @@ window.__pvShot = async (cfg) => {
   /* 人物层是「按镜头滑动装载」的：抽帧也必须走同一条装载路径，
      否则非首镜的人物永远画不出来（会误判成「人物层没生效」）。 */
   const pend = PV.ensureWindow ? PV.ensureWindow(cfg.t) : null;
-  if (pend) await pend;
+  if (pend) { await pend; FIG_SHOTS++; }
   applyScale();
   PV.renderAt(ctx, cfg.t);
   return cv.toDataURL('image/png');
 };
 window.__pvInfo = () => ({
-  scale: OUT_SCALE, total: HL.total, dur: HL.dur,
+  scale: OUT_SCALE, total: HL.total, dur: HL.dur, figShots: FIG_SHOTS,
   stats: PV.STAT ? PV.STAT() : null,
   fonts: Array.from(document.fonts).filter(f => f.status === 'loaded').length,
 });

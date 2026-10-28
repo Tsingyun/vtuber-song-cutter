@@ -389,7 +389,8 @@ async function cleanupArtifacts() {
       try {
         return await h.page.evaluate(async ({ s, e, up, q }) => {
           // 歌词排版有跨帧累积状态，每个实例都必须从 f0 顺序快进到自己的起点（绘制仅 0.3 ms/帧）
-          for (let i = 0; i < s; i++) window.__frame(i);
+          // fast=1：只推排版状态，不装载人物帧（否则这一段会把 48 个镜头的图全解一遍）
+          for (let i = 0; i < s; i++) window.__frame(i, { fast: 1 });
           for (let i = s; i < e; i++) {
             /* 页面可以返回 Promise：人物层是「按镜头滑动装载」的，换镜头时要把那一镜
                的直播帧解码完再画（否则会画到回落帧 = 人物闪）。v9/v10 的 __frame
@@ -454,8 +455,9 @@ async function cleanupArtifacts() {
       if (done) return;
       try {
         const st = await handles[0].page.evaluate(() => ({ phase: HL.phase, prog: HL.prog, total: HL.total, err: HL.err,
+          figShots: (typeof window.__pvInfo === 'function') ? window.__pvInfo().figShots : -1,
                                                  q: HL.q, cfg: HL.encCfg }));
-        const line = `[render] ${st.phase} ${st.prog}/${st.total} 帧 (${(st.prog / Math.max(1, st.total) * 100).toFixed(1)}%) q=${st.q} cfg=${st.cfg || '?'}`;
+        const line = `[render] ${st.phase} ${st.prog}/${st.total} 帧 (${(st.prog / Math.max(1, st.total) * 100).toFixed(1)}%) fig=${st.figShots} q=${st.q} cfg=${st.cfg || '?'}`;
         if (line !== lastLog) { console.log(line); lastLog = line; }
       } catch (e) { console.error('[probe 失败]', e.message && e.message.slice(0, 200)); }
     }, 5000);

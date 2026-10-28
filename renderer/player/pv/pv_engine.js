@@ -767,7 +767,11 @@
       fonts: nf, glyphs: total, shots: ST.shots.length,
       seqs: Object.keys(ST.seq), dpr: ST.dpr,
       preload: pre.n, settled: pre.jobs, memMB: Math.round(pre.bytes / 1048576),
-      missing: Object.keys(PV.FACES).filter(k => !document.fonts.check(PV.cssFace(k, 64), 'A字')),
+      /* 探测文本必须用**这首歌实际会排的字**。早先固定写 'A字'：英文歌的歌词里没有汉字，
+         日文分片从头就没被请求过，于是永远报 heavy/mincho/minchoLt「未就绪」——
+         纯误报，白查了两轮（实际 808 个分片全 loaded，14 族 check 全 true）。
+         字体是分 unicode-range 的，check 的字符串决定了它去找哪些分片。 */
+      missing: Object.keys(PV.FACES).filter(k => !document.fonts.check(PV.cssFace(k, 64), texts.slice(0, 240) || 'A0')),
     };
   };
 
