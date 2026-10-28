@@ -169,6 +169,21 @@
         ctx.rect(bx + c[0] * g.w, TOP + c[1] * BH, (c[2] - c[0]) * g.w, (c[3] - c[1]) * BH);
         ctx.clip();
       }
+      /* piece 级：字被拆成若干零件后各自飞行（见 pv_piece.js）。
+         三个前置条件缺一不可：有驱动源、能真的拆（>=2 块，或退场要碎）、拿得到主色。
+         零件**归位后** drawPieces 返回 false —— 退回整字 fillText，
+         否则全片每个字都变成一次 drawImage，还会丢掉 TREAT 的笔画处理。 */
+      if (g.pfns && g.pfns.length && PV.drawPieces && o.S) {
+        const P = PV.glyphPieces(g.face, g.c, g.size * (PV.SCALE || 1));
+        g._gph = P;
+        if (P.pieces.length >= 2 || g.shatter) {
+          const fn = PV.combinePiece(g.pfns);
+          if (PV.drawPieces(ctx, g, P.pieces, o.S.ink, g.alpha * g.vis, fn)) {
+            ctx.restore();
+            continue;
+          }
+        }
+      }
       paint(ctx, g, bx, by, g.alpha * g.vis);
       ctx.restore();
     }

@@ -225,6 +225,49 @@
     g.sc = lerp(1.75, 1, k);
   };
 
+  /* ---- piece 级组装：零件各自从四面八方飞回来拼成字 ----
+     这一条是从 JIZURA 的 `assemble` 搬过来的核心。差别不在「飞多远」，
+     而在**零件是各自飞的**：「漂」的氵和票从不同方向、不同延迟回来，
+     读作「字被拼起来」；整字位移同样的距离只会读作「画面在晃」。
+     三点务必保留：① 每块有自己的延迟 ② 落地前有一瞬拉伸（瞬时速度）
+     ③ 大块先归位 —— 反过来会读作「碎屑先到、主体后到」。
+     g.pfns 由 drawGlyphs 消费；alpha 必须留 1，否则整套被 a<=0.004 跳过。 */
+  E.pAssemble = (g, e, rnd, rnd2) => {
+    const seed = (Math.floor(rnd * 2147483647) ^ 0x5f37) >>> 0;
+    const spread = g.size * 2.7 * (0.5 + 0.85 * rnd2);
+    const fps = PV.FPS || 60;
+    g.alpha = 1;
+    g.dx = 0; g.dy = 0; g.rot = 0; g.sc = 1; g.sx = 1; g.sy = 1;
+    const r = (j, k) => PV.rng(seed, j, k)();
+    g.pfns = (g.pfns || []).concat((j, p, n) => {
+      /* 小块晚到：面积最大的先落位，读作「主笔先搭好，点捺后补」 */
+      const areaN = Math.min(1, (p.area || 0) * 12);
+      const d = r(j, 1) * 0.32 + (1 - areaN) * 0.16;
+      const x = (e - d) / 0.62;
+      if (x < 0) return null;
+      const ee = ease.outExpo(Math.min(1, x));
+      const k = 1 - ee;
+      if (k <= 0.0006) return PV.PID;
+      const ang = r(j, 2) * 6.283185307;
+      const dist = spread * (0.35 + 0.65 * r(j, 3));
+      /* 瞬时速度 → 单轴拉伸。取「早一帧的进度」做差分（不积分，确定性不变），
+         于是零件在飞行最快的时候被拉长、落定时收回 —— 这才像「飞」不像「移」。 */
+      const xp = Math.max(0, x - (1 / fps) / 0.62);
+      const prev = xp >= 1 ? 1 : ease.outExpo(xp);
+      const sp = (ee - prev) * dist;
+      /* 起手尺寸随机（0.45~2.0 倍），归位时收到 1 —— 零件是「从别的大小飞回来」的，
+         齐整地同尺寸平移会读作「一块块贴纸在滑」。 */
+      const s0 = lerp(0.45, 2.0, r(j, 5));
+      return PV.PT(
+        Math.cos(ang) * dist * k, Math.sin(ang) * dist * k * 0.78,
+        (r(j, 4) - 0.5) * 150 * k,
+        s0 + (1 - s0) * k,
+        1 + Math.min(1.9, sp * 0.022), ang / (Math.PI / 180),
+        1
+      );
+    });
+  };
+
   /* 柔和升起：整句从「略大且略低」收到位，几乎看不出动作，但画面永远是活的。
      用于最安静的段落 —— 那里放大动作反而破坏情绪。 */
   E.softIn = (g, e) => {
@@ -381,6 +424,62 @@
   X.flatten = (g, e) => {
     g.alpha *= 1 - e;
     g.sy *= 1 - ease.inQuad(e);
+  };
+
+  /* ---- piece 级炸开（JIZURA `explode`）----
+     整字位移能做的只有「字飞走了」；这是「字炸了」：
+     每块沿**自己离字形中心的方向**飞出去（+随机偏转），且越远越旋转。
+     关键在 outer directed angle 是 `atan2(p.cy, p.cx)`：朝外的一致性让人
+     一眼读出「从中心崩开」，而不是「一堆碎片各飞各的」。 */
+  X.pExplode = (g, e, rnd, rnd2) => {
+    const seed = (Math.floor(rnd * 2147483647) ^ 0x2c9d) >>> 0;
+    const spread = PV.W * 0.62 * (0.5 + 0.7 * rnd2);
+    const r = (j, k) => PV.rng(seed, j, k)();
+    /* shatter：把每个连通块再切几刀。
+       英文歌词上这是**唯一**能碎起来的一层 —— 拉丁字母普遍只有一个连通块，
+       不开这个开关的话 pExplode 退化成「整颗字母飞出去」。 */
+    g.shatter = true;
+    g.psd = seed;
+    g.pfns = (g.pfns || []).concat((j, p, n) => {
+      const d = r(j, 11) * 0.28;
+      const x = (e - d) / 0.7;
+      if (x <= 0) return PV.PID;
+      if (x >= 1) return null;
+      const k = ease.inCubic(x);
+      const ang = Math.atan2(p.cy || 0, p.cx || 0) + (r(j, 12) - 0.5) * 1.9;
+      const dist = spread * (0.35 + 0.65 * r(j, 13));
+      return PV.PT(
+        Math.cos(ang) * dist * k, Math.sin(ang) * dist * k,
+        (r(j, 14) - 0.5) * 220 * k,
+        1 + (r(j, 15) - 0.5) * 0.5 * k,
+        1 + Math.min(1.8, dist * k * 0.004), ang / (Math.PI / 180),
+        1 - x * x * x
+      );
+    });
+  };
+
+  /* ---- piece 级崩落（JIZURA `fall`）----
+     和炸开的区别是方向统一向下 + 二次加速度 + 旋到 90°：
+     重力方向的齐一性读作「塌了」，炸开读作「爆了」。二者不能互换段落。 */
+  X.pFall = (g, e, rnd, rnd2) => {
+    const seed = (Math.floor(rnd * 2147483647) ^ 0x77ab) >>> 0;
+    const grav = PV.H * 4.6;
+    const r = (j, k) => PV.rng(seed, j, k)();
+    g.shatter = true;                 // 同上：不切碎就只能整颗字母往下掉
+    g.psd = seed;
+    g.pfns = (g.pfns || []).concat((j, p, n) => {
+      const x = e - r(j, 21) * 0.34;
+      if (x <= 0) return PV.PID;
+      if (x >= 1.15) return null;
+      const v = grav * x * x * 0.5;
+      return PV.PT(
+        (r(j, 22) - 0.5) * PV.W * 0.05 * x,
+        v,
+        (r(j, 23) - 0.5) * 160 * x + 90 * Math.min(1, x * 1.6),
+        1, 1 + Math.min(1.6, v * 0.0014), (Math.PI / 2) / (Math.PI / 180),
+        clamp(1.25 - x)
+      );
+    });
   };
 
   /* ============================================================ decor：装饰

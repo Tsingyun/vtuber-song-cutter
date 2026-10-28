@@ -40,11 +40,26 @@ def main():
     ap.add_argument("--sb", default="")
     ap.add_argument("--fps", type=float, default=60)
     ap.add_argument("--top", type=int, default=12)
+    ap.add_argument("--koma", type=int, default=0,
+                    help="两拍格：每秒几张画（编排稿 meta.koma）。>0 时比较的是「相邻两张画」"
+                         "而不是「相邻两帧」—— koma=12 / 60fps 下每 5 帧才有 1 张新画，"
+                         "按相邻帧算会有 80% 的死帧，把明明在动的镜头全部误判成静止。")
     a = ap.parse_args()
+
+    # 抽帧后「相邻帧」不再等于「相邻的两张画」：隔 stride 帧取一张才有意义
+    stride = max(1, round(a.fps / a.koma)) if a.koma > 0 else 1
 
     ds, ds_full = [], []
     prev = None
+    ring = []
     for f in frames(a.mp4, a.fps):
+        if stride > 1:
+            ring.append(f)
+            if len(ring) > stride:
+                ring.pop(0)
+                prev = ring[0]
+            else:
+                prev = None
         if prev is not None:
             ds_full.append(float(np.abs(f - prev).mean()))
             # 内容区差异：底色平移后颜色不变，只有字/人物/标记的像素会产生真实差异。

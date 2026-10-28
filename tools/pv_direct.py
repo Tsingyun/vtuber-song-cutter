@@ -463,10 +463,14 @@ def main():
         typ = {"face": fonts["face"], "body": fonts["body"], "squeeze": 1.0}
 
         # ---- 入场 / 保持 / 退场
+        # pAssemble 是 piece 级入场：字被拆成零件后各自飞回来拼成整体。
+        #   给它的权重不高（2）—— 它的信息量比整字位移大得多，48 镜里出现 6~8 次就够，
+        #   用多了「拆字」会从签名变成套路。
         entk = weighted(r, [("assemble", 3), ("softIn", 3), ("sliceDown", 2),
-                            ("dropBounce", 2), ("typeOn", 1)])
+                            ("dropBounce", 2), ("typeOn", 1), ("pAssemble", 2)])
         if mood == "peak" and r.random() < 0.45:
-            entk = weighted(r, [("assemble", 3), ("slam", 2), ("dropBounce", 2)])
+            entk = weighted(r, [("assemble", 3), ("slam", 2), ("dropBounce", 2),
+                                ("pAssemble", 3)])
         ent = {"k": entk}
         if entk == "slam":
             ent.update(dur=0.22, stagger=0.0, lead=0.02)
@@ -478,11 +482,20 @@ def main():
             ent.update(dur=0.52, stagger=0.030, lead=0.05)
         elif entk == "typeOn":
             ent.update(dur=0.24, stagger=0.030, lead=0.02)
+        elif entk == "pAssemble":
+            # 零件飞行需要时间铺开：太短会读作「抖了一下」，太长会抢唱词。
+            # 0.62 是 48 镜里能保住「堆起来」这个过程而不拖沓的下限。
+            ent.update(dur=0.62, stagger=0.024, lead=0.06)
         else:
             ent.update(dur=0.34, stagger=0.040, lead=0.04)
 
-        exitk = weighted(r, [("fadeUp", 4), ("blurOut", 2), ("fade", 2)])
+        # pExplode / pFall 同为 piece 级：前者「炸」，后者「塌」。
+        #   pFall 放在长句/情绪落点上，pExplode 放在宰制的cut before 断点。
+        exitk = weighted(r, [("fadeUp", 4), ("blurOut", 2), ("fade", 2),
+                             ("pFall", 1), ("pExplode", 1)])
         xit = {"k": exitk, "dur": 0.26 if mood == "peak" else 0.40}
+        if exitk in ("pExplode", "pFall"):
+            xit["dur"] = 0.34 if mood == "peak" else 0.46
         hold = {"k": weighted(r, [("breathe", 3), ("drift", 2), ("none", 1)]),
                 "amp": round(0.7 + 0.2 * m["cam"], 2)}
 

@@ -534,6 +534,9 @@
       // 重置：所有变换每帧从零开始，避免上一帧残留
       g.dx = 0; g.dy = 0; g.rot = 0; g.sc = 1; g.sx = 1; g.sy = 1;
       g.alpha = 1; g.vis = 1; g.clip = null;
+      /* 零件驱动源同理必须每帧清空：它是数组（入场、退场各能 push 一层），
+         留着上一帧的会逐帧累积，零件越飞越野且没有任何报错。 */
+      g.pfns = null;
 
       const charAxis = g.t0 != null;          // sync 镜头里 t0 已被整块覆写成 shot.t0，天然无错相
       /* 首词必须跟着镜头一起出现。
@@ -569,7 +572,14 @@
         const bx0 = g.dx, by0 = g.dy, bs = g.sc, b_sx = g.sx, b_sy = g.sy, brot = g.rot, ba = g.alpha;
         const eP = Math.max(0, e - (1 / (ST.fps || 60)) / EN_DUR);
         g.dx = 0; g.dy = 0; g.rot = 0; g.sc = 1; g.sx = 1; g.sy = 1; g.alpha = 1;
+        /* 这一遍只为取「早一帧」的位姿来算瞬时速度，**不是**真正的当前帧：
+           piece 型入场会把自己的驱动源 push 进 g.pfns，若不掐掉，
+           每帧就多挂一层 eP 版本的过期闭包 —— 零件的相位被早一帧的进度劫持，
+           表现为「零件永远差一点点归位」且随时间越积越多。 */
+        const bPfn = g.pfns;
+        g.pfns = null;
         re(g, eP, rnd1[i], rnd2[i], enter);
+        g.pfns = bPfn;
         rowClamp(g);
         const mx = bx0 - g.dx, my = by0 - g.dy;
         g.dx = bx0; g.dy = by0; g.sc = bs; g.sx = b_sx; g.sy = b_sy; g.rot = brot; g.alpha = ba;
@@ -604,6 +614,28 @@
       for (const g of glyphs) if (setw.has(g.wi)) g.emph = true;
     }
     return glyphs;
+  }
+
+  /* 一趟色散残影：把整行重画在 lag 秒之前的位姿上，整体错位(dx,dy)并染成色散色。
+     lag > 0 才有意义 —— lag=0 的重画和主层完全重合，只剩下「加粗」。 */
+  function ghostPass(ctx, shot, t, lag, ox, oy, col, blend, S) {
+    if (!(lag > 0)) return;
+    const gs = applyParts(shot, t - lag);
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.globalCompositeOperation = blend;
+    PV.drawGlyphs(ctx, gs, (c2, gg, bx, by, aa) => {
+      /* 0.82 而不是更淡：残影本来就该被读出来，太淡就退化成「字边缘有点脏」。
+         JIZURA 这里是不打折的满 alpha，我们留一点余量是怕它在大面积文字上发糊。
+         要记住真正让残影一眼可读的是 **lag（1/24 秒前的位姿）**，静止画面上
+         看不出色散是正常的 —— 它在运动里才有意义。 */
+      c2.globalAlpha = aa * 0.82;
+      c2.fillStyle = col;
+      c2.fillText(gg.c, bx, by);
+    }, { S });
+    ctx.restore();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
   }
 
   function paintFor(kind) { return PV.TREAT[kind] || PV.TREAT.solid; }
@@ -643,8 +675,28 @@
       applyParts(shot, t);   // 主层要用当前时刻，必须再算回来
     }
 
-    PV.drawGlyphs(ctx, glyphs.filter(g => !g.emph), bindS(base, spec));
-    if (shot.treatEmph) PV.drawGlyphs(ctx, glyphs.filter(g => g.emph), bindS(emph, specE));
+    /* ---- 色散残影：JIZURA 的 ghost A / B 两趟 ----
+       这不是「给字加一圈发光」。两趟各自把时间**往回拨** 1.6/24 与 0.8/24 秒
+       重算整行位姿，再以色散色错位叠上去 —— 于是被画出来的是
+       「上一瞬它真的在这个位置飞过」，而不是同一个字的轮廓副本
+       （同帧复制两份只等于把字加粗，这正是早前 trail 的做法）。
+       合成模式跟着底色走：亮底用 multiply，否则残影读作浮在纸上的一层白雾。 */
+    const chroma = (shot.chroma == null ? 0.7 : shot.chroma) * (S.ghost == null ? 1 : S.ghost);
+    if (chroma > 0.02 && S.ghostA && S.ghostB) {
+      const u = PV.H / 1080;
+      const mul = PV.lum(S.paperRGB) > 0.55 ? 'multiply' : 'source-over';
+      /* 第五个参数必须是 S：ghost 这一趟也要走 piece 分支。
+         漏了它 ⇒ 残影用整字 fillText 画了一颗**完整**的字母垫在底下，
+         已经飞散的碎片反而变成漂浮的碎屑（实测 "THIS IS THE BEST FEELING"
+         读作「字没碎、旁边多了几粒小白点」）。JIZURA 每一趟都是完整重绘，
+         内容是上一次位姿下的**同一批零件**。 */
+      ghostPass(ctx, shot, t, 1.6 / 24, -3.4 * chroma * u, -1.3 * chroma * u, S.ghostB, mul, S);
+      ghostPass(ctx, shot, t, 0.8 / 24, 3.2 * chroma * u, 1.9 * chroma * u, S.ghostA, mul, S);
+      applyParts(shot, t);           // 上面重算了两次位姿，主层必须回到当前时刻
+    }
+
+    PV.drawGlyphs(ctx, glyphs.filter(g => !g.emph), bindS(base, spec), { S: spec });
+    if (shot.treatEmph) PV.drawGlyphs(ctx, glyphs.filter(g => g.emph), bindS(emph, specE), { S: specE });
     ctx.filter = 'none';
     ctx.globalAlpha = 1;
     if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'over');
@@ -708,6 +760,17 @@
   PV.renderAt = function (ctx, t) {
     const sb = ST.sb;
     const S = ST.S;
+    /* ---- 两拍格（JIZURA 的 koma）：把动画时间量化到 1/KOMA 秒的栅格上 ----
+       这是「日本文字 PV 味道」最主要的结构来源，也是逆向时得到的第一条结论。
+       传统有限动画每秒只画 8~12 张，中间的运动靠重复，而不是逐帧插值。
+       我们原先在 60fps 上逐帧重算每一个位移 ⇒ 顺得像 UI 动效，
+       再怎么写缓动曲线也读不出 animator 的手感，因为**采样率本身就是信号**。
+       量化后同一张画连续出现 5 帧，抖动类的手势才有了「格」。
+       副作用也是设计的一部分：相机、装饰、人物全都跟着一起被量化 ——
+       有限动画本来就是整帧整体在跳，只把文字抽帧而背景照旧持顺会读作两层不同源。
+       KOMA=0 表示不抽帧（逐输出帧一张画）。 */
+    const KOMA = ST.koma || 0;
+    if (KOMA > 0) t = Math.floor(t * KOMA + 1e-6) / KOMA;
     const shot = shotAt(t);
     /* 复位到「设计坐标 × 输出倍率」，**不是单位矩阵**。
        写成 setTransform(1,0,0,1,0,0) 时，4K 母版上整张画面只画在左上 1920×1080，
@@ -894,6 +957,11 @@
     ST.dpr = opt.dpr || 1;
     ST.sb = opt.storyboard;
     ST.fps = opt.fps || 60;
+    PV.FPS = ST.fps;                       // piece 型入场取瞬时速度时需要知道帧率
+    /* 两拍格：默认 12（每秒 12 张画，等价 JIZURA 的 onTwos）。0 = 不抽帧。
+       编排稿 meta.koma 可以覆盖 —— 抒情段想要更顺时值得降到 8 或 0。 */
+    const meta = opt.storyboard && opt.storyboard.meta;
+    ST.koma = opt.koma != null ? opt.koma : (meta && meta.koma != null ? meta.koma : 12);
     ST.dur = opt.dur;
     ST.S = buildStyle(opt.storyboard.palette || {}, ST.dpr);
 
