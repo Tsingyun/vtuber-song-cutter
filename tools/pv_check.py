@@ -7,7 +7,14 @@
   · 时长与编排稿 meta.dur 差 ≤ 0.5s
   · 分辨率 3840×2160、60fps、yuv420p、bt709
   · 视频码率 16000~19000 kbps（>19000 会被平台二压）
-  · 抽帧全部非纯黑（平均亮度 > 6）
+  · 抽帧底色 == 编排稿该时刻期望的 scheme.bg（换纸是否真的落地）
+  · 平涂：四角同色（无暗角、无渐变、无残幅）
+  · 底纹存在：右下象限有噪点（残幅的未绘制区是死平的 0）
+  · 有内容：与底色差异 > 25 的像素 ≥ 0.15%
+
+为什么不用「平均亮度 / 铺满率」：那两条是为米白满幅底设计的。新版是平涂底 +
+大留白，黑底镜头的平均亮度 5.9、铺满率 0.537 完全正常 —— 两条都会恒误报。
+换纸把「底色」变成了每一帧都不同的量，判据必须跟着编排稿走，不能再用绝对阈值。
 """
 import argparse
 import json
@@ -46,7 +53,7 @@ def mean_luma(png):
     return sum(out) / max(1, len(out))
 
 
-def fill_ratio(png):
+def fill_ratio(png):  # noqa: F401 —— 已停用，见文件头说明
     """内容铺满率：非黑像素的横向跨度 / 画面宽度。
 
     这条检查是被一次真实事故逼出来的：`renderAt` 把画布变换复位成单位矩阵，
@@ -62,6 +69,71 @@ def fill_ratio(png):
         return 0.0
     x0, x1 = np.argmax(cols), len(cols) - 1 - np.argmax(cols[::-1])
     return (x1 - x0 + 1) / im.shape[1]
+
+
+def load_schemes():
+    """pack → [bg 色值,...]，顺序即 scheme 下标。直接解析 pv_scheme.js，避免与前端漂移。"""
+    import re
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "renderer", "player", "pv", "pv_scheme.js")
+    packs, cur = {}, None
+    for line in open(p, encoding="utf-8"):
+        m = re.match(r"\s{4}(\w+):\s*\{\s*$", line)
+        if m:
+            cur = m.group(1); packs[cur] = []; continue
+        m2 = re.search(r"bg: '(#\w+)'", line)
+        if m2 and cur:
+            packs[cur].append(m2.group(1))
+    return packs
+
+
+def hex_rgb(h):
+    h = h.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def expect_bg(sb, schemes, t):
+    """编排稿里 t 时刻该用哪张纸的底色（附带版面名，供判据分流）。"""
+    for s in (sb.get("shots") or []):
+        if float(s["t0"]) <= t < float(s["t1"]):
+            pal = s.get("pal") or {}
+            lst = schemes.get(pal.get("pack")) or []
+            lay = (s.get("layout") or {}).get("k") or ""
+            if lst:
+                return (hex_rgb(lst[int(pal.get("idx") or 0) % len(lst)]),
+                        "%s/%s" % (pal.get("pack"), pal.get("idx") or 0), lay)
+    return None, None, ""
+
+
+def frame_stats(png):
+    """(底色众数, 内容占比, 底纹方差, 四角最大差)。"""
+    from PIL import Image
+    import numpy as np
+    im = Image.open(png).convert("RGB")
+    a = np.asarray(im, dtype=np.int16)
+    h, w, _ = a.shape
+    # 底色众数：平涂底上底色一定占绝大多数面积，量化到 16 级后取最多的那一档
+    small = np.asarray(im.resize((120, 68), Image.BILINEAR), dtype=np.int16)
+    q = (small // 16).reshape(-1, 3)
+    keys, cnt = np.unique(q, axis=0, return_counts=True)
+    bg = keys[cnt.argmax()] * 16 + 8
+    # 残幅检测：取右下象限的**中位数**，它是「这一块到底画没画」的直接证据。
+    # 平涂底上哪怕压着字，中位数也还是底色（字占不到一半面积）；
+    # 残幅时那一块根本没绘制，中位数是 0。
+    # 这里一度改用「grain 方差 < 0.8」判残幅 —— 在 paper/1(#151515) 上恒误报：
+    # 极深底上 grain 幅度只有 ±1，8bit 量化后标准差 0.13，而画面明明是画满的。
+    patch = a[h // 2:, w // 2:].mean(axis=2)
+    grain = float(np.median(patch))
+    # 内容占比：与底色差 > 25 的像素（字、人物、标记）
+    content = float((np.abs(a - bg).max(axis=2) > 25).mean())
+    # 四角最大差：平涂底上四角必须和中心一样平（暗角是电影语法，这里不该有）
+    def corner(y0, x0):
+        b = a[int(h * y0):int(h * y0) + max(1, int(h * 0.04)),
+              int(w * x0):int(w * x0) + max(1, int(w * 0.04))]
+        return b.reshape(-1, 3).mean(axis=0)
+    cs = [corner(0.02, 0.02), corner(0.02, 0.94), corner(0.94, 0.02), corner(0.94, 0.94)]
+    flat = float(max(np.abs(cs[i] - cs[j]).max() for i in range(4) for j in range(i + 1, 4)))
+    return bg, content, grain, flat
 
 
 def main():
@@ -95,10 +167,15 @@ def main():
     # 抽帧（--sheet 只决定要不要出接触表，抽样与判据始终执行）
     if True:
         from PIL import Image
+        import numpy as np
         tmp = os.path.join(os.path.dirname(a.sheet or a.fig_sheet) or ".", "_chk")
         os.makedirs(tmp, exist_ok=True)
         d = info["dur"]
-        files, lum, fill = [], [], []
+        schemes = {}
+        if a.manifest:
+            schemes = load_schemes()
+        files, lum = [], []
+        badpaper, badflat, badgrain, badcontent = [], [], [], []
         for i in range(a.n):
             t = d * (i + 0.5) / a.n
             p = os.path.join(tmp, "f%02d.png" % i)
@@ -106,13 +183,31 @@ def main():
                             "-frames:v", "1", p], check=True)
             files.append(p)
             lum.append(mean_luma(p))
-            fill.append(fill_ratio(p))
-        dark = [(round(d * (i + 0.5) / a.n, 1), round(v, 1)) for i, v in enumerate(lum) if v < 6]
-        print("[luma] min %.1f max %.1f  过暗帧 %s" % (min(lum), max(lum), dark or "无"))
-        ok &= not dark
-        thin = [(round(d * (i + 0.5) / a.n, 1), round(v, 3)) for i, v in enumerate(fill) if v < 0.94]
-        print("[fill] 最小铺满率 %.3f  未铺满 %s" % (min(fill), thin or "无"))
-        ok &= not thin
+            bg, content, grain, flat = frame_stats(p)
+            want, name, lay = expect_bg(sb, schemes, t) if a.manifest else (None, None, "")
+            tag = (round(t, 1), name)
+            if want is not None:
+                dp = float(np.abs(bg - np.array(want)).max())
+                # 14 是 8bit 转换 + grain + scan 纹理能吃掉的量；再大就是换纸没落地
+                if dp > 14:
+                    badpaper.append((tag, "#%02X%02X%02X" % tuple(bg), "#%02X%02X%02X" % tuple(want), round(dp)))
+            # 巨影版面跳过：cropGiant 的巨字本来就要被画缘切掉，它会占满左下与右下角
+            # （实测 t=79.8 四角差 35.3，而画面无暗角、无残幅）。残幅由 [residue] 负责。
+            if flat > 10 and lay != "cropGiant":
+                badflat.append((tag, round(flat, 1)))
+            if want is not None and abs(float(grain) - sum(want) / 3.0) > 10:
+                badgrain.append((tag, round(grain, 1), round(sum(want) / 3.0, 1)))
+            if content < 0.0015:
+                badcontent.append((tag, round(content * 100, 3)))
+        print("[luma] min %.1f max %.1f（仅供参考，不作为判据）" % (min(lum), max(lum)))
+        print("[paper] 底色与编排稿不符 %s" % (badpaper or "无"))
+        ok &= not badpaper
+        print("[flat]  四角不平（暗角/渐变/残幅）%s" % (badflat or "无"))
+        ok &= not badflat
+        print("[residue] 右下象限不是期望底色（残幅）%s" % (badgrain or "无"))
+        ok &= not badgrain
+        print("[content] 画面无内容 %s" % (badcontent or "无"))
+        ok &= not badcontent
         # 人物层：必须从**成片**里抽，不能用 pv_stills（那条路是预览接口，绕开了缺陷本身）。
         # 这一条是被「成片里一个人都没有、抽帧却每格都有」逼出来的。
         if a.fig_sheet:

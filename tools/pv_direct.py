@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
-"""文字 PV 导演层：音乐段落 + 逐词时间轴 → storyboard.json（可人工编辑的编排稿）。
+"""文字 PV 导演层 —— 第二版（JIZURA 版式语法）
 
-设计原则（这是本文件存在的理由，不是修辞）
-------------------------------------------------
-1. **一档一级，不叠buff**：每句只从所属 tier 的白名单里取 1 个 layout / 1 个 enter /
-   1 个 hold / 1 个 exit / 1 种字形样式。档与档之间靠**反差**制造节奏，不靠单句堆效果。
-2. **字体是主要旋钮**：tier 越高 → 字重越粗、字距越紧、字号越大。这条阶梯是全局一致的，
-   所以同一个「粗体压紧」在别处出现时，观众能感到「又上来了」。
-3. **重复句必须同处理**（unify）：副歌同一句反复出现，如果每次都换花样，结构就散了。
-   以歌词文本为键，第二次出现直接复用第一次的编排。
-4. **克制**：整片只有一处**色彩反转**（最高潮的章节），只在少数句子开抖动/色差/放射线。
-   这些是「事件」，不是背景噪声。
-5. 全部随机量走 seed，同一 seed 与同一输入 → 同一份编排。
+与第一版的关系：**推翻重来**。第一版的思路是「一句话 = 一个字块，五档能量逐级加 buff」，
+结果是一整片差不多构图的居中大字，靠入场动效制造差别。JIZURA 不是这么工作的：
 
-用法：
-  python tools/pv_direct.py --timing _tmp/pv/timing.json --analysis _tmp/pro_analysis.json \\
-      --out _tmp/pv/storyboard.json --start 20 --dur 40 --live _tmp/live_seq/live.json \\
-      --title "Innocence" --artist "Avril Lavigne" --vocal "岁己SUI" --date 2026-10-27
+  1. **段落决定视觉，不是句子决定视觉**。一个 style pack + 一套 scheme 贯穿整段，
+     段落边界就是硬切色 —— 观众靠「换了一种纸」来感知「换了一段」。
+  2. **版面是有限词汇，不是无限参数**。每句只从 12 个版面里挑一个，且每个版面
+     自带规则线/索引/注记/遮带。挑版面看的是**句子形态**（几个词、多长），
+     不是「能量档位」。
+  3. **字只分三级**：主字（0.11~0.26H）/ 次字（0.27 倍主字）/ 注记（0.023U）。
+     没有中间级。断层级差是版面感的一半。
+  4. **留白是正片**。一句话平均只占画面 30~45%，其余是空的、有线和注记的「空」。
+
+随机量全部走 seed；同一 seed + 同一输入 → 同一份编排稿。
 """
 import argparse
 import json
@@ -26,67 +23,115 @@ import sys
 
 import numpy as np
 
-# ----------------------------------------------------------------- 词汇表
-# 每档的取件范围。**刻意收窄**：一档里只有 2~4 个候选，才不会每句都长得不一样。
-TIERS = {
-    0: dict(face=["didoneLt", "minchoLt", "sansLt"], track=0.050, sizeK=0.62, squeeze=1.0,
-            layout=["center", "corner", "justify"],
-            enter=["softIn", "fadeSlow", "rise"], hold=["none", "breathe"],
-            exit=["fade"], treat=["solid", "bag", "solid"], fig=0.14),
-    1: dict(face=["didone", "mincho", "sansMed"], track=0.018, sizeK=0.76, squeeze=1.0,
-            layout=["center", "justify", "corner", "mixed"],
-            enter=["softIn", "sliceDown", "rise", "dropBounce"], hold=["drift", "breathe"],
-            exit=["fadeUp", "fade"], treat=["solid", "bag", "shadowSolid"], fig=0.34),
-    2: dict(face=["sans", "grotesk", "didone", "tall"], track=-0.012, sizeK=0.88, squeeze=1.0,
-            layout=["stack", "split", "justify", "diagonal", "mixed"],
-            enter=["assemble", "stretchIn", "dropBounce", "scalePop", "sliceUp"], hold=["drift", "breathe", "wave"],
-            exit=["fadeUp", "blurOut"], treat=["bag", "shadowSolid", "solid"], fig=0.56),
-    3: dict(face=["heavy", "grotesk", "tall"], track=-0.032, sizeK=1.0, squeeze=0.90,
-            layout=["centerBig", "band", "megaCrop", "dense", "mixed", "split"],
-            enter=["slam", "assemble", "sliceDown", "typeOn"], hold=["wave", "jitter", "drift"],
-            exit=["scatterOut", "flatten"], treat=["bag", "shadowSolid", "bag"], fig=0.74),
-    4: dict(face=["heavy", "condensed", "tall"], track=-0.046, sizeK=1.16, squeeze=0.86,
-            layout=["megaCrop", "column", "dense", "centerBig", "split"],
-            enter=["scatterIn", "spinIn", "slam", "dropBounce"], hold=["jitter", "flutter", "wave"],
-            exit=["scatterOut", "dissolve"], treat=["bag", "shadowSolid", "bag"], fig=0.70),
+# ----------------------------------------------------------------- 版式词汇
+# 每个版面能接什么句子，是**形态约束**，不是审美偏好：
+#   keySplit   挑一个词撑到 0.5H，其余缩到 0.27 倍 —— 词太多就挤成一排小字
+#   cropGiant  巨型副本被画框切掉 + 一段可读的小字 —— 句子太长时小字要三行
+#   lowerThird 下部一条 telop —— 超过三行就顶到画面上半区，不再是「下部」
+#   cross      十字轴 —— 字少才有轴，字多轴就被盖住了
+#   bandHide   一条横带从行间扫过 —— 两行以上才有「行间」可穿
+#   indexTable 歌词 + 一张小表 —— 长句会把表挤出去
+#   vRuler     竖轴刻度 —— 需要一个相对窄的字块
+#   scaleSteps 逐词递减 —— 词必须少且短
+#   marginNote 极小字 + 大留白 —— 只能给短句，长句会变成「正文」
+#   fullTrack  极端字距铺满整幅 —— 单行才行
+#   block      左缘字块 —— 长句主力，任何句子都能接
+FIT = {
+    "keySplit":   lambda nw, n, cjk: 2 <= nw <= 7,
+    # 巨字只做短句：长句本身要占两三行，再配一块巨影就是「两层字互相打架」。
+    # 原来的上界 n<=46 几乎放行一切，长句段（副歌 12 镜）里有 5 镜都是巨影。
+    "cropGiant":  lambda nw, n, cjk: n <= 40 and nw <= 9,
+    "lowerThird": lambda nw, n, cjk: 2 <= nw <= 13,
+    "cross":      lambda nw, n, cjk: 2 <= nw <= 6,
+    "bandHide":   lambda nw, n, cjk: 2 <= nw <= 9,
+    "indexTable": lambda nw, n, cjk: 3 <= nw <= 13,
+    "vRuler":     lambda nw, n, cjk: 2 <= nw <= 11,
+    "scaleSteps": lambda nw, n, cjk: 3 <= nw <= 6,
+    "marginNote": lambda nw, n, cjk: n <= 36,
+    "fullTrack":  lambda nw, n, cjk: nw <= 8 and n <= 36,
+    "block":      lambda nw, n, cjk: True,
 }
 
-# 空心字（outline / outlineThick / double）**不再进入任何档位的主体样式池**。
-# 一版实测：150px 的字配 0.017em 描边 = 4K 下 2.5px 的一圈线，字腔是空的，
-# 一眼读作 WordArt —— 这是用户判定「字体廉价」的直接原因。
-# 空心只允许出现在背景装饰层（巨大 ghost 字），作为「压在纸里的另一个声音」。
-HOLLOW = {"outline", "outlineThick", "double"}
+# 三种「语气」各自能用的版面池，权重写重复次数。
+# 为什么语气只分三种：JIZURA 的 cut 也只有「安静 / 驱动 / 爆发」这三种功能，
+# 再多就会变成「每句都在换招」——那是没有编排，不是有编排。
+VOICE = {
+    # block 是「万能落点」（长句只有它接得住），所以它天然会被抽中偏多。
+    # 但它是所有版面里最朴素的一个——左缘块 + 短竖线 + 底细线，没有索引也没有遮蔽。
+    # 权重给到 4/3/2 时实测占 29%（14/48），且多次 3~7s 内连着出现两次，
+    # 观众读到的就是「又是那一块字」。降到 2/2/1，多出来的份额给带索引与遮蔽的版面。
+    "quiet": [("block", 2), ("marginNote", 3), ("indexTable", 3), ("vRuler", 3),
+              ("cropGiant", 2)],
+    "drive": [("lowerThird", 4), ("block", 2), ("keySplit", 3), ("indexTable", 3),
+              ("marginNote", 3), ("vRuler", 2), ("cropGiant", 2)],
+    "peak":  [("keySplit", 4), ("bandHide", 3), ("cross", 3), ("cropGiant", 3),
+              ("scaleSteps", 2), ("fullTrack", 2), ("block", 1)],
+}
 
-# 「事件型」构图：只在短句上用。长句一旦套上这些，画面会僵在那个状态十几秒。
-IMPACT = {"dense", "megaCrop", "centerBig", "band"}
+# 段落 → (style pack, scheme)。一个 pack 贯穿一段，段落之间换纸。
+# 只用了 noir / paper / crimson 三个 pack：
+#   noir    黑地米白字 + 琥珀/青  → 前奏、主歌、尾奏
+#   paper   奶油纸 + 蓝墨 + 洋红  → 主歌（整片唯一的大面积亮底）
+#   crimson 深红地 + 白/黑       → 副歌（整片唯一的饱和色块）
+# 三个 pack 已经能给出「黑 / 纸 / 红」三种完全不同的性格；再多就是拼贴。
+LOOK = {
+    "B1": ("noir", 0),
+    "A1": ("paper", 0),
+    "A2": ("noir", 0),
+    "A3": ("paper", 1),
+    "B2": ("crimson", 0),
+    "B3": ("crimson", 0),
+    "B4": ("noir", 1),
+    "A4": ("paper", 2),
+    "B5": ("crimson", 0),
+    "A5": ("paper", 0),
+    "C1": ("noir", 1),
+    "C2": ("noir", 0),
+}
 
-# 相机：手法按档位取（对齐 JIZURA 的 CAMERA 分组）。
-# 低档要「几乎看不出在动」但确实在动 —— 慢推和浮游就是这个作用；
-# 高档才允许甩镜和弹性，且全局限次：甩超过两次就不叫「甩」，叫「抖」。
+SCHEME_N = {}                # pack → scheme 套数（运行时从 pv_scheme.js 解析）
+
+# 段内换纸的间隔（秒）。一个 pack 连撑太久会读成「卡住了」——实测 crimson 段
+# 13 镜 55s 一镜不换，观众只看到一整片红。换的是**同 pack 的另一套 scheme**：
+# 纸换了、字体人格没变，所以段落感还在，节奏却活了。
+SWITCH_EVERY = 24.0
+
+# pack → 字体角色。display 是「这套纸的性格」，body 只负责次字与注记。
+FONTS = {
+    "noir": {"face": "heavy", "body": "sansMed"},
+    "crimson": {"face": "grotesk", "body": "sansMed"},
+    "paper": {"face": "mincho", "body": "sansMed"},
+    "hud": {"face": "grotesk", "body": "sansMed"},
+    "mono": {"face": "mincho", "body": "sansMed"},
+}
+
+# 语气 → 相机档 / 人物概率 / 版面尺寸基线
+# availW 是「版心能有多宽」。上限定在 0.66~0.72：再宽正文块就会横贯画面，
+# 从「一张版面」退化成「一条字幕」。
+MOOD = {
+    "quiet": dict(cam=1, fig=0.42, hK=0.112, availW=0.60, amp=0.85),
+    "drive": dict(cam=2, fig=0.58, hK=0.140, availW=0.66, amp=0.95),
+    "peak":  dict(cam=3, fig=0.54, hK=0.165, availW=0.72, amp=1.10),
+}
+
+# 有人物时必须用的版面：这些版面自带「空的一侧」，人和字不会抢同一片空间。
+# 这一条是硬的 —— 一旦让 cropGiant / cross 这类满幅版面带人物，
+# 字就必然压在脸上（第一版 43.3s 的 This moment 就是这么盖住眼睛的）。
+# 允许与人物同框的版面。lowerThird 之所以能进来：它是一条从画缘伸进版心的横带，
+# 只要站到人的另一侧就完全不碰 —— 它曾经因为侧向写死成 'l' 被排除在 51% 的镜头之外。
+FIG_SAFE = {"block", "marginNote", "cropGiant", "vRuler", "lowerThird"}
+
+# 相机手法（pv_cam.js 侧实现）
 CAM_BY_TIER = {
-    1: [("push", 3), ("drift", 2), ("float", 2)],
+    1: [("push", 4), ("drift", 2), ("float", 2)],
     2: [("push", 3), ("float", 2), ("orbit", 1), ("tiltDown", 1)],
-    3: [("pendulum", 2), ("orbit", 2), ("float", 2), ("focusIn", 1), ("push", 1)],
-    4: [("jelly", 2), ("snapPan", 1), ("pendulum", 2), ("push", 1)],
+    3: [("pendulum", 2), ("orbit", 2), ("float", 2), ("push", 1), ("snapPan", 1)],
 }
-CAM_QUOTA = {"snapPan": 2, "jelly": 4}
-CAM_AMP = {1: 0.9, 2: 0.95, 3: 1.05, 4: 1.15}
-
-# 纸底不能是纯黑。#0A0D12 在 4K 屏上就是「关掉的显示器」——白字压上去毫无依托。
-# 提到 #0F131A 并把第二色偏冷，画面才有一层可读的中间调；暗角也才有东西可压。
-PALETTE = {
-    "ink": "#F4EEE1", "paper": "#12171E", "paper2": "#232C38",
-    "accent": "#E2604A", "ghostA": "#5E90B6", "ghostB": "#B8452F", "void": "#080A0E",
-}
-# 唯一的反转：最高潮那一章用暖纸 + 墨字（全片只有一次，所以它是事件）
-PALETTE_INV = {
-    "ink": "#0C0F14", "paper": "#F3E7D2", "paper2": "#E6D2B4",
-    "accent": "#C0392B", "ghostA": "#2E6E8E", "ghostB": "#9E4B2A", "void": "#DEC7A5",
-}
+CAM_QUOTA = {"snapPan": 2}
 
 
 def rng(seed, *keys):
-    """由 seed 与若干整数键派生一个确定性 RNG（同一键永远同一序列）。"""
+    """由 seed 与若干整数键派生的确定性 RNG。"""
     h = seed & 0xFFFFFFFF
     for k in keys:
         h = (h ^ (int(k) * 2654435761)) & 0xFFFFFFFF
@@ -98,317 +143,167 @@ def pick(r, arr):
     return arr[int(r.integers(0, len(arr)))]
 
 
-def layout_ok(k, text, nwords, cjk):
-    """构图不是万能件：每种构图对「句子形态」有要求，硬套就会得到一堆画外字。
-    · stack 一行一个词 —— 词太多会排出画外且字号被压到看不懂
-    · diagonal 旋转后水平投影变长 —— 长句直接飞出去
-    · column 是竖排 —— 拉丁文只能整体旋 90°，长句会绕出画面
-    · dense/megaCrop 靠「重复/裁切」冲击，短句做了没有信息量
-    · corner 是「角落小字」——整句塞进左下角就是卡拉OK字幕，只能给短句用"""
-    n = len(text)
-    if k == "stack":
-        return 2 <= nwords <= 5
-    if k == "diagonal":
-        return nwords <= 7
-    if k == "column":
-        return cjk and n <= 24
-    if k == "dense":
-        return n >= 12
-    if k == "megaCrop":
-        return n >= 8
-    if k == "mixed":
-        # 大小混排要有「小词」衬托大词；词太少（2 个）会读成「一行大一行小」的错位，
-        # 词太多（9 个以上）则大词压不住版面。
-        ws = [w for w in text.split() if w]
-        if not (3 <= len(ws) <= 8):
-            return False
-        if min(len(w) for w in ws) < 2:      # "I" 缩到半号就成了一道竖线
-            return False
-        return max(len(w) for w in ws) >= 4 and min(len(w) for w in ws) <= 6
-    if k == "corner":
-        # 实测 t=10.6「Waking up I see that everything」被排进左下角，
-        # 整句贴底 + 满宽拉满 ⇒ 一眼读作普通歌词条，正好是要避免的那种观感
-        return nwords <= 3 and n <= 14
-    return True
+def weighted(r, pairs):
+    """[(值, 权重)] → 值"""
+    tot = sum(w for _, w in pairs)
+    x = float(r.random()) * tot
+    for v, w in pairs:
+        x -= w
+        if x <= 0:
+            return v
+    return pairs[-1][0]
 
 
-def pick_layout(r, spec, text, cjk, fallbacks):
-    nwords = max(1, len(text.split()))
-    for _ in range(6):
-        k = pick(r, spec)
-        if layout_ok(k, text, nwords, cjk):
-            return k
-    for k in fallbacks:
-        if layout_ok(k, text, nwords, cjk):
-            return k
-    return "center"
+def key_index(words, kw):
+    """挑「主字」：标题词优先，其次最长的实词，最后退回最长的词。
 
-
-# ----------------------------------------------------------------- 读取分析
-def load_series(ana):
-    import base64
-    N = ana["nframes"]
-    rms = np.frombuffer(base64.b64decode(ana["rms_b64"]), dtype=np.uint8).astype(np.float32) / 255.0
-    vox = np.frombuffer(base64.b64decode(ana["voiced_b64"]), dtype=np.uint8).astype(np.float32) / 255.0
-    flux = np.frombuffer(base64.b64decode(ana["flux_b64"]), dtype=np.uint8).astype(np.float32) / 255.0
-    return rms[:N], vox[:N], flux[:N]
-
-
-def section_features(ana, rms, vox, flux, fps):
-    out = []
-    for s in ana["sections"]:
-        t0, t1 = float(s[0]), float(s[1])
-        a, b = int(t0 * fps), int(min(len(rms), t1 * fps))
-        if b <= a:
-            continue
-        out.append({
-            "t0": t0, "t1": t1, "name": s[2],
-            "rms": float(rms[a:b].mean()),
-            "vox": float((vox[a:b] > 0.45).mean()),
-            "flux": float(flux[a:b].mean()),
-        })
-    return out
-
-
-def assign_tiers(feats, r):
-    """用实测能量排序后分档，而不是写死「副歌=3」。
-
-    **不要用 rms**：这条成片是母带过的，全曲 rms p5=0.66 / p95=0.91，段与段之间的
-    排名基本是噪声（实测 A1 与 B4 只差 0.008，却分属安静段与最密段）。改用
-      0.50 * rank(谱通量) + 0.50 * rank(人声密度)
-    谱通量测的是「编曲有多密」，人声密度测的是「她唱得多满」——这两个才对应
-    观众感到的「这一段更猛」。分位 → tier；首尾段落降一档（开场收尾天然要留白）。
+    JIZURA 的 tyKeySplit 也是这么挑的（最长词 / 首个汉字串）。
+    为什么要显式挑：随便取中间那个词，等于版面上最重要的位置交给了随机数。
     """
-    if not feats:
-        return []
-    n = len(feats)
-    for k in ("flux", "vox"):
-        vals = np.array([f[k] for f in feats])
-        order = vals.argsort().argsort()
-        for i, f in enumerate(feats):
-            f[k + "_r"] = order[i] / max(1, n - 1)
-    for f in feats:
-        f["score"] = 0.50 * f["flux_r"] + 0.50 * f["vox_r"]
-    order = np.argsort([-f["score"] for f in feats])
-    for rank, idx in enumerate(order):
-        q = rank / max(1, n - 1)
-        f = feats[idx]
-        f["tier"] = 4 if q < 0.14 else 3 if q < 0.38 else 2 if q < 0.64 else 1 if q < 0.86 else 0
-    # 首尾降档：开场第一个段落和收尾最后一个段落不该是最吵的
-    feats[0]["tier"] = min(feats[0]["tier"], 1)
-    feats[-1]["tier"] = min(feats[-1]["tier"], 1)
-    return feats
+    best, bi = -1, 0
+    for i, w in enumerate(words):
+        t = re.sub(r"[^A-Za-z']", "", w).lower()
+        score = len(t) + (3.0 if t in kw else 0) + (1.2 if 0 < i < len(words) - 1 else 0)
+        if score > best:
+            best, bi = score, i
+    return bi
 
 
-# ----------------------------------------------------------------- 文案辅助
-def make_type(line, tier, spec, phase_seed, idx):
-    """字号 / 字距 / 字体 + 构图参数。长句自动缩字号，否则必然撞边。"""
-    txt = line["text"]
-    n = max(1, len(txt.replace(" ", "")))
-    # 基准字号按「字的体格」给：同样是 200px，Didone 看着比 Archivo 小一圈，
-    # 因为它的竖画细、字面窄；统一数值会让抒情段显得「字变小了」。
-    base = {"heavy": 300, "grotesk": 280, "condensed": 320, "tall": 330,
-            "sans": 250, "sansMed": 230, "sansLt": 210,
-            "mincho": 220, "minchoLt": 200,
-            "didone": 250, "didoneLt": 240, "mono": 150, "monoB": 150}
-    face = pick(phase_seed, spec["face"])
-    # 长句的封顶从 1500 抬到 2200：原来 48 字的句子被压到 100px，
-    # 排出来就是「一条字幕」。构图层各自有按可用宽高反推字号的逻辑，
-    # 这里的封顶只负责挡住「短句被放到荒唐的大字」，不必替构图层做适配。
-    size = int(min(base.get(face, 240) * spec["sizeK"], 2200 / max(6, n) * 3.2))
-    size = max(56, size)
-    return face, size, spec["track"]
+def scheme_counts():
+    """从 pv_scheme.js 解析每个 pack 有几套 scheme。
 
-
-def emphasis_of(line, keywords):
-    """挑要强调的词：命中关键词优先，否则取音节最多（信息量最大）的那个词。"""
-    ws = line.get("words") or []
-    if not ws:
-        return []
-    hits = [i for i, w in enumerate(ws) if re.sub(r"[^a-z]", "", w["text"].lower()) in keywords]
-    if hits:
-        # 只强调 1 个：一版实测把 2 个词同时换色，配上大小混排会读成
-        # 「荧光笔划了两段」—— 强调之所以成立，是因为它稀少。
-        return hits[:1]
-    best = max(range(len(ws)), key=lambda i: (len(re.sub(r"[^a-z]", "", ws[i]["text"].lower())), -i))
-    # 太短的句子不必强调
-    if len(re.sub(r"\s", "", line["text"])) < 8:
-        return []
-    return [best]
-
-
-# ----------------------------------------------------------------- 背景 / 人物剧本
-def halftone_block(corner, size, a, step=13):
-    """网点块贴四角之一。位置用比例而不是像素 —— 排版层按 1920×1080 设计坐标算。"""
-    x = 0.015 if corner in (0, 2) else 1.0 - size - 0.015
-    y = 0.015 if corner in (0, 1) else 1.0 - size - 0.015
-    return {"k": "halftone", "x": round(x, 3), "y": round(y, 3),
-            "w": size, "h": size, "a": a, "step": step}
-
-
-def bg_layers(tier, r, txt="", title=""):
-    """背景层次：每镜 3~5 层，全部低对比。
-
-    修复记录：此前每层的 globalAlpha 都写成 `a * SAFE_A(a)`，而 SAFE_A 又返回 a，
-    实际透明度 = a²。0.16 的网点层只剩 0.026，等于没画 —— 这才是「背景纯黑」的根因，
-    不是配色不够亮。修掉之后同一套参数立刻有东西了。
-
-    层次分工（顺序即绘制顺序）：
-      mega        → 巨型底字：把某个词放大到只剩笔画。加的是**声部**，不是纹理
-      wash / ink  → 色彩深度（把黑变成有色的暗）
-      halftone / grid / hatch → 印刷纹理（把空变成纸）
-      panel / rings → 构图骨架（只在强拍）
-      leak / dust → 空气与时间
-      edge        → 版式线框（让留白读作留白）
+    不在这里写死，是为了避免与前端漂移：pv_scheme.js 增删 scheme 之后轮转会自己跟上，
+    不会出现「idx 越界 → 解算出 undefined 色 → 整镜画成黑」这种零报错事故。
     """
-    out = []
-    corner = int(r.integers(0, 4))
-    side = "r" if corner % 2 else "l"
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "renderer", "player", "pv", "pv_scheme.js")
+    packs, cur = {}, None
+    for line in open(p, encoding="utf-8"):
+        m = re.match(r"\s{4}(\w+):\s*\{\s*$", line)
+        if m:
+            cur = m.group(1); packs[cur] = 0; continue
+        if cur and re.search(r"bg: '#\w+'", line):
+            packs[cur] += 1
+    return packs
 
-    # 巨型底字：优先取「上一句」里最长的词 —— 与当前句错开，才不会读成字的影子。
-    src = txt or (title or "")
-    word = ""
-    if src:
-        ws = [w for w in re.sub(r"[^0-9A-Za-z\u3040-\u9fff' ]", " ", src).split() if len(w) > 2]
-        word = (max(ws, key=len) if ws else src).strip()
-    if word and tier >= 1:
-        out.append({
-            "k": "mega", "txt": word[:16].upper() if tier >= 2 else word[:16],
-            "size": round(0.46 + 0.05 * min(3, tier), 3),
-            "face": "tall" if tier >= 2 else "didone",
-            "vert": bool(int(r.integers(0, 2))),
-            "x": 0.64 if int(r.integers(0, 2)) else 0.34,
-            "y": 0.50,
-            "a": round(0.045 + 0.008 * min(3, tier), 3),
-            "col": "accent" if tier >= 4 else "ink",
-        })
 
-    if tier <= 1:
-        out.append({"k": "wash", "n": 3, "a": 0.22})
-        out.append({"k": "hatch", "a": 0.17})
-        out.append(halftone_block(corner, 0.46, 0.22))
-        # 等高线（参考 JIZURA 的 topoLines）：慢速自转的「地形」，给安静的段落一点纵深。
-        # 只在低档用 —— 高档已经有三层纹理，再加会糊成一片。
-        if r.random() < 0.62:
-            out.append({"k": "topo", "rings": 11, "a": 0.135, "r": 1.15,
-                        "spin": 0.0075, "x": 0.62 if corner % 2 else 0.38, "y": 0.46})
-    elif tier == 2:
-        out.append({"k": "wash", "n": 4, "a": 0.22})
-        out.append({"k": "grid", "a": 0.15, "step": 72})
-        out.append(halftone_block(corner, 0.54, 0.24))
-        out.append({"k": "leak", "side": side, "a": 0.22, "y": 0.08})
-        # 光芒（JIZURA 的 godRays）：一束极宽的光斜切进来，随镜头摆动
-        if r.random() < 0.55:
-            out.append({"k": "rays", "n": 13, "a": 0.15, "x": 0.42, "y": 0.20,
-                        "r": 1.30, "rot": -18 if side == "l" else 18,
-                        "ph": round(float(r.random()) * 6.28, 2)})
-    elif tier == 3:
-        out.append({"k": "wash", "n": 3, "a": 0.21})
-        out.append({"k": "halftone", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
-                    "a": 0.19, "step": 24})
-        out.append({"k": "panel", "x": 0.72, "y": 0.24, "w": 0.52, "h": 0.20,
-                    "rot": -13, "a": 0.22})
-        out.append({"k": "leak", "side": "r", "a": 0.24, "y": 0.10})
-        if r.random() < 0.45:
-            out.append({"k": "topo", "rings": 13, "a": 0.115, "r": 1.25,
-                        "spin": -0.008, "x": 0.5, "y": 0.5})
-    else:
-        out.append({"k": "ink", "n": 4, "a": 0.34})
-        out.append({"k": "halftone", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
-                    "a": 0.20, "step": 26})
-        out.append({"k": "panel", "x": 0.30, "y": 0.76, "w": 0.60, "h": 0.22,
-                    "rot": 9, "a": 0.21})
-        if int(r.integers(0, 2)):
-            out.append({"k": "rings", "x": 0.5, "y": 0.46, "n": 5, "a": 0.18,
-                        "spd": 0.42, "rMax": 0.92})
-    out.append({"k": "dust", "a": 0.22})
-    if tier >= 2:
-        out.append({"k": "edge", "a": 0.15, "m": 0.052})
-    return out
+def fig_reserve(fig, W=1920):
+    """人物占掉的一侧宽度（px）。
+
+    为什么必须精确算：`fixed=False` 时 placeFigure 会在六个锚点里挑「离字最远」的一个，
+    于是导演层以为人在右、引擎把她放到了左边（实测 t=14 的圆窗压在 SEC/BAR 表上）。
+    改成 fixed 之后人的位置是确定的，文字的版心也就能算准 —— 两边都不靠猜。
+    """
+    if fig["mode"] == "disc":
+        return 2 * int(fig["r"]) + 48
+    return int(int(fig["h"]) * 0.752) + 24
+
+
+def layout_params(layk, mood, fig, r, nwords, key=None, avoid=None):
+    """给版面填参数。参数只做「位置与比例」，字号一律交给版面自己反解 ——
+    字号写在编排稿里，等于把排版交给导演层，长句必然溢出。"""
+    m = MOOD[mood]
+    p = {"k": layk, "availW": round(m["availW"], 3)}
+    frac = (avoid or {}).get("frac", 0.0)
+    free_left = (avoid is None) or avoid.get("side") != "l"
+    # 版心：字永远从「空的那一侧」的边距起排。
+    # 人在右 → 字从 0.075W 起；人在左 → 字从 (0.075 + frac)W 起。
+    # 这里一度写反了：人站右边、字却从 0.36W 起排，整块字直接压到人身上。
+    xL = 0.075 if free_left else 0.075 + frac
+    # 上限取 MOOD 给的版心宽（它表达「这一段能排多宽」），再被人物占位压窄。
+    # 原来写成 min(0.80, ...) —— 那是个硬顶，MOOD.availW 从来没生效过，
+    # 长句因此一路排到 0.80W，折行怎么算都排不出均衡的三行。
+    aw = max(0.30, min(m["availW"], 1.0 - 0.15 - frac))
+    p["availW"] = round(aw, 3)
+
+    if layk in ("block", "marginNote", "cropGiant", "vRuler"):
+        if layk == "block":
+            p.update(hK=m["hK"], x=round(xL, 3), cy=0.48, lead=1.16, maxRows=3)
+            p["no"] = int(r.integers(1, 99))
+        elif layk == "marginNote":
+            p.update(pos="b" if r.random() < 0.7 else "t", x=round(xL, 3),
+                     availW=round(min(aw, 0.52), 3),
+                     note=("NOTE %02d" % int(r.integers(1, 99))),
+                     no=int(r.integers(1, 99)))
+        elif layk == "cropGiant":
+            p.update(edge="b" if r.random() < 0.62 else "t",
+                     mode="dim" if r.random() < 0.76 else "outline",
+                     giantK=round(0.56 + 0.10 * r.random(), 3),
+                     no=int(r.integers(1, 99)), x=round(xL, 3))
+            # 巨型字占下半屏时，可读块必须在上半屏（反之亦然）
+            p["side"] = "t" if p["edge"] == "b" else "b"
+        elif layk == "vRuler":
+            p.update(side="l" if free_left else "r", n=18)
+    elif layk == "indexTable":
+        p.update(side="r", rows=[["SEC", "B"], ["BAR", "%02d" % int(r.integers(1, 99))],
+                                 ["KEY", pick(r, ["D", "A", "Bm", "G"])]])
+    elif layk == "lowerThird":
+        # 横带永远从「没人」的那侧伸进来：人在左 → 条从右缘伸，反之从画缘伸
+        p.update(side="r" if (avoid and avoid.get("side") == "l") else "l",
+                 no=int(r.integers(1, 99)),
+                 meta=pick(r, ["VERSE", "CHORUS", "BRIDGE", "A", "B"]))
+    elif layk == "keySplit":
+        p.update(key=key, cx=0.5)
+    elif layk == "cross":
+        p.update(no=int(r.integers(1, 99)), cx=0.5)
+    elif layk == "bandHide":
+        p.update(bandK=round(0.30 + 0.10 * r.random(), 3),
+                 bandCol=pick(r, ["accent", "ink", "accent"]),
+                 dir=1 if r.random() < 0.5 else -1,
+                 tag=pick(r, ["CHORUS", "B", "REFRAIN", "FULL"]))
+    elif layk == "fullTrack":
+        p.update(note=pick(r, ["CHORUS 04", "VERSE", "OUTRO"]))
+    return p
+
+
+def fig_script(mood, r, pack):
+    """人物剧本（JIZURA 没有人物层，这一层是我们的加法）。
+
+    平涂底上的照片必须像「印刷品里切好的一块」，不像贴纸：
+      · **fixed**：贴边放置。位置确定，版心才能算准（auto 锚点会在六个位置里乱跳）
+      · 硬边（feather = 0）+ 2px 实线框（引擎在 S.flat 时自己加）
+      · 去饱和（mono）或轻双色调（duo），色温必须服从纸
+      · 尺寸按语气给：quiet 只给一个圆窗，peak 才允许整块大幅
+      · 只保留 disc / band / slab 三种：crop 是「半边出画」，宽度不可控，
+        和平涂版面抢版心时算不准要让多少
+    """
+    modes = {"quiet": [("disc", 6), ("band", 4)],
+             "drive": [("band", 6), ("disc", 3)],
+             "peak": [("slab", 4), ("band", 4)]}[mood]
+    mode = weighted(r, modes)
+    side = "r" if r.random() < 0.60 else "l"
+    fig = {
+        "mode": mode, "side": side,
+        "tone": "duo" if mode == "disc" else "mono",
+        "motion": round(0.6 + 0.7 * r.random(), 2),
+        "ph": round(r.random(), 3),
+        "layer": "avoid",
+        "fixed": True,
+        "seq": "head" if mode == "disc" else "body",
+        "feather": 0,
+        "frame": 2,
+    }
+    if mode == "disc":
+        fig.update(r=int(158 + 30 * r.random()), y=round(0.36 + 0.12 * r.random(), 3), a=0.94)
+    elif mode == "band":
+        fig.update(h=int(600 + 110 * r.random()), y=round(0.16 + 0.08 * r.random(), 3), a=0.90)
+    else:  # slab
+        fig.update(h=int(880 + 90 * r.random()), y=round(0.07 + 0.05 * r.random(), 3), a=0.76)
+    return fig
 
 
 def fig_band_fix(shots, w=1920):
-    """把「大幅人物 + split」镜头的文字版心推到人物对面那一侧。
+    """兼容旧调用（tools/pv_figband.py）。
 
-    为什么需要这一趟：split 的 cx/availW 原来只被用来限右边界，第一行永远从
-    pad（0.085W）起排 —— 于是左边站一个 slab 人物时，整行字直接压在人脸上
-    （实测 43.3s 的 This moment 正好盖住眼睛，读作事故而不是版面）。
-    pv_type.js 的 split 现在两头都按版心收，这里负责把版心给对。
-
-    幂等：已是目标值的镜头会被跳过，重复执行不会累积修改。
+    第二版把「文字让开人物」做在导演层（layout_params 里按 fig.side 改 availW / x / cx），
+    不再需要事后补丁。这个函数保留为稽核口：只报告「还有哪些镜头不符合新规则」。
     """
-    BIG = ("band", "slab", "ghost", "crop")
-    changed = []
+    bad = []
     for s in shots:
-        f = s.get("fig")
-        lay = s.get("layout") or {}
-        if not f or lay.get("k") != "split" or f.get("mode") not in BIG:
-            continue
-        side = f.get("side") or "r"
-        cx = int(round(w * (0.66 if side == "l" else 0.34)))
-        aw = round(min(float(lay.get("availW", 0.74)), 0.52), 3)
-        if lay.get("cx") == cx and abs(float(lay.get("availW", 0)) - aw) < 1e-6:
-            continue
-        lay["cx"] = cx
-        lay["availW"] = aw
-        s["layout"] = lay
-        changed.append((s.get("i"), round(s.get("t0", 0), 2), f.get("mode"), side, cx, aw))
-    return changed
-
-
-def fig_script(tier, layk, r):
-    """人物剧本：出现在哪、以什么方式出现、怎么和后景咬合。
-
-    「加强岁己的镜头」不是把概率调高就完事 —— 频率一高就会变成「右下角一直有个头像」，
-    那是 OBS 场景，不是 PV。所以方式比频率重要：
-      disc  圆窗（最克制，主歌用）
-      band  3:4 竖幅（副歌，人开始「进画面」）
-      slab  整块大幅（强拍，字从她身上压过）
-      crop  半边出画（日本 PV 里最常见的「被画框切掉的人」）
-      ghost 极淡的巨大影子（只做一两次，用来放慢）
-      duo   主窗 + 一个更小的「前一刻」（贵，只给最强的一两处）
-    """
-    full = layk in ("dense", "megaCrop", "centerBig", "band")
-    modes = {0: ["disc"], 1: ["disc"], 2: ["disc", "disc", "band"],
-             3: ["disc", "band", "slab", "crop"],
-             4: ["slab", "crop", "ghost", "duo", "band"]}[tier]
-    mode = pick(r, modes)
-    side = "r" if r.random() < 0.62 else "l"
-    fig = {
-        "mode": mode, "side": side,
-        # 双色调把直播截图的色温/噪点拉回纸面，否则永远是「贴了一张照片」
-        "tone": "mono" if mode in ("ghost", "slab", "crop") else "duo",
-        "motion": round(0.7 + 0.9 * r.random(), 2),
-        "ph": round(r.random(), 3),
-        "layer": "front" if (full or mode in ("slab", "crop")) else "avoid",
-        "fixed": bool(full),
-        "seq": "head",
-        # 羽化：硬边照片永远是「贴纸」。crop 只揉内侧那条边，ghost 四面八方都揉。
-        "feather": {"band": 0.05, "slab": 0.07, "crop": 0.12, "ghost": 0.26}.get(mode, 0.0),
-    }
-    if mode == "disc" or mode == "duo":
-        fig["r"] = int(150 + 38 * r.random())
-        fig["y"] = round(0.34 + 0.14 * r.random(), 3)
-        fig["a"] = 0.88
-    elif mode == "band":
-        fig["seq"] = "body"
-        fig["h"] = int(600 + 140 * r.random())
-        fig["y"] = round(0.20 + 0.10 * r.random(), 3)
-        fig["a"] = 0.82
-    elif mode == "slab":
-        fig["seq"] = "body"
-        fig["h"] = int(900 + 110 * r.random())
-        fig["y"] = round(0.10 + 0.08 * r.random(), 3)
-        fig["a"] = 0.72
-    elif mode == "crop":
-        fig["h"] = int(980 + 160 * r.random())
-        fig["y"] = round(0.06 + 0.06 * r.random(), 3)
-        fig["a"] = 0.64
-    else:  # ghost
-        fig["h"] = 1180
-        fig["y"] = 0.02
-        fig["a"] = 0.20
-    return fig
+        f, lay = s.get("fig"), s.get("layout") or {}
+        if f and lay.get("k") not in FIG_SAFE:
+            bad.append((s.get("i"), round(s.get("t0", 0), 2), lay.get("k"), f.get("mode")))
+    return bad
 
 
 # ----------------------------------------------------------------- 主流程
@@ -417,341 +312,265 @@ def main():
     ap.add_argument("--timing", required=True)
     ap.add_argument("--analysis", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--start", type=float, default=0.0, help="样片起点（秒，相对成片）")
-    ap.add_argument("--dur", type=float, default=0.0, help="样片时长（0=整首）")
+    ap.add_argument("--start", type=float, default=0.0)
+    ap.add_argument("--dur", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=20261027)
     ap.add_argument("--title", default="")
     ap.add_argument("--artist", default="")
     ap.add_argument("--vocal", default="")
     ap.add_argument("--source", default="")
     ap.add_argument("--date", default="")
-    ap.add_argument("--live", default="", help="tools/prepare_live.py 的 live.json")
-    ap.add_argument("--lrc", default="", help="只用于逐字核对行数")
+    ap.add_argument("--live", default="")
+    ap.add_argument("--lrc", default="")
     a = ap.parse_args()
 
     tdoc = json.load(open(a.timing, encoding="utf-8"))
     ana = json.load(open(a.analysis, encoding="utf-8"))
-    fps = 60.0
     total = float(ana["dur"])
     w0 = max(0.0, a.start)
     w1 = min(total, w0 + a.dur) if a.dur > 0 else total
+    dur = round(w1 - w0, 3)
 
-    rms, vox, flux = load_series(ana)
-    feats = assign_tiers(section_features(ana, rms, vox, flux, fps), rng(a.seed, 1))
+    # ---- 段落（曲式）：只用于决定「这一段用什么纸」与语气
+    secs = [{"t0": t0 - w0, "t1": t1 - w0, "name": name} for t0, t1, name in ana["sections"]]
+    if not secs:
+        secs = [{"t0": 0.0, "t1": dur, "name": "A1"}]
 
-    print("[sections] 段落能量与档位")
-    for f in feats:
-        print("  %-3s %7.2f→%7.2f  rms %.3f vox %.3f  score %.3f  tier %d"
-              % (f["name"], f["t0"], f["t1"], f["rms"], f["vox"], f["score"], f["tier"]))
+    def sec_at(t):
+        for s in secs:
+            if s["t0"] <= t < s["t1"]:
+                return s
+        return secs[-1]
 
-    def tier_at(t):
-        for f in feats:
-            if f["t0"] <= t < f["t1"]:
-                return f["tier"], f
-        return 1, (feats[0] if feats else {"name": "?", "tier": 1})
+    def mood_of(name):
+        if name.startswith("B"):
+            return "peak" if name in ("B3", "B5") else "drive"
+        if name.startswith("C"):
+            return "quiet"
+        return "quiet" if name in ("A1", "A2") else "drive"
 
-    # ---- 窗口内的歌词行（时间归零）
+    # ---- 窗口内的歌词行
     lines = []
     for l in tdoc["lines"]:
         if l["t1"] < w0 + 0.25 or l["t0"] > w1 - 0.25:
             continue
-        lines.append(json.loads(json.dumps(l)))
+        q = json.loads(json.dumps(l))
+        q["t0"] = round(max(0.0, q["t0"] - w0), 3)
+        q["t1"] = round(min(q["t1"] - w0, w1 - w0), 3)
+        for w in q["words"]:
+            w["t0"] = round(max(0.0, w["t0"] - w0), 3)
+            w["t1"] = round(min(w["t1"] - w0, w1 - w0), 3)
+        for c in q["chars"]:
+            c["t0"] = round(max(0.0, c["t0"] - w0), 3)
+            c["t1"] = round(min(c["t1"] - w0, w1 - w0), 3)
+        lines.append(q)
     if not lines:
         raise SystemExit("窗口 %.1f~%.1f 内没有歌词行" % (w0, w1))
-    for l in lines:
-        l["t0"] = round(l["t0"] - w0, 3)
-        l["t1"] = round(min(l["t1"] - w0, w1 - w0), 3)
-        for w in l["words"]:
-            w["t0"] = round(w["t0"] - w0, 3)
-            w["t1"] = round(min(w["t1"] - w0, w1 - w0), 3)
-        for c in l["chars"]:
-            c["t0"] = round(c["t0"] - w0, 3)
-            c["t1"] = round(min(c["t1"] - w0, w1 - w0), 3)
-    dur = round(w1 - w0, 3)
 
-    # ---- 关键词（用于强调）
-    kw = set(re.findall(r"[a-z]{3,}", (a.title + " " + " ".join(
-        l["text"] for l in lines)).lower()))
-    # 只保留标题词 + 出现 ≥3 次的内容词，避免「什么都强调」
+    # ---- 关键词（标题词 + 高频实词）
     freq = {}
     for l in lines:
-        for w in re.findall(r"[a-z]{3,}", l["text"].lower()):
+        for w in re.findall(r"[a-z']{3,}", l["text"].lower()):
             freq[w] = freq.get(w, 0) + 1
-    title_words = set(re.findall(r"[a-z]{3,}", a.title.lower()))
-    kw = {w for w, c in freq.items() if c >= 3} | title_words
-    kw -= {"the", "and", "that", "this", "you", "your", "with", "for", "you're", "it's", "was", "are"}
+    kw = {w for w, c in freq.items() if c >= 3} | set(re.findall(r"[a-z']{3,}", a.title.lower()))
+    kw -= {"the", "and", "that", "this", "you", "your", "with", "for", "was", "are", "its"}
 
-    # ---- 统一表：同一句歌词复用同一套编排
-    unify = {}
+    print("[look] 段落 → 纸")
+    for s in secs:
+        pk = LOOK.get(s["name"], ("noir", 0))
+        print("  %-3s %7.2f→%7.2f  %-8s scheme %d  %s"
+              % (s["name"], s["t0"], s["t1"], pk[0], pk[1], mood_of(s["name"])))
 
+    SCHEME_N.update(scheme_counts())
+    SEC_SW = {}              # 段名 → [上次换纸时刻, 当前 scheme]
     shots = []
-    last_cam = [""]          # 相邻镜头不重复同一手法
-    cam_used = {}            # 全局配额（snapPan / jelly）
+    last_cam = [""]
+    cam_used = {}
+    recent_lay = []          # 最近用过的版面（避免连续重复）
+
     for i, l in enumerate(lines):
-        prev_txt = lines[i - 1]["text"] if i else ""
-        tier, sec = tier_at(l["t0"] + w0)
-        # 下一条的**实际**起点要算上 0.10s 的提前量，否则每条都差 0.1s
-        nxt = max(0.0, lines[i + 1]["t0"] - 0.10) if i + 1 < len(lines) else dur
+        sec = sec_at(l["t0"])
+        mood = mood_of(sec["name"])
+        m = MOOD[mood]
+        # 镜头首尾相接：起点提前 0.10s（人声起点略晚于字），终点顶到下一句
         t0 = max(0.0, l["t0"] - 0.10)
-        # 镜头必须**首尾相接**：原来留了 0.22s 的气口，又可能和下一条重叠 0.26s，
-        # 于是交接处有一小段「上一句已退、下一句未出」的空画面（实测 50.5s 整屏只剩
-        # 一根残影）。现在直接顶到下一条的起点，交接永远是无缝的。
-        t1 = min(dur, max(nxt, l["t1"] + 0.15)) if nxt > l["t1"] else min(dur, l["t1"] + 3.0)
-        if t1 - t0 < 0.5:
-            t1 = t0 + 0.5
-        spec = TIERS[tier]
-        key = re.sub(r"[^a-z]", "", l["text"].lower())
-        r = rng(a.seed, 100 + i)
+        nxt = max(0.0, lines[i + 1]["t0"] - 0.10) if i + 1 < len(lines) else dur
+        t1 = min(dur, max(nxt, l["t1"] + 0.12)) if nxt > l["t1"] else min(dur, l["t1"] + 2.4)
+        if t1 - t0 < 0.6:
+            t1 = t0 + 0.6
+        r = rng(a.seed, 200 + i)
 
-        if key in unify and len(key) > 6:
-            base = unify[key]
-            layk, entk, holdk, exitk, treatk = (base["layout"]["k"], base["enter"]["k"],
-                                                base["hold"]["k"], base["exit"]["k"],
-                                                base["treat"]["k"])
-            face, size, track = base["type"]["face"], base["type"]["size"], base["type"]["track"]
-            unified = True
-        else:
-            cjk = any("\u3040" <= ch <= "\u9fff" for ch in l["text"])
-            cands = spec["layout"]
-            # 冲击型构图是「事件」，只有 2~4 秒的短句撑得住。
-            # 实测《Innocence》末句「don't you let it pass you by」持续 10.7s，
-            # 被排成 dense 之后就是整整十秒的同一面墙 —— 观众会以为卡了。
-            if (l["t1"] - l["t0"]) > 4.6:
-                calm = [k for k in cands if k not in IMPACT]
-                if calm:
-                    cands = calm
-            layk = pick_layout(r, cands, l["text"], cjk,
-                               ["justify", "split", "center"])
-            entk = pick(r, spec["enter"])
-            holdk = pick(r, spec["hold"])
-            exitk = pick(r, spec["exit"])
-            treatk = pick(r, spec["treat"])
-            face, size, track = make_type(l, tier, spec, r, i)
-            uniform = dict(layout={"k": layk}, enter={"k": entk}, hold={"k": holdk},
-                           exit={"k": exitk}, treat={"k": treatk},
-                           type={"face": face, "size": size, "track": track})
-            if len(key) > 6:
-                unify[key] = uniform
-            unified = False
+        pack, sch0 = LOOK.get(sec["name"], ("noir", 0))
+        # 段内轮转：每累计 SWITCH_EVERY 秒换同 pack 的下一套 scheme。
+        # 旧写法是「过中点 且 sch==0 才换成 1」——于是只有 crimson 段能触发，
+        # 而且 13 镜里只换后半段一次，纸还是读成连着的一整片。
+        st = SEC_SW.setdefault(sec["name"], [sec["t0"], sch0])
+        nsc = SCHEME_N.get(pack, 1)
+        if nsc > 1 and (sec["t1"] - sec["t0"]) > 34 and l["t0"] - st[0] >= SWITCH_EVERY:
+            st[1] = (st[1] + 1) % nsc
+            st[0] = l["t0"]
+        sch = st[1]
+        fonts = FONTS.get(pack, FONTS["noir"])
 
-        # 构图参数：不同 layout 需要不同的锚点，统一在这里给
-        lay = {"k": layk}
-        if layk == "center":
-            lay.update(cy=0.50 if tier <= 1 else 0.52)
-        elif layk == "centerBig":
-            lay.update(fillH=0.60 + 0.05 * (tier - 3), cy=0.66)
-        elif layk == "corner":
-            lay.update(pos="bl" if (i % 2 == 0) else "tr")
-        elif layk == "edge":
-            lay.update(side="left" if i % 2 == 0 else "right", bleed=0.20)
-        elif layk == "megaCrop":
-            lay.update(focus=0.30 + 0.12 * (i % 3), cy=0.72)
-        elif layk == "band":
-            lay.update(cy=0.50)
-        elif layk == "column":
-            lay.update(x=0.86, y=0.16, colH=0.70)
-        elif layk == "stack":
-            # 垂直位置交给排版层按行数自己算（词多时整体居中最稳）
-            lay.update(stair=(tier >= 4))
-        elif layk == "mixed":
-            # 大小混排：大词由 emph 决定（下面会回填 key），比例按档位收紧/放松
-            lay.update(cy=0.50, ratio=round(0.66 - 0.02 * tier, 3),
-                       wordGap=round(0.26 + 0.02 * (2 - min(2, tier)), 3))
-        elif layk == "diagonal":
-            lay.update(angle=-8 if i % 2 else 7)
-        # 冲击型构图整块出现，不跟逐词时间
-        sync = layk in ("dense", "megaCrop", "centerBig", "band")
+        words = [w["text"] for w in l["words"]]
+        nw = len(words)
+        n = len(l["text"])
+        cjk = any("\u3040" <= ch <= "\u9fff" for ch in l["text"])
+        key = key_index(words, kw)
 
-        # 入场：节奏越强，错开越小（重拍要「一起砸下来」）
-        ent = {"k": entk}
-        if entk in ("slam", "typeOn"):
-            ent.update(dur=0.20, stagger=0.0, lead=0.02)
-        elif entk == "softIn":
-            ent.update(dur=0.62, stagger=0.018, lead=0.10)
-        elif entk == "assemble":
-            ent.update(dur=0.46, stagger=0.028, lead=0.09)
-        elif entk == "dropBounce":
-            ent.update(dur=0.54, stagger=0.035, lead=0.06)
-        elif entk in ("sliceDown", "sliceUp", "stretchIn"):
-            ent.update(dur=0.30, stagger=0.045, lead=0.05)
-        elif entk in ("scatterIn", "spinIn"):
-            ent.update(dur=0.42, stagger=0.030, lead=0.10)
-        else:
-            ent.update(dur=0.52, stagger=0.020, lead=0.08)
-
-        xit = {"k": exitk, "dur": 0.30 if tier >= 3 else 0.46}
-        hold = {"k": holdk, "amp": 0.8 + 0.35 * tier}
-
-        # 衬线（尤其是 Didone）的横画极细，任何描边都会把细画灌满，
-        # 视觉上等于「一半字变成实心、一半还是空心」—— 这是本轮最像「渲染坏了」的一处。
-        # 衬线一律走袋文字：留白圈 + 外线，反而正是专辑封面的做法。
-        if face in ("didone", "didoneLt", "didoneIt", "mincho", "minchoLt") and treatk in ("outline", "outlineThick", "double"):
-            treatk = "bag"
-        if treatk in HOLLOW:
-            treatk = "bag"
-        tr = {"k": treatk}
-        if treatk == "chroma":
-            tr.update(chromaAmp=0.020 + 0.010 * (tier - 3))
-        if treatk == "extrude":
-            tr.update(extrudeN=6, extrudeDX=0.05, extrudeDY=0.045)
-        tre = None
-        emph = emphasis_of(l, kw)
-        if layk == "dense":
-            emph = []          # 密排墙把同一句重复七行，逐字强调会变成一片随机色块
-        if layk == "mixed":
-            # 大词就是强调词；没有强调词时让排版层自己取最长的那个
-            if emph:
-                lay["key"] = int(emph[0])
-            emph = []
-        if emph and tier >= 1:
-            # 高档段落用「换成强调色」而不是压色块：色块会把字的中宫吃掉，读作短视频字幕。
-            # 但底色本身是「空心」时不能再换色 —— 一行的字一半空心一半实色，
-            # 读起来像渲染出错，而不是强调。
-            # 深底上「加粗」是同色，起不到强调作用；强调必须换色（朱）。
-            tre = {"k": "accent"}
-
-        # 人物层：由 tier 的 fig 概率决定出现与否，出现时按 fig_script 决定方式
+        # ---- 人物：先决定有没有人，再决定版面（版面必须为人让位）
         fig = None
-        if spec["fig"] > 0 and r.random() < spec["fig"]:
-            fig = fig_script(tier, layk, r)
+        if r.random() < m["fig"]:
+            fig = fig_script(mood, r, pack)
 
-        # 人进了画面，字就要让出版面 —— 这是日本 PV 里最稳的一条构图纪律：
-        # 人占一侧，字块收到六成宽，两者不争同一片空间。
-        # 上一版把「避让」全交给 placeFigure 的六个候选锚点，可满宽的字块
-        # 根本没有空隙可挑，圆窗只能被压在字上（175s 那句「Cause I need you」
-        # 的 you 直接被圆窗吃掉半边）。缩字比挪人可靠。
-        if fig and not fig.get("fixed"):
-            if fig["mode"] in ("disc", "duo"):
-                size = max(76, int(round(size * 0.78)))
-                lay["availW"] = 0.60
-                if lay.get("cx") is None:
-                    lay["cx"] = 620
-            elif fig["mode"] in ("band", "ghost"):
-                size = max(76, int(round(size * 0.90)))
-                lay["availW"] = 0.78
-            elif fig["mode"] == "slab":
-                # slab 是「整块大幅、字从上面压过去」——压是设计，但字压在脸上不是。
-                size = max(76, int(round(size * 0.86)))
-                lay["availW"] = 0.74
-
-        # 装饰：按档位递进，不叠加
-        bgl = bg_layers(tier, r, prev_txt, getattr(a, "title", "") or "")
-        decor, bg = [], []
-        if tier <= 1:
-            decor.append({"k": "rule", "x0": 132, "x1": 1788, "y": 856, "a": 0.13, "ticks": 12})
-            decor.append({"k": "chapter", "x": 132, "y": 900, "text": sec["name"], "size": 14, "a": 0.40})
-        elif tier == 2:
-            bg.append({"k": "vrule", "x": 96, "y0": 120, "y1": 960, "a": 0.10})
-            decor.append({"k": "cropMarks", "m": 52, "len": 20, "a": 0.18})
-        else:
-            decor.append({"k": "barcode", "x": 1500, "y": 856, "w": 290, "h": 34,
-                          "a": 0.30, "seed": 7 + i})
-            if tier >= 4 and r.random() < 0.55:
-                bg.append({"k": "speedLines", "cx": 960, "cy": 520, "r0": 300,
-                           "r1": 1250, "n": 30, "a": 0.07, "phase": 0.2})
-        decor.append({"k": "progress", "x": 132, "y": 1008, "w": 1656,
-                      "p": round((t0 / dur) if dur else 0, 4)})
-
-        # 画面效果：只在高档、且限次
-        post = []
-        if tier >= 3 and r.random() < 0.30:
-            post.append({"k": "flash", "at": round(t0 + 0.02, 3), "decay": 0.10, "a": 0.22})
-
-        # 相机：每个镜头都必须有一台在动的机器（静止的镜头连起来就是幻灯片）。
-        # 手法按档位取，且**相邻不重复** —— 连续两支 pendulum 会把「摆动」读成「画面歪了」。
-        pool, alt = [], []
-        for _k, _w in CAM_BY_TIER[tier]:
-            alt += [_k] * _w
-            if _k != last_cam[0]:
-                pool += [_k] * _w
+        # ---- 版面：语气池 → 形态过滤 → 避免连续重复
+        pool = [(k, w) for k, w in VOICE[mood] if FIT[k](nw, n, cjk)]
+        if fig:
+            safe = [(k, w) for k, w in pool if k in FIG_SAFE]
+            if safe:
+                pool = safe
+        if recent_lay:
+            fresh = [(k, w) for k, w in pool if k not in recent_lay[-2:]]
+            if fresh:
+                pool = fresh
+        # 兜底：长句在 peak 池里可能一个版面都接不住（keySplit/cross/scaleSteps 都有词数上限），
+        # 这时必须退回 block —— 空池会让抽签直接崩，而不是「排得难看」。
         if not pool:
-            pool = alt
-        camk = r.choice(pool)
+            pool = [("block", 1)]
+        layk = weighted(r, pool)
+        recent_lay.append(layk)
+        if len(recent_lay) > 6:
+            recent_lay.pop(0)
+
+        # 人占掉多宽 → 版心从哪儿起。人太宽时先缩人（字是主角，人不能让版心消失）
+        avoid = None
+        if fig:
+            res = fig_reserve(fig)
+            for _ in range(4):
+                if res <= 1920 * 0.40:
+                    break
+                if fig["mode"] == "disc" and fig["r"] > 140:
+                    fig["r"] = int(fig["r"] * 0.90)
+                elif fig["mode"] != "disc" and fig["h"] > 520:
+                    fig["h"] = int(fig["h"] * 0.90)
+                else:
+                    break
+                res = fig_reserve(fig)
+            avoid = {"side": fig["side"], "frac": round(res / 1920.0, 3)}
+        lay = layout_params(layk, mood, fig, r, nw, key, avoid)
+
+        # ---- 类型：只有三级（主字 / 次字 / 注记），字体由 pack 决定
+        typ = {"face": fonts["face"], "body": fonts["body"], "squeeze": 1.0}
+
+        # ---- 入场 / 保持 / 退场
+        entk = weighted(r, [("assemble", 3), ("softIn", 3), ("sliceDown", 2),
+                            ("dropBounce", 2), ("typeOn", 1)])
+        if mood == "peak" and r.random() < 0.45:
+            entk = weighted(r, [("assemble", 3), ("slam", 2), ("dropBounce", 2)])
+        ent = {"k": entk}
+        if entk == "slam":
+            ent.update(dur=0.22, stagger=0.0, lead=0.02)
+        elif entk == "assemble":
+            ent.update(dur=0.46, stagger=0.026, lead=0.08)
+        elif entk == "softIn":
+            ent.update(dur=0.60, stagger=0.018, lead=0.10)
+        elif entk == "dropBounce":
+            ent.update(dur=0.52, stagger=0.030, lead=0.05)
+        elif entk == "typeOn":
+            ent.update(dur=0.24, stagger=0.030, lead=0.02)
+        else:
+            ent.update(dur=0.34, stagger=0.040, lead=0.04)
+
+        exitk = weighted(r, [("fadeUp", 4), ("blurOut", 2), ("fade", 2)])
+        xit = {"k": exitk, "dur": 0.26 if mood == "peak" else 0.40}
+        hold = {"k": weighted(r, [("breathe", 3), ("drift", 2), ("none", 1)]),
+                "amp": round(0.7 + 0.2 * m["cam"], 2)}
+
+        # ---- 相机
+        poolc, alt = [], []
+        for k, wgt in CAM_BY_TIER[m["cam"]]:
+            alt += [k] * wgt
+            if k != last_cam[0]:
+                poolc += [k] * wgt
+        if not poolc:
+            poolc = alt
+        camk = pick(r, poolc)
         if camk in CAM_QUOTA:
             if cam_used.get(camk, 0) >= CAM_QUOTA[camk]:
                 camk = "push"
             else:
                 cam_used[camk] = cam_used.get(camk, 0) + 1
         last_cam[0] = camk
-        cam = {"k": camk, "amp": round(CAM_AMP[tier] * (0.85 + 0.3 * r.random()), 3)}
-        if camk == "snapPan":
-            cam["at"] = round(0.42 + 0.16 * r.random(), 3)
-        if camk == "jelly" and entk != "slam":
-            cam["k"] = camk = "push"
+        cam = {"k": camk, "amp": round(m["amp"] * (0.86 + 0.28 * r.random()), 3)}
 
+        # ---- 装饰：JIZURA 的 decor 组，宁可没有也不要多
+        decor, bgl, bg = [], [], []
+        if not fig and r.random() < 0.34:
+            dk = weighted(r, [("cropMarks", 3), ("barcode", 2), ("dots", 1)])
+            if dk == "cropMarks":
+                decor.append({"k": "cropMarks", "m": 46, "len": 18, "a": 0.30})
+            elif dk == "barcode":
+                decor.append({"k": "barcode", "x": 1500, "y": 64, "w": 300, "h": 26,
+                              "a": 0.42, "seed": 11 + i})
+            else:
+                decor.append({"k": "dots", "x0": 0, "y0": 0, "x1": 1920, "y1": 1080,
+                              "step": 44, "r": 1.0, "a": 0.07})
+        # 背景：平涂底上只允许一层极淡的图形，且只给爆发段 —— 这是「层次」不是「滤镜」
+        if mood == "peak" and r.random() < 0.30:
+            if r.random() < 0.5:
+                bgl.append({"k": "rings", "x": 0.5, "y": 0.5, "n": 4, "a": 0.10,
+                            "spd": 0.20, "rMax": 1.10})
+            else:
+                bgl.append({"k": "halftone", "x": 0.55, "y": 0.10, "w": 0.45, "h": 0.80,
+                            "a": 0.07, "step": 22})
 
         shots.append({
             "i": len(shots), "t0": round(t0, 3), "t1": round(t1, 3),
-            "line": i, "kind": "line", "tier": tier, "section": sec["name"],
-            "energy": round(float(min(1.0, sec["score"])), 3),
-            "layout": lay,
-            "type": {"face": face, "size": size, "track": track,
-                     "squeeze": spec.get("squeeze", 1.0)},
+            "line": i, "kind": "line", "tier": m["cam"], "section": sec["name"],
+            "energy": 0.35 if mood == "quiet" else (0.62 if mood == "drive" else 0.9),
+            "layout": lay, "type": typ,
             "enter": ent, "hold": hold, "exit": xit,
-            "treat": tr, "treatEmph": tre, "emphasis": emph,
-            "bgl": bgl, "bg": bg, "decor": decor, "post": post, "cam": cam,
-            "fig": fig, "sync": bool(sync),
-            "wobble": 0.9 if tier >= 4 else (0.5 if tier == 3 else 0),
-            "unified": unified,
-            "note": "%s / %s / %s / %s" % (sec["name"], face, layk, entk),
+            "treat": {"k": "solid"},
+            "pal": {"pack": pack, "idx": sch},
+            "bgl": bgl, "bg": bg, "decor": decor, "post": [],
+            "cam": cam, "fig": fig, "sync": False, "wobble": 0,
+            "unified": False,
+            "note": "%s / %s / %s / %s" % (sec["name"], pack, layk, entk),
         })
 
-    # ---- 片头标题卡
-    # 铁律：标题卡**占据整个前奏**（0 → 首句前 0.3s），并且绝不移动歌词时间。
-    # 早先的写法是「标题卡 3.4s + 把后面所有镜头整体后移」，两个错：前奏剩下的
-    # 7 秒是纯空画面；歌词被平移后与音频错位（PV 的时间轴必须锁死在实际演唱上）。
+    # ---- 片头标题卡：占满整个前奏（绝不移动歌词时间轴）
     intro_end = shots[0]["t0"] if shots else 0.0
     if intro_end >= 2.4:
-        title_card = [{
-            "i": -1, "t0": 0.0, "t1": round(intro_end - 0.30, 3), "line": -1,
-            "kind": "title", "tier": 0,
-            "section": "TITLE", "energy": 0.2,
-            # 片头是第一印象，字号必须够大：118px 在 4K 输出里只是一个注脚。
-            # 日本 PV 的标题卡是「细明朝 + 大留白」，靠字号与间距立住，不靠装饰。
-            "layout": {"k": "justify", "targetW": 1420, "cy": 0.48, "maxSize": 210},
-            "type": {"face": "didone", "size": 186, "track": 0.052, "squeeze": 1.0},
+        shots.insert(0, {
+            "i": -1, "t0": 0.0, "t1": round(intro_end - 0.26, 3), "line": -1,
+            "kind": "title", "tier": 1, "section": "TITLE", "energy": 0.2,
+            "layout": {"k": "titleCard", "kicker": "ORIGINAL SONG",
+                       "artist": a.artist or "", "shadow": True,
+                       "meta": " ".join(x for x in (("VOCAL " + a.vocal) if a.vocal else "",
+                                                    ("·  " + a.date) if a.date else "") if x)},
+            "type": {"face": "heavy", "body": "sansMed", "squeeze": 1.0},
             "text": a.title,
-            "enter": {"k": "fadeSlow", "dur": 1.1, "stagger": 0.055, "lead": 0.25},
-            "hold": {"k": "breathe"}, "exit": {"k": "fade", "dur": 0.85},
+            "enter": {"k": "fadeSlow", "dur": 1.0, "stagger": 0.05, "lead": 0.20},
+            "hold": {"k": "breathe", "amp": 0.8},
+            "exit": {"k": "fade", "dur": 0.62},
             "treat": {"k": "solid"},
-            "bgl": [
-                {"k": "mega", "txt": (a.title or "").upper(), "size": 0.44,
-                 "face": "didone", "vert": False, "x": 0.5, "y": 0.30, "a": 0.05},
-                {"k": "wash", "n": 3, "a": 0.22},
-                {"k": "hatch", "a": 0.17},
-                {"k": "halftone", "x": 0.56, "y": 0.44, "w": 0.52, "h": 0.52,
-                 "a": 0.22, "step": 13},
-                {"k": "dust", "a": 0.20},
-                {"k": "edge", "a": 0.18, "m": 0.052},
-            ],
-            "bg": [],
-            # 海报式的信息层级：细线 → ORIGINAL → 原唱歌手 → 演唱来源/日期，逐条渐显
-            "decor": [
-                {"k": "rule", "x0": 370, "x1": 1550, "y": 604, "a": 0.20, "at": 0.55, "fade": 0.7},
-                {"k": "chapter", "x": 370, "y": 660, "text": "ORIGINAL", "size": 13,
-                 "a": 0.44, "at": 0.80, "fade": 0.6},
-                {"k": "chapter", "x": 370, "y": 700, "text": a.artist or "",
-                 "size": 22, "a": 0.66, "at": 1.05, "fade": 0.7},
-                {"k": "chapter", "x": 370, "y": 730,
-                 "text": ("VOCAL " + a.vocal if a.vocal else "") + ("  " + a.date if a.date else ""),
-                 "size": 14, "a": 0.36, "at": 1.35, "fade": 0.7},
-            ],
-            "post": [], "cam": {"k": "push", "amp": 0.55}, "fig": None, "wobble": 0,
-            "unified": False, "note": "title card (整段前奏)",
-        }]
-        shots = title_card + shots
+            "pal": {"pack": "noir", "idx": 0},
+            "bgl": [], "bg": [], "decor": [], "post": [],
+            "cam": {"k": "push", "amp": 0.7},
+            "fig": None, "sync": False, "wobble": 0, "unified": False,
+            "note": "title card",
+        })
         for k, s2 in enumerate(shots):
-            s2["i"] = k        # 片头插进来之后必须重排，否则 seeded rng 的键会撞
+            s2["i"] = k
 
-    # ---- 色彩反转：只给最高档章节，且只给其中一段
-    tiers_present = [s["tier"] for s in shots if s["kind"] == "line"]
-    if 4 in tiers_present:
-        idx4 = [k for k, s in enumerate(shots) if s["kind"] == "line" and s["tier"] == 4]
-        # 取该章节里连续的一段（不超过 3 句），让反转有「开始与结束」
-        inv = idx4[:min(3, len(idx4))]
-        for k in inv:
-            shots[k]["pal"] = PALETTE_INV
-            shots[k]["note"] += " · inverted"
+    # ---- 收口：镜头首尾相接
+    shots.sort(key=lambda s: s["t0"])
+    for i in range(len(shots) - 1):
+        shots[i]["t1"] = round(max(shots[i]["t0"] + 0.30, shots[i + 1]["t0"]), 3)
+        shots[i + 1]["t0"] = shots[i]["t1"]
+        shots[i + 1]["i"] = i + 1
+    if shots:
+        shots[-1]["t1"] = round(dur, 3)
 
     # ---- 直播序列
     live = None
@@ -766,54 +585,53 @@ def main():
         if lj.get("face"):
             live["face"] = lj["face"]
 
-    # ---- 收口：强制镜头首尾相接
-    # 源字幕的行尾常常拖过下一行开头（长尾/叠句），逐条去算 t1 永远会留下
-    # 0.1~3s 的缝或重叠；缝里是「上一句已退、下一句未出」的空画面。
-    # 与其在每条上打补丁，不如成稿后统一收口：第 i 镜的终点 = 第 i+1 镜的起点。
-    shots.sort(key=lambda s: s["t0"])
-    for i in range(len(shots) - 1):
-        nxt0 = shots[i + 1]["t0"]
-        shots[i]["t1"] = round(max(shots[i]["t0"] + 0.30, nxt0), 3)
-        shots[i + 1]["t0"] = shots[i]["t1"]
-        shots[i + 1]["i"] = i + 1
-    if shots:
-        shots[-1]["t1"] = round(dur, 3)
-
-    _band = fig_band_fix(shots)
-
     sb = {
-        "version": 1,
+        "version": 2,
         "meta": {
             "title": a.title, "artist": a.artist, "vocal": a.vocal,
             "source": a.source, "date": a.date,
             "seed": a.seed, "dur": dur, "fps": 60, "start": w0,
-            # 角落极淡标记：信息交给片头标题卡之后，全片只留这一行
-            "mark": " · ".join(x for x in (a.vocal, a.title) if x),
+            "mark": "",
         },
-        "palette": PALETTE,
+        "palette": {"pack": "noir", "idx": 0},
         "audio": {"bpm": ana["bpm"], "barSec": ana["bar_sec"],
-                  "sections": [[f["t0"] - w0, f["t1"] - w0, f["name"], f["tier"]] for f in feats]},
+                  "sections": [[s["t0"], s["t1"], s["name"]] for s in secs]},
         "lines": lines,
         "shots": shots,
     }
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(sb, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
-    # ---- 核对：行数、遮挡、档次分布
-    nl = sum(1 for s in shots if s["kind"] == "line")
-    print("[shots] %d 句 → %d 个镜头（含片头 %d），时长 %.2fs"
-          % (len(lines), len(shots), len(shots) - nl, dur))
+    # ---- 核对
     from collections import Counter
-    c = Counter(s["tier"] for s in shots if s["kind"] == "line")
-    print("[tier] %s" % dict(sorted(c.items())))
-    cu = sum(1 for s in shots if s.get("unified"))
-    print("[unify] 复用同一编排的重复句 %d 个" % cu)
-    nf = sum(1 for s in shots if s.get("fig"))
-    print("[figure] 出现人物层的镜头 %d 个（%.0f%%）" % (nf, 100.0 * nf / max(1, nl)))
-    if _band:
-        print("[band] 文字版心让开大幅人物 %d 个镜头" % len(_band))
-        for b in _band:
-            print("   #%s @%.1fs %s/%s → cx=%d availW=%.2f" % b)
+    nl = sum(1 for s in shots if s["kind"] == "line")
+    print("[shots] %d 句 → %d 镜（含片头 %d），%.2fs" % (len(lines), len(shots), len(shots) - nl, dur))
+    print("[layout] %s" % dict(Counter(s["layout"]["k"] for s in shots if s["kind"] == "line").most_common()))
+    print("[pal] %s" % dict(Counter("%s/%d" % (s["pal"]["pack"], s["pal"]["idx"]) for s in shots).most_common()))
+    # 换纸节奏：统计的是 **scheme**（pack/idx）连续段，不是 pack。
+    # pack 一个贯穿一整段是设计（noir 段就该一直是 noir 的字体人格）；
+    # 观众感知到的「换纸」来自 scheme —— 同一个 pack 里红纸与黑纸的切换。
+    segs, curpk, cnt = [], None, 0
+    for s in shots:
+        pk = "%s/%d" % (s["pal"]["pack"], s["pal"]["idx"])
+        if pk == curpk:
+            cnt += 1
+        else:
+            if curpk:
+                segs.append((curpk, cnt))
+            curpk, cnt = pk, 1
+    segs.append((curpk, cnt))
+    worst = max(c for _, c in segs)
+    # 阈值定 8 而不是 6：换纸只能发生在镜头边界，SWITCH_EVERY=24s 落地后
+    # 必然带一个镜头的余量（实测 24s 规则 → 最长 7 镜 ≈ 30s）。6 会恒定误报。
+    print("[paper runs] 最长同纸连续 %d 镜  共换纸 %d 次  %s"
+          % (worst, len(segs) - 1, "OK" if worst <= 8 else "WARN 换纸节奏偏慢"))
+    print("[paper runs] %s" % segs)
+    nf = sum(1 for s in shots if s["fig"])
+    print("[figure] 人物镜头 %d 个（%.0f%%）" % (nf, 100.0 * nf / max(1, nl)))
+    bad = fig_band_fix(shots)
+    if bad:
+        print("[warn] 有人物却用了满幅版面：%s" % bad)
     print("[out] %s  %.0fKB" % (a.out, os.path.getsize(a.out) / 1024.0))
 
 

@@ -22,16 +22,27 @@
 
   /* ---------------- 调色板 ---------------- */
   function buildStyle(pal, dpr) {
-    const ink = PV.hex(pal.ink || '#F2F6FA');
-    const paper = PV.hex(pal.paper || '#0A0D12');
+    /* 九角色（JIZURA 的 scheme 模型）：bg / fg / sub / accent / accent2 / ink / dim / ghostA / ghostB。
+       旧字段 paper / ink 仍兼容（上一版的编排稿还在），但新编排稿一律走 bg / fg。
+       这就是「一套配色」和「一套配色体系」的差别：
+       以前只有 paper + ink + accent 三个位置，能表达的层次只有三层。 */
+    const ink = PV.hex(pal.ink || pal.fg || '#F2F6FA');
+    const paper = PV.hex(pal.paper || pal.bg || '#0A0D12');
     const accent = PV.hex(pal.accent || '#FFB067');
+    const accent2 = PV.hex(pal.accent2 || pal.accent || '#FFFFFF');
+    const sub = PV.hex(pal.sub || pal.ink || '#BDB6B2');
+    const dim = PV.hex(pal.dim || pal.void || '#2A2A2E');
     const ghostA = PV.hex(pal.ghostA || '#39C6E0');
     const ghostB = PV.hex(pal.ghostB || '#C8373A');
-    const voidc = PV.hex(pal.void || '#000000');
+    const voidc = dim;
     return {
-      inkRGB: ink, paperRGB: paper, accentRGB: accent, ghostARGB: ghostA, ghostBRGB: ghostB, voidRGB: voidc,
+      inkRGB: ink, paperRGB: paper, accentRGB: accent, acc2RGB: accent2,
+      subRGB: sub, dimRGB: dim,
+      ghostARGB: ghostA, ghostBRGB: ghostB, voidRGB: voidc,
       ink: rgba(ink, 1), paper: rgba(paper, 1), accent: rgba(accent, 1),
+      acc2: rgba(accent2, 1), sub: rgba(sub, 1), dim: rgba(dim, 1),
       ghostA: rgba(ghostA, 1), ghostB: rgba(ghostB, 1),
+      flat: !!pal.flat, texture: pal.texture || null,
       /* 深底还是浅底，决定了「分离字与底」的手法完全不同：
          浅底靠描边（暗边压在纸上），深底靠加粗 + 硬投影。
          同一套 bag 用错底，会在字周围留一圈与背景同色的暗缝，笔画被吃掉 2~3px，
@@ -317,8 +328,9 @@
       ctx.restore();
 
       // 环：只有 disc 有，极细一圈；粗环会变成「头像框」
-      ctx.globalAlpha = 0.20 + en * 0.14;
-      ctx.strokeStyle = S.ink; ctx.lineWidth = 1.2;
+      /* 平涂底上要「硬边 + 硬线」：印刷品的图永远是切好的方块/圆，边缘带羽化就成了贴纸 */
+      ctx.globalAlpha = S.flat ? 0.62 : (0.20 + en * 0.14);
+      ctx.strokeStyle = S.ink; ctx.lineWidth = S.flat ? 2 : 1.2;
       ctx.beginPath(); ctx.arc(x, y, r + 0.8, 0, TAU); ctx.stroke();
       ctx.globalAlpha = clamp(a, 0, 1);
 
@@ -348,10 +360,20 @@
       ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
       if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, w, h, S, fig, 1), x, y, w, h);
       else drawCover(ctx, im, x, y, w, h, 1);
-      /* 底部压暗：只在 55%~100% 这一段渐变，用 1×256 的竖直贴图拉伸 */
-      ctx.drawImage(PV.fadeSprite('bandVig', S.voidRGB, [[0, 0], [1, 0.55]], true),
-        x, y + h * 0.55, w, h * 0.45);
+      /* 底部压暗：只在 55%~100% 这一段渐变，用 1×256 的竖直贴图拉伸。
+         平涂底上不要这层 —— 它会把下缘糊成一片脏灰，和「硬边印刷图」的语法相反。 */
+      if (!S.flat) {
+        ctx.drawImage(PV.fadeSprite('bandVig', S.voidRGB, [[0, 0], [1, 0.55]], true),
+          x, y + h * 0.55, w, h * 0.45);
+      }
       ctx.restore();
+      /* 平涂底：图框四周一道 2px 实线，读作「切好的版面元素」 */
+      if (S.flat) {
+        ctx.globalAlpha = 0.55;
+        ctx.strokeStyle = S.ink; ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+        ctx.globalAlpha = clamp(a, 0, 1);
+      }
     }
     ctx.restore();
   }
@@ -387,11 +409,48 @@
     return _paperC;
   }
 
+  /* 平涂底（JIZURA 的全部 style pack 都是「整幅一个颜色」）。
+     为什么必须平涂：渐变纸底会让每一个版面都自带一层「氛围」，
+     于是无论排什么字，观众读到的都是「那张纸」而不是「这个版面」。
+     JIZURA 的版面之所以立得住，正是因为底是哑的、平的、不参与叙事的。 */
+  let _flatC = null, _flatKey = null;
+  function flatCanvas(S, pal) {
+    const tx = pal.texture || {};
+    const key = (pal.bg || '') + '|' + (tx.scan || 0) + '|' + (tx.paper || 0) + '|' + (pal.pack || '');
+    if (_flatKey === key && _flatC) return _flatC;
+    const o = PV.offscreen('flatBase', PV.W, PV.H, 1);
+    o.ctx.fillStyle = rgba(S.paperRGB, 1);
+    o.ctx.fillRect(0, 0, PV.W, PV.H);
+    /* 扫描线：每 4px 一条 2% 的暗线。这是「显示器/印刷网屏」的味道，
+       只在 pack 声明 scan 时才加（crimson 0.4 / hud 0.2 / mono 0.3）。 */
+    if (tx.scan > 0.01) {
+      o.ctx.globalAlpha = 0.05 * tx.scan;
+      o.ctx.fillStyle = rgba([0, 0, 0], 1);
+      for (let y = 0; y < PV.H; y += 4) o.ctx.fillRect(0, y, PV.W, 1);
+      o.ctx.globalAlpha = 1;
+    }
+    /* 纸纹：确定性点阵（不能用随机，否则两遍渲染 md5 不同） */
+    if (tx.paper > 0.01) {
+      const rnd = PV.rng(9187, 3);
+      o.ctx.globalAlpha = 0.045 * tx.paper;
+      o.ctx.fillStyle = rgba([0, 0, 0], 1);
+      const n = Math.round(PV.W * PV.H / 900);
+      for (let k = 0; k < n; k++) {
+        const x = rnd() * PV.W, y = rnd() * PV.H;
+        o.ctx.fillRect(x, y, 1 + (rnd() > 0.8 ? 1 : 0), 1);
+      }
+      o.ctx.globalAlpha = 1;
+    }
+    _flatKey = key; _flatC = o.c;
+    return _flatC;
+  }
+
   function drawPaper(ctx, t, shot) {
     const S = (shot && shot._S) || ST.S;
     /* 纸色必须跟着「本镜头的调色板」走。只读全局 ST.sb.palette 的话，
        反转镜头的字变了色、纸还是深色 —— 反转事件等于没发生。 */
-    const pal = (shot && shot.pal) || ST.sb.palette || {};
+    const pal = (shot && shot._pal) || ST.sb.palette || {};
+    if (S.flat) { ctx.drawImage(flatCanvas(S, pal), 0, 0, PV.W, PV.H); return; }
     ctx.drawImage(paperCanvas(S, pal), 0, 0, PV.W, PV.H);
     /* 环境光：两团方向相反、周期互质的柔光缓慢漂移。
        一团光会读作「画面中间亮了一块」；两团互相穿过才有「空气在动」的错觉，
@@ -554,6 +613,13 @@
   function drawLyrics(ctx, shot, t) {
     const S = shot._S || ST.S;
     const lay = shot._lay;
+    const dur = Math.max(0.01, shot.t1 - shot.t0);
+    const lt = t - shot.t0;
+    const outDur = (shot.exit && shot.exit.dur != null) ? shot.exit.dur : 0.42;
+    /* 版面层：巨型暗影在最下，规则线/注记在字下，遮带在字上。
+       全部由 layout 自己产出 —— 这样「字和它的线」永远同源，不会各摆各的。 */
+    if (lay && PV.drawGiant) PV.drawGiant(ctx, lay.giant, lt, outDur, dur);
+    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'under');
     const glyphs = applyParts(shot, t);
     const base = paintFor(shot.treat && shot.treat.k);
     const emph = shot.treatEmph ? paintFor(shot.treatEmph.k) : base;
@@ -581,6 +647,7 @@
     if (shot.treatEmph) PV.drawGlyphs(ctx, glyphs.filter(g => g.emph), bindS(emph, specE));
     ctx.filter = 'none';
     ctx.globalAlpha = 1;
+    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'over');
   }
 
   /* ---------------- 背景层次 ----------------
@@ -712,13 +779,18 @@
        实现上用「延迟擦除」而不是 A/B 双层合成：逐帧顺序渲染时画布上已经有上一镜的
        画面，把它存成一张 cross 缓存即可，不必把上一镜重新渲一遍（4K 重渲要 40ms/帧）。 */
     crossFade(ctx, shot, t);
-    if (!(shot.post || []).some(f => f.k === 'vignette')) {
+    /* 平涂底（JIZURA 风格）不加暗角：暗角是「电影感」的语法，
+       而 JIZURA 的语法是「印刷品」—— 四角必须和中心一样平，版面才立得住。 */
+    /* 注意这里必须用**本镜头**的 S：renderAt 顶上的 S 是全局 ST.S，
+       它的 flat 永远是 undefined —— 拿它判会得到「平涂底照样压暗角」，
+       实测四角 155 vs 中心 236，一整片奶油底被压成脏灰。 */
+    if (!((shot._S || S).flat) && !(shot.post || []).some(f => f.k === 'vignette')) {
       /* 默认暗角：让画面四周沉下去，是「电影感」最便宜也最有效的一步 */
       /* 暗角 0.40 / r0 0.46：原来是 0.60，四角直接压成纯黑 ——
          背景纹理全部被吃掉，等于白做。 */
       PV.FX.vignette(ctx, { a: 0.40, r0: PV.H * 0.46, r1: PV.H * 1.10 }, { S });
     }
-    PV.drawGrain(ctx, 0, 0, PV.W, PV.H, 0.55, ST.dpr);
+    PV.drawGrain(ctx, 0, 0, PV.W, PV.H, (shot._S || S).flat ? 0.30 : 0.55, ST.dpr);
 
     /* 角落极淡标记：歌名/来源改成片头标题卡承载后，全片只留这一行。
        压在画面右下角、alpha 0.16 —— 存在但不抢戏，观众要看得到、平时看不见。 */
@@ -848,23 +920,33 @@
     ST.shots = (opt.storyboard.shots || []).slice().sort((a, b) => a.t0 - b.t0);
     let total = 0;
     for (const sh of ST.shots) {
-      const layFn = PV.LAYOUT[(sh.layout && sh.layout.k) || 'center'];
+      const layFn = (PV.LAYOUT_NEXT && PV.LAYOUT_NEXT[(sh.layout && sh.layout.k) || 'center'])
+        || PV.LAYOUT[(sh.layout && sh.layout.k) || 'center'];
       if (!layFn) continue;
       // line=-1 是片头标题卡：数组下标 -1 会取到最后一行，必须显式挡掉
       const line = (sh.line >= 0 ? LINES[sh.line] : null)
         || { text: sh.text || '', t0: sh.t0, t1: sh.t1, words: [], chars: [] };
+      /* 调色板必须先于构图解算：版面要拿九角色去画自己的线/注记/暗影。
+         编排稿里 pal 只写 {pack, idx}（30 字节），色值由 pv_scheme.js 解算 ——
+         改一个色值只改一处，不必回写 48 个镜头的 JSON。 */
+      sh._pal = sh.pal
+        ? (sh.pal.pack ? Object.assign({}, PV.STYLE(sh.pal.pack, sh.pal.idx | 0), sh.pal) : sh.pal)
+        : null;
+      sh._S = sh._pal ? Object.assign({}, ST.S, buildStyle(sh._pal, ST.dpr)) : ST.S;
       const stp = Object.assign({ line, text: (sh.text || line.text) }, sh.layout || {}, sh.type || {});
+      stp.pal = sh._pal || Object.assign({}, PV.STYLE('noir', 0));
       const r = fitShot(layFn(ctx, null, stp));
       /* sync：冲击型构图（密排墙/极限裁切/满幅大字）必须整块同时出现。
          沿用逐词时间的话，墙是一格一格长出来的 —— 读作「卡了」而不是「砸下来」。 */
       if (sh.sync) for (const g of r.glyphs) { g.t0 = sh.t0; g.t1 = sh.t1; }
       sh._lay = r;
       sh._en = sh.energy == null ? 0.5 : sh.energy;
-      // 逐镜头调色：全片只反转一次，所以这是一次「事件」而不是配色方案
-      sh._S = sh.pal ? Object.assign({}, ST.S, buildStyle(sh.pal, ST.dpr)) : ST.S;
       total += r.glyphs.length;
     }
     ST.stats = { glyphs: total, shots: ST.shots.length };
+    /* 调试口：抽帧探针要读每镜解算后的构图（巨影 bbox / 版心 / 人物占位），
+       不该让外部去重算一遍 —— 重算必然和真渲染漂移。只读，不参与渲染。 */
+    if (typeof window !== 'undefined') window.__pvShots = ST.shots;
 
     /* 只装载第一镜的帧；其余镜头在渲染循环里按需换装（见 holdShot）。
        暖机渲染不需要人物层 —— 它只是为了把字形栅格/贴图/pattern 先跑一遍。 */

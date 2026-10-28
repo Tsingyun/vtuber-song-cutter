@@ -235,3 +235,70 @@ node _tmp/pv/scan.cjs
 | 入场手法种类 | 1 主导演（`slam` 23/48 = 48%） | 11，`slam` 降到 8/48（17%） |
 | 切镜处帧差尖峰 | 16.8 | 4.0 ~ 5.6（14s 样片，逐帧均值差） |
 | 帧间差异 p95 | 3.70 | 4.17（更「活」，但无突变） |
+
+## 10. 第二轮重做：抄 JIZURA 的**设计层**（2026-10-29）
+
+第 9 节抄的是动效层（相机 / 入场 / 过渡）。动效补齐之后仍然「像 PPT」——
+问题不在动，在**版面**。第二轮把 JIZURA 的设计层整体移植过来，上一版的
+`pv_direct.py`（五档 energy 逐级加 buff）整个废弃。
+
+### 10.1 上一版的病根
+
+| 症结 | 表现 |
+|---|---|
+| 一句话 = 一个字块 | 48 镜里 40 镜是「居中 / 左对齐的一段大字」，只有字号与颜色在变 |
+| 配色只有三个位置 | `paper / ink / accent` + 一次色彩反转。没有「压进底色的巨影色」，所以做不出見切れ大文字 |
+| 全片共用一张渐变纸 | 每个镜头自带同一层氛围，观众读到的是**那张纸**，不是**这个版面**；且暗角把这层氛围统一成了「电影感」，与印刷语法冲突 |
+| 装饰由导演层拼 | 「字 + 线 + 编号」在 `pv_direct.py` 里组合，每加一种组合都要单独调坐标 |
+
+### 10.2 移植的四件事
+
+| 层 | 文件 | 内容 |
+|---|---|---|
+| **配色** | `renderer/player/pv/pv_scheme.js`（新） | 5 个 style pack × 2~3 套 scheme，九职能色 `bg/fg/sub/accent/accent2/ink/dim/ghostA/ghostB`；每 pack 带 `fonts{display,serif,body,mono}` 与 `texture{grain,paper,scan}`。`PV.STYLE(pack, idx)` 解算，`PV.onCol(pal, box)` 给色块上的反色字 |
+| **版面** | `renderer/player/pv/pv_typo.js`（新，13 个） | `titleCard / keySplit / cropGiant / lowerThird / cross / bandHide / indexTable / vRuler / scaleSteps / marginNote / fullTrack / block / center`。每个 layout 输出 `{glyphs, marks, giant}` —— **版面自己画自己的规则线 / 索引 / 注记 / 遮带 / 巨影** |
+| **底** | `pv_engine.js` 的 `flatCanvas()` | 平涂底 + 可选 `scan`（每 4px 一条 5%）/ `paper`（确定性点阵 `PV.rng(9187,3)`）。平涂底**不加暗角**，grain 降到 0.30 |
+| **导演** | `tools/pv_direct.py`（重写） | 段落 → `(pack, scheme)`；三种语气 `quiet/drive/peak` → 形态过滤后的版面池（`FIT`）→ 相邻去重 → 人物先定 → 版心让位 → 相机 |
+
+### 10.3 为什么只抄 5 / 12 个 pack
+
+JIZURA 有 12 个 pack（`noir/crimson/caution/magenta/paper/hud/mint/specimen/transit/blueprint/rouge/mono`）。
+这里留 `noir / crimson / paper / hud / mono`：**每个 pack 换一套字体人格**，
+232 秒里出现五种以上字体会读作拼贴而不是风格。`caution`（黄黑警戒）、
+`specimen`（标本标签）、`transit`（交通标识）这些太有「主题」，用在抒情歌上会抢戏。
+
+### 10.4 为什么只抄 13 / 60+ 个版面
+
+JIZURA 的 `11p_typo1 / 11p_layoutsA / 11p_layoutsB / 11p_layoutsC` 加起来 60 多个版面。
+这里留 13 个，判据是「**能不能在一句话之内自证是版面**」：
+
+- 保留：带索引/规则的（`vRuler` / `indexTable` / `marginNote` / `keySplit` / `titleCard`）、
+  带遮蔽的（`bandHide` / `cropGiant`）、带横带的（`lowerThird`）、纯字距的（`fullTrack` / `scaleSteps`）
+- 砍掉：需要**两屏联动**才成立的（`splitScreen` / `mirror` / `panels`）、
+  模仿**具体 UI** 的（`chat` / `notification` / `searchBar` / `ticket`）——
+  它们读作「截图」而不是「版面」，在一首歌里出现一次就把观众拉出戏
+
+### 10.5 全曲实测（48 镜 / 232s / 4K）
+
+| 指标 | 上一版 | 这一版 |
+|---|---|---|
+| 版面种类 | 1（`center` 系）+ 若干字号档 | **10 种**，最大单一占比 23%（`block` 11/48） |
+| 配色 | 3 个体裁位 + 1 次反转 | **7 套 scheme**（`paper/0` 12、`crimson/0` 9、`crimson/1` 7、`noir/0` 6、`paper/1` 6、`noir/1` 6、`paper/2` 2） |
+| 换纸节奏 | 无（全片一张渐变底） | 48 镜换纸 **10 次**，最长同纸 7 镜（原：crimson 连 13 镜不换） |
+| 真相邻同版面 | — | **0 对**（`block` 权重 4/3/2 → 2/2/1 之后从 2 对降到 0） |
+| 人物镜头 | 0（第一版）/ 全片同一种圆窗（第二版） | **24 / 48（51%）**，`disc/band/slab` × 左右两侧 |
+| 字块撞人 | — | **0**（`pv_audit.cjs` 逐镜判定 textBox × figBox） |
+| 标记撞人 | 未检查 | **0**（同脚本判定 marks 的规则线 / 编号 / 色块） |
+| 巨影失效镜 | 未检查 | **0**（9 镜，可见面积 23.8~36.1%） |
+
+### 10.6 两个「权重对了分布还是不对」的坑
+
+版面池的权重只是**入口**，真正决定分布的是 `FIT` 形态约束：
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| 副歌 12 镜里 5 镜都是 `cropGiant` | 长句把 `keySplit`(≤7 词) / `cross`(≤6) / `scaleSteps`(3~6) 全过滤掉，池里只剩巨影一家 | 每个语气池都必须留一个**万能落点**（`block`），否则长句段会把某一个版面抽成主语法 |
+| `lowerThird` 权重 5 却只出场 1 次 | 它不在 `FIG_SAFE` 里，而人物镜头占 51% —— 一半以上的镜头直接把它排除了 | 它本来就是「从画缘伸进版心的横带」，站到人的另一侧就不冲突。加进 `FIG_SAFE` + 侧向按人站位取反 |
+| `block` 占 29% 且多次 3~7s 内连出两次 | 它是唯一接得住长句的版面，天然被抽中偏多；而它又是最朴素的一个（无索引、无遮蔽） | 权重降到 2/2/1，多出的份额给带索引与遮蔽的版面 |
+
+**结论**：调分布不要只调权重。先问「这一句能进哪个池」——`FIT` 与 `FIG_SAFE` 才是闸门。

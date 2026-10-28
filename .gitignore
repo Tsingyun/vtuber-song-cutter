@@ -48,6 +48,7 @@ desktop.ini
 _tmp/
 _tmp_ctcseg/
 _tmpwav/
+_chk/
 _tmpctc/
 
 # ---- 每日检测报告（含本机绝对路径，属于运行时产物）----
