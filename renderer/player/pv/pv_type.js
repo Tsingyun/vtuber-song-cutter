@@ -322,6 +322,12 @@
 
     const out = [];
     const pad = W * 0.085;
+    /* 行距必须跟着字号走。原先固定 H*0.21（=227px）配 size 320 的两行，
+       基线只差 227 而字高约 230 —— 第二行直接骑到第一行的降部上，
+       末词像「砸」在句首（实测 181.4s 的 it 压在 don't 上）。
+       取 max(固定值, 1.12×size)，并把两行整体垂直居中。 */
+    const lh = Math.max(H * 0.21, size * 1.12);
+    const yTop = H * 0.50 - lh * 0.5 + size * 0.36;
     /* 右端限位：给了 cx/availW 说明右侧留给了人物，第二行「顶右」只能顶到版心右缘，
        不能再顶到画布右缘 —— 否则末词会被圆窗整个盖掉（实测 "life" 只剩 "lif"）。 */
     const xRight = (st.cx != null && st.availW)
@@ -333,7 +339,7 @@
       const w = PV.glyphWidth(g);
       // 第一行顶左、第二行顶右；宽度不够时退回左对齐，避免两行只剩一角
       const x = (ri === 0) ? pad : Math.max(pad, xRight - w);
-      const y = H * (0.40 + ri * 0.21);
+      const y = yTop + ri * lh;
       const wl = st.line.words.slice(ri ? cut : 0, ri ? words.length : cut);
       const wiOff = ri ? cut : 0;
       /* 词归属必须**按词的实字数**精确分配。原先用「平均每词几个字」估算

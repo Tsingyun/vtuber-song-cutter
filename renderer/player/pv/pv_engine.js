@@ -587,7 +587,13 @@
     const sb = ST.sb;
     const S = ST.S;
     const shot = shotAt(t);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    /* 复位到「设计坐标 × 输出倍率」，**不是单位矩阵**。
+       写成 setTransform(1,0,0,1,0,0) 时，4K 母版上整张画面只画在左上 1920×1080，
+       其余 3/4 是纯黑 —— 而且逐帧循环里毫无报错、码率和时长全对，只有肉眼看画面
+       才发现（2026-10-28 实际踩过，4K 母版整片作废，白跑 13 分钟）。
+       页面在 setup 里把输出倍率写进 PV.SCALE，这里必须沿用它。 */
+    const sc = PV.SCALE || 1;
+    ctx.setTransform(sc, 0, 0, sc, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     /* 整帧先铺底：相机 zoom<1 时纸底会缩进，露出的边框若不先铺色，
