@@ -29,7 +29,10 @@
   };
 
   /* ---------------- 标量 ---------------- */
-  PV.clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  /* a/b 必须有默认值：`clamp(8.78)` 在 JS 里 `8.78 < undefined` 和 `8.78 > undefined`
+     都是 false，于是原样返回 8.78 —— 再喂给 outCubic 得到 473 倍。相机层就是这么
+     炸的（orbit 的 x 跑到 8961px）。缺省即 [0,1]。 */
+  PV.clamp = (v, a, b) => { a = a == null ? 0 : a; b = b == null ? 1 : b; return v < a ? a : v > b ? b : v; };
   PV.lerp = (a, b, t) => a + (b - a) * t;
   PV.smoothstep = (a, b, x) => { const t = PV.clamp((x - a) / (b - a || 1e-6), 0, 1); return t * t * (3 - 2 * t); };
   PV.pulse = (t, period, phase) => 0.5 + 0.5 * Math.sin((t / period + (phase || 0)) * 6.283185307);

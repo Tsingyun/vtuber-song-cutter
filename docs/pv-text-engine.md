@@ -127,7 +127,7 @@ node _tmp/pv/scan.cjs
 
 | 项目 | 能不能用 | 结论 |
 |---|---|---|
-| **JIZURA** | 引擎可跑，风格不可控 | 自动分镜质量随随机波动（`jz_20` 读作 PPT）。**借鉴其「文字部件 + 自动编排」分层**，引擎自建。bundle 留在 `renderer/pv/vendor/`（已 gitignore），可作可选通道 |
+| **JIZURA**（`852wa/JIZURA`，v0.9.0，38MB） | 引擎可跑，风格不可控 | 把文字 PV 拆成 **10 组 / 860 部件 / 27 样式**（`layout / enter / hold / exit / decor / treat / bg / cam / fx / trans`），每 cut 独立选一件。自动分镜质量随随机波动（`jz_20` 读作 PPT）。**借鉴其分层与具体手法**（见第 9 节），引擎自建。bundle 留在 `renderer/pv/vendor/`（已 gitignore），可作可选通道 |
 | **Vocaloid-Style MV Pipeline** | 是 skill / 模板，不是引擎 | `jizura_adapter.js` + `06-jizura.md` 有参考价值（把编排拆成可配置步骤的思路）。代码未复用 |
 | **Phrasync** | 不可复用 | 依赖形态与本项目差异过大 |
 
@@ -190,3 +190,48 @@ node _tmp/pv/scan.cjs
 根因不是配色不够亮，而是**每层 alpha 被平方了**（`a * SAFE_A(a)`，0.16→0.026），
 九层叠起来不到 1/255。修掉之后同一套参数立刻有纸感；随后才谈得上加层：
 `mega`（巨型底字，给画面一个「沉默的声部」）、`edge`（版式线框，让留白读作留白）。
+
+---
+
+## 9. 对照 JIZURA：抄了什么、为什么、没抄什么（2026-10-28）
+
+参考实现：<https://github.com/852wa/JIZURA/>（`src/01_util.js` 缓动与确定性随机、
+`src/05_anim.js` enter/hold/exit 回调、`src/09_render.js` 双帧合成与相机、
+`src/11p_bgcamB.js` 12 相机 + 44 背景、`src/11p_treattrans.js` 20 过渡）。
+
+### 9.1 架构层面对齐的三件事
+
+| JIZURA 的做法 | 我们原来的状态 | 现在 |
+|---|---|---|
+| 每个 cut 从 **`J.register(group,key,def,pack)`** 里各选一件（10 组独立） | 有 layout/enter/hold/exit/treat/bg/decor/post，**没有 cam** | 补齐 cam（`pv_cam.js`），并给 cam 加了 tier 池 + 相邻去重 + 全局配额 |
+| 部件用**回调**（`it.charFns` / `pieceFns`）拿 `(g, p, i)` 逐字/逐片算 | 已是回调（`PV.ENTER/HOLD/EXIT`） | 不变，只加 `rowClamp` 兜住「跨行掉字」 |
+| `J.E` 缓动库（`outExpo/outBack/outElastic/inOutExpo`） | 有 outCubic/outQuint/outBack | 新增 `outExpo` 用于 `assemble`，`bounceAt` 用于 `dropBounce` |
+
+### 9.2 抄了的手法（都在用）
+
+| 手法 | JIZURA 出处 | 我们的落地 |
+|---|---|---|
+| `assemble`：散片飞入 + **`outExpo` 末段急停** | `J.ENTER.assemble`（`spread = size*3.2`） | `E.assemble`（`dist = size*2.4`，随机角度 + 轻旋） |
+| 每镜慢推 `1.00 → 1.03` | `J.CAMERA.push` 默认行为 | `C.push`：`1.002 → 1.04×amp`，实测 push 类 s 从 1.0028 到 1.017 |
+| 相机噪声漂移 | `J.noise1` / `floatNoise` | `C.float` / `C.drift`（一维平滑值噪声，seed 由 `shot.i` 决定） |
+| 逐片爆散退场 | `J.EXIT.explode/fall/drift` | 已有 `PV.EXIT.scatter/fall/blurOut`，本轮未改（够用） |
+| 双帧合成过渡 | `J.TRANS[cut.trans].draw(ctx,A,B,p)` | 我们用**更便宜的一条**：逐帧渲染时画布上本来就有上一镜 → 退场前存 `XC` 快照，下一镜前 0.22s 擦掉。见 9.3 |
+
+### 9.3 没抄的，以及理由
+
+| JIZURA 有 | 我们的选择 | 理由 |
+|---|---|---|
+| **20 种 trans**（`cubeTurn` / `shatterTiles` / `inkBlob` / `pixelate` …） | 只用「左右延迟擦除 + accent 亮线」 | 它每镜都走 `TRANS`，A 帧要**重渲一遍上一镜**再合成；我们是顺序渲染 13931 帧，成本翻倍。且抽帧实测：四方向 + 0.32s 的版本会把片头标题**拦腰横切**、A/B 交错读作「画面没刷新」。收敛到左右各一 + 0.22s + `1-(1-q)^2.2` 之后，切镜处的帧差尖峰从 16.8 降到 4.0/5.6 |
+| **44 种背景** | 加了 `topo`（等高线自转）与 `rays`（光芒摆动）两种，按 tier 概率接入（tier≤1 0.62 / tier2 0.55 / tier3 0.45） | 背景层已有 12 种 + 烘焙场，再多会变成「每镜都在换滤镜」。日本 PV 的层次感来自**同一底子上的缓慢差异**，不是每镜换背景 |
+| **18 族日文字体，全量预载** | 只加载当前编排**实际用到的**（`PV.FACES` + `warmFonts(实际歌词)`） | 全量预载在 4K 长片上是几十秒的空白启动；而且字体是分 unicode-range 的，英文歌请求日文分片纯属浪费（RULES §56 的误报就是这么来的） |
+| `J.rng` mulberry32 + 运行期随机 | 全部随机量在**排版期**一次算定（`PV.rng(seed, shot.i, k)`），渲染期零随机 | 交付要求「同一 t 两次渲染字节一致、同一 job 渲两遍 md5 相同」。运行期 RNG 会破坏这条 |
+
+### 9.4 量化对照（本轮实测）
+
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| 镜头内有运动的镜头 | 0 / 48（只有常量 zoom/shake） | **48 / 48**（最小位移 0.0142W，0 个露边） |
+| 相机手法种类 | 1（常量缩放） | 10，实际分布 `orbit13 / float11 / push10 / pendulum5 / focusIn4 / tiltDown2 / snapPan2 / jelly1` |
+| 入场手法种类 | 1 主导演（`slam` 23/48 = 48%） | 11，`slam` 降到 8/48（17%） |
+| 切镜处帧差尖峰 | 16.8 | 4.0 ~ 5.6（14s 样片，逐帧均值差） |
+| 帧间差异 p95 | 3.70 | 4.17（更「活」，但无突变） |

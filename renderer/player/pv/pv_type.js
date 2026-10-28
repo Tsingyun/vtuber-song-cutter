@@ -287,7 +287,7 @@
       const wref = st.line.words[k] || { t0: st.line.t0, t1: st.line.t1 };
       for (const q of g) { q.t0 = wref.t0; q.t1 = wref.t1; q.wi = k; }
       const off = st.stair ? k * size * 0.42 : 0;            // 阶梯错位
-      for (const q of g) { q.x += x + off; q.y = y; }
+      for (const q of g) { q.x += x + off; q.y = y; q.row = k; q.rowGap = lh; }
       out.push(...g);
       y += lh;
     });
@@ -333,12 +333,19 @@
     const xRight = (st.cx != null && st.availW)
       ? Math.min(W - pad, st.cx + W * st.availW / 2)
       : W - pad;
+    /* 左端同样要限位：cx/availW 定义的是「文字版心」这条带子，不是只管右边界。
+       原实现第一行永远从 pad 起，于是「左边站着一个 slab 人物」时，
+       整行字直接压在人脸上（实测 43.3s 的 split：This moment 正好盖住眼睛）。
+       给了 cx 就两头都按版心收，字才会真的让开人物。 */
+    const xLeft = (st.cx != null && st.availW)
+      ? Math.max(pad, st.cx - W * st.availW / 2)
+      : pad;
     [[r1, 0, pad], [r2, 1, null]].forEach(([rowTxt, ri, fixedX]) => {
       if (!rowTxt) return;
       const g = PV.buildGlyphs(ctx, st.line, Object.assign({}, st, { size, text: rowTxt }));
       const w = PV.glyphWidth(g);
       // 第一行顶左、第二行顶右；宽度不够时退回左对齐，避免两行只剩一角
-      const x = (ri === 0) ? pad : Math.max(pad, xRight - w);
+      const x = (ri === 0) ? xLeft : Math.max(xLeft, xRight - w);
       const y = yTop + ri * lh;
       const wl = st.line.words.slice(ri ? cut : 0, ri ? words.length : cut);
       const wiOff = ri ? cut : 0;
@@ -358,6 +365,9 @@
           ci++;
         }
         q.x += x; q.y = y;
+        /* rowGap 供入场动效做「不跨行」约束（pv_engine 的 rowClamp）。
+           没有这个标注时，dropBounce 会让第二行的词穿过第一行掉下来。 */
+        q.row = ri; q.rowGap = lh;
       }
       out.push(...g);
     });

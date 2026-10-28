@@ -200,13 +200,59 @@
     g.alpha = clamp(e * 3, 0, 1); g.dy = -(1 - k) * g.size * 0.55;
   };
 
-  /* 砸下：起手超出画幅再压回来，重拍专用 */
+  /* 砸下：起手超出画幅再压回来，重拍专用。
+     2 倍（原来 3 倍）就够「砸」了 —— 3 倍起手再配合 48% 的镜头占比，整片读作
+     「每一句都在往前推」，那是廉价感的另一个来源。落地给一点点过冲（outBack），
+     让字是「落定」而不是「停死」。 */
   E.slam = (g, e) => {
-    const k = ease.outQuint(e);
-    g.alpha = clamp(e * 4, 0, 1);
-    g.sc = lerp(3.0, 1, k);
-    g.dy = -(1 - k) * g.size * 0.05;
+    const k = ease.outBack(e);
+    g.alpha = clamp(e * 3.2, 0, 1);
+    g.sc = lerp(1.85, 1, k);
+    g.dy = -(1 - k) * g.size * 0.06;
   };
+
+  /* 从「散」到「聚」的优雅版：受 JIZURA 的 assemble 启发。
+     关键差别不在位移，而在**末段的急停**（outExpo 前 30% 就走完 70% 路程）——
+     outCubic 匀速收尾会读作「飘过来」，outExpo 才读作「归位」。 */
+  E.assemble = (g, e, rnd, rnd2) => {
+    const k = ease.outExpo(e);
+    const dist = g.size * 2.4;
+    const ang = rnd * 6.283185307;
+    g.alpha = clamp(e * 2.6, 0, 1);
+    g.dx = Math.cos(ang) * dist * (1 - k);
+    g.dy = Math.sin(ang) * dist * 0.72 * (1 - k);
+    g.rot = (rnd2 - 0.5) * 1.15 * (1 - k);
+    g.sc = lerp(1.75, 1, k);
+  };
+
+  /* 柔和升起：整句从「略大且略低」收到位，几乎看不出动作，但画面永远是活的。
+     用于最安静的段落 —— 那里放大动作反而破坏情绪。 */
+  E.softIn = (g, e) => {
+    const k = ease.outExpo(e);
+    g.alpha = Math.pow(clamp(e, 0, 1), 0.72);
+    g.sc = lerp(1.15, 1, k);
+    g.dy = (1 - k) * g.size * 0.09;
+  };
+
+  /* 落体：带一次真实回弹（bounce 曲线），落地的挤压比砸下更「物理」。
+     起始高度 1.9→1.45×size、拉伸 0.42→0.26：1.9 倍在行距紧的排版里会让字
+     从上一行的位置掉下来（半透明 + 拉长），读作两行字绞在一起。
+     1.45 倍仍然读得出「掉」，但落点始终落在自己那一行的范围内。 */
+  E.dropBounce = (g, e, rnd) => {
+    const q = clamp((e - rnd * 0.10) / (1 - rnd * 0.10), 0, 1);
+    const b = bounceAt(q);
+    g.alpha = clamp(q * 5, 0, 1);
+    g.dy = -(1 - b) * g.size * 1.45;
+    g.sy = 1 + (1 - q) * 0.26;
+    g.sx = 1 - (1 - q) * 0.10;
+  };
+  function bounceAt(x) {
+    const n1 = 7.5625, d1 = 2.75;
+    if (x < 1 / d1) return n1 * x * x;
+    if (x < 2 / d1) { x -= 1.5 / d1; return n1 * x * x + 0.75; }
+    if (x < 2.5 / d1) { x -= 2.25 / d1; return n1 * x * x + 0.9375; }
+    x -= 2.625 / d1; return n1 * x * x + 0.984375;
+  }
 
   E.scalePop = (g, e) => {
     g.alpha = clamp(e * 3, 0, 1);

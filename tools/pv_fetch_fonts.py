@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import subprocess
+import time
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -42,6 +43,16 @@ FAMILIES = [
     # 超窄全大写：版面上「一行顶满」的重体，和 Archivo Black 的浑厚形成体型反差
     ("Bebas+Neue", "bebasneue", "OFL_bebasneue.txt",
      "https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/OFL.txt"),
+    # 参考 JIZURA（852wa/JIZURA）的字体表：它的 18 族里最常出现的是「日系笔触」——
+    # Klee One 是教科书体，写起来像铅笔稿，独白段用它比用黑体更像「写在纸上」；
+    # Shippori Mincho B1 是日本印刷品最常用的明朝，比 Zen Old Mincho 更「活字」。
+    # 这一族一直在 PV.FACES 里（sans / sansMed / sansLt），但从没进过抓取清单 ——
+    # 于是所有中等粗细的段落都 fallback 到 Noto Sans SC，字形偏「网页」。
+    # 用户说的「部分段落字体廉价」，一部分就是它。
+    ("Zen+Kaku+Gothic+New:wght@500;700;900", "zenkakugothicnew", "OFL_zenkakugothicnew.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/zenkakugothicnew/OFL.txt"),
+    # 注意：本机代理下 fonts.gstatic.com 偶发 rc=35（SSL connect），全量重抓会失败。
+    # 只抓需要的族：`--only zenkakugothicnew`。
 ]
 
 CSS_URL = "https://fonts.googleapis.com/css2?family=%s&display=block"
@@ -49,11 +60,22 @@ CSS_URL = "https://fonts.googleapis.com/css2?family=%s&display=block"
 
 # 本机开着 Clash（http_proxy/https_proxy 指向本地端口），但 urllib 走 CONNECT 隧道会 502，
 # 而 curl 直连正常，所以统一走 curl 子进程（Windows 自带 curl.exe）。
-def get(url, binary=False):
-    r = subprocess.run(["curl", "-sL", "--fail", "-A", UA, url], capture_output=True)
-    if r.returncode != 0:
-        raise RuntimeError("curl rc=%d %s :: %s" % (r.returncode, url[:90], r.stderr[:200]))
-    return r.stdout if binary else r.stdout.decode("utf-8")
+def get(url, binary=False, tries=6):
+    """curl 直连（本机代理对 gstatic 偶发 rc=35 SSL connect），必须带重试。
+
+    实测全量抓 400 个分片时，不重试几乎必挂：单个分片有 3~5% 概率 SSL 握手失败，
+    400 次里有 15+ 次 ⇒ 整个族前功尽弃。重试是唯一稳的办法（同一 URL 立刻重试
+    通常就能过，不是持续性故障）。已存在的分片直接跳过，所以重跑是断点续传。
+    """
+    last = ""
+    for k in range(tries):
+        r = subprocess.run(["curl", "-sL", "--fail", "--connect-timeout", "20",
+                            "--max-time", "120", "-A", UA, url], capture_output=True)
+        if r.returncode == 0:
+            return r.stdout if binary else r.stdout.decode("utf-8")
+        last = "curl rc=%d %s :: %s" % (r.returncode, url[:90], r.stderr[:120])
+        time.sleep(0.8 + 0.6 * k)
+    raise RuntimeError(last)
 
 
 def main():
@@ -101,6 +123,21 @@ def main():
     # 汇总一份 fonts.css，页面只需引一次
     head = ("/* 自托管字体（OFL），由 tools/pv_fetch_fonts.py 生成，勿手改。\n"
             "   许可证文本在各子目录内。 */\n")
+    # `--only` 只重抓某几族时，其它族必须沿用磁盘上已有的 fonts.css ——
+    # 否则汇总文件会被写成「只有这一族」，页面其余字体全部静默 fallback，
+    # 而启动日志只会少几族、不报任何错（实测踩过一次）。
+    done = set(only) if only else set(s for _, s, _, _ in FAMILIES)
+    for _, slug, _, _ in FAMILIES:
+        if slug in done:
+            continue
+        fp = os.path.join(a.out, slug, "fonts.css")
+        if os.path.exists(fp):
+            chunks.append(open(fp, encoding="utf-8").read())
+            done.add(slug)
+            print("[keep] %-16s 沿用已有 fonts.css" % slug)
+    missing = [s for _, s, _, _ in FAMILIES if s not in done]
+    if missing:
+        print("[warn] 这些族没有 fonts.css，会 fallback 到 Noto：%s" % ", ".join(missing))
     open(os.path.join(a.out, "fonts.css"), "w", encoding="utf-8", newline="\n").write(head + "\n".join(chunks))
     print("[out] %s  fonts.css 合计 %.1f MB" % (a.out, total / 1048576.0))
 

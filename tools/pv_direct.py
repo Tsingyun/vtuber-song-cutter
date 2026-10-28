@@ -31,23 +31,23 @@ import numpy as np
 TIERS = {
     0: dict(face=["didoneLt", "minchoLt", "sansLt"], track=0.050, sizeK=0.62, squeeze=1.0,
             layout=["center", "corner", "justify"],
-            enter=["fadeSlow", "rise"], hold=["none", "breathe"],
+            enter=["softIn", "fadeSlow", "rise"], hold=["none", "breathe"],
             exit=["fade"], treat=["solid", "bag", "solid"], fig=0.14),
     1: dict(face=["didone", "mincho", "sansMed"], track=0.018, sizeK=0.76, squeeze=1.0,
             layout=["center", "justify", "corner", "mixed"],
-            enter=["sliceDown", "rise", "typeOn"], hold=["drift", "breathe"],
+            enter=["softIn", "sliceDown", "rise", "dropBounce"], hold=["drift", "breathe"],
             exit=["fadeUp", "fade"], treat=["solid", "bag", "shadowSolid"], fig=0.34),
     2: dict(face=["sans", "grotesk", "didone", "tall"], track=-0.012, sizeK=0.88, squeeze=1.0,
             layout=["stack", "split", "justify", "diagonal", "mixed"],
-            enter=["stretchIn", "sliceUp", "scalePop"], hold=["drift", "wave"],
+            enter=["assemble", "stretchIn", "dropBounce", "scalePop", "sliceUp"], hold=["drift", "breathe", "wave"],
             exit=["fadeUp", "blurOut"], treat=["bag", "shadowSolid", "solid"], fig=0.56),
     3: dict(face=["heavy", "grotesk", "tall"], track=-0.032, sizeK=1.0, squeeze=0.90,
             layout=["centerBig", "band", "megaCrop", "dense", "mixed", "split"],
-            enter=["slam", "typeOn", "sliceDown"], hold=["wave", "jitter"],
+            enter=["slam", "assemble", "sliceDown", "typeOn"], hold=["wave", "jitter", "drift"],
             exit=["scatterOut", "flatten"], treat=["bag", "shadowSolid", "bag"], fig=0.74),
     4: dict(face=["heavy", "condensed", "tall"], track=-0.046, sizeK=1.16, squeeze=0.86,
             layout=["megaCrop", "column", "dense", "centerBig", "split"],
-            enter=["scatterIn", "spinIn", "slam"], hold=["jitter", "flutter"],
+            enter=["scatterIn", "spinIn", "slam", "dropBounce"], hold=["jitter", "flutter", "wave"],
             exit=["scatterOut", "dissolve"], treat=["bag", "shadowSolid", "bag"], fig=0.70),
 }
 
@@ -59,6 +59,18 @@ HOLLOW = {"outline", "outlineThick", "double"}
 
 # 「事件型」构图：只在短句上用。长句一旦套上这些，画面会僵在那个状态十几秒。
 IMPACT = {"dense", "megaCrop", "centerBig", "band"}
+
+# 相机：手法按档位取（对齐 JIZURA 的 CAMERA 分组）。
+# 低档要「几乎看不出在动」但确实在动 —— 慢推和浮游就是这个作用；
+# 高档才允许甩镜和弹性，且全局限次：甩超过两次就不叫「甩」，叫「抖」。
+CAM_BY_TIER = {
+    1: [("push", 3), ("drift", 2), ("float", 2)],
+    2: [("push", 3), ("float", 2), ("orbit", 1), ("tiltDown", 1)],
+    3: [("pendulum", 2), ("orbit", 2), ("float", 2), ("focusIn", 1), ("push", 1)],
+    4: [("jelly", 2), ("snapPan", 1), ("pendulum", 2), ("push", 1)],
+}
+CAM_QUOTA = {"snapPan": 2, "jelly": 4}
+CAM_AMP = {1: 0.9, 2: 0.95, 3: 1.05, 4: 1.15}
 
 # 纸底不能是纯黑。#0A0D12 在 4K 屏上就是「关掉的显示器」——白字压上去毫无依托。
 # 提到 #0F131A 并把第二色偏冷，画面才有一层可读的中间调；暗角也才有东西可压。
@@ -275,11 +287,21 @@ def bg_layers(tier, r, txt="", title=""):
         out.append({"k": "wash", "n": 3, "a": 0.22})
         out.append({"k": "hatch", "a": 0.17})
         out.append(halftone_block(corner, 0.46, 0.22))
+        # 等高线（参考 JIZURA 的 topoLines）：慢速自转的「地形」，给安静的段落一点纵深。
+        # 只在低档用 —— 高档已经有三层纹理，再加会糊成一片。
+        if r.random() < 0.62:
+            out.append({"k": "topo", "rings": 11, "a": 0.135, "r": 1.15,
+                        "spin": 0.0075, "x": 0.62 if corner % 2 else 0.38, "y": 0.46})
     elif tier == 2:
         out.append({"k": "wash", "n": 4, "a": 0.22})
         out.append({"k": "grid", "a": 0.15, "step": 72})
         out.append(halftone_block(corner, 0.54, 0.24))
         out.append({"k": "leak", "side": side, "a": 0.22, "y": 0.08})
+        # 光芒（JIZURA 的 godRays）：一束极宽的光斜切进来，随镜头摆动
+        if r.random() < 0.55:
+            out.append({"k": "rays", "n": 13, "a": 0.15, "x": 0.42, "y": 0.20,
+                        "r": 1.30, "rot": -18 if side == "l" else 18,
+                        "ph": round(float(r.random()) * 6.28, 2)})
     elif tier == 3:
         out.append({"k": "wash", "n": 3, "a": 0.21})
         out.append({"k": "halftone", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
@@ -287,6 +309,9 @@ def bg_layers(tier, r, txt="", title=""):
         out.append({"k": "panel", "x": 0.72, "y": 0.24, "w": 0.52, "h": 0.20,
                     "rot": -13, "a": 0.22})
         out.append({"k": "leak", "side": "r", "a": 0.24, "y": 0.10})
+        if r.random() < 0.45:
+            out.append({"k": "topo", "rings": 13, "a": 0.115, "r": 1.25,
+                        "spin": -0.008, "x": 0.5, "y": 0.5})
     else:
         out.append({"k": "ink", "n": 4, "a": 0.34})
         out.append({"k": "halftone", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
@@ -300,6 +325,35 @@ def bg_layers(tier, r, txt="", title=""):
     if tier >= 2:
         out.append({"k": "edge", "a": 0.15, "m": 0.052})
     return out
+
+
+def fig_band_fix(shots, w=1920):
+    """把「大幅人物 + split」镜头的文字版心推到人物对面那一侧。
+
+    为什么需要这一趟：split 的 cx/availW 原来只被用来限右边界，第一行永远从
+    pad（0.085W）起排 —— 于是左边站一个 slab 人物时，整行字直接压在人脸上
+    （实测 43.3s 的 This moment 正好盖住眼睛，读作事故而不是版面）。
+    pv_type.js 的 split 现在两头都按版心收，这里负责把版心给对。
+
+    幂等：已是目标值的镜头会被跳过，重复执行不会累积修改。
+    """
+    BIG = ("band", "slab", "ghost", "crop")
+    changed = []
+    for s in shots:
+        f = s.get("fig")
+        lay = s.get("layout") or {}
+        if not f or lay.get("k") != "split" or f.get("mode") not in BIG:
+            continue
+        side = f.get("side") or "r"
+        cx = int(round(w * (0.66 if side == "l" else 0.34)))
+        aw = round(min(float(lay.get("availW", 0.74)), 0.52), 3)
+        if lay.get("cx") == cx and abs(float(lay.get("availW", 0)) - aw) < 1e-6:
+            continue
+        lay["cx"] = cx
+        lay["availW"] = aw
+        s["layout"] = lay
+        changed.append((s.get("i"), round(s.get("t0", 0), 2), f.get("mode"), side, cx, aw))
+    return changed
 
 
 def fig_script(tier, layk, r):
@@ -431,6 +485,8 @@ def main():
     unify = {}
 
     shots = []
+    last_cam = [""]          # 相邻镜头不重复同一手法
+    cam_used = {}            # 全局配额（snapPan / jelly）
     for i, l in enumerate(lines):
         prev_txt = lines[i - 1]["text"] if i else ""
         tier, sec = tier_at(l["t0"] + w0)
@@ -509,7 +565,13 @@ def main():
         # 入场：节奏越强，错开越小（重拍要「一起砸下来」）
         ent = {"k": entk}
         if entk in ("slam", "typeOn"):
-            ent.update(dur=0.16, stagger=0.0, lead=0.02)
+            ent.update(dur=0.20, stagger=0.0, lead=0.02)
+        elif entk == "softIn":
+            ent.update(dur=0.62, stagger=0.018, lead=0.10)
+        elif entk == "assemble":
+            ent.update(dur=0.46, stagger=0.028, lead=0.09)
+        elif entk == "dropBounce":
+            ent.update(dur=0.54, stagger=0.035, lead=0.06)
         elif entk in ("sliceDown", "sliceUp", "stretchIn"):
             ent.update(dur=0.30, stagger=0.045, lead=0.05)
         elif entk in ("scatterIn", "spinIn"):
@@ -595,8 +657,28 @@ def main():
         if tier >= 3 and r.random() < 0.30:
             post.append({"k": "flash", "at": round(t0 + 0.02, 3), "decay": 0.10, "a": 0.22})
 
-        shake = round((0.6 + 1.6 * r.random()) * (tier >= 3), 2) if tier >= 3 else 0.0
-        cam = {"shake": shake} if shake else {"zoom": 0.012 * (tier - 1) if tier >= 2 else 0}
+        # 相机：每个镜头都必须有一台在动的机器（静止的镜头连起来就是幻灯片）。
+        # 手法按档位取，且**相邻不重复** —— 连续两支 pendulum 会把「摆动」读成「画面歪了」。
+        pool, alt = [], []
+        for _k, _w in CAM_BY_TIER[tier]:
+            alt += [_k] * _w
+            if _k != last_cam[0]:
+                pool += [_k] * _w
+        if not pool:
+            pool = alt
+        camk = r.choice(pool)
+        if camk in CAM_QUOTA:
+            if cam_used.get(camk, 0) >= CAM_QUOTA[camk]:
+                camk = "push"
+            else:
+                cam_used[camk] = cam_used.get(camk, 0) + 1
+        last_cam[0] = camk
+        cam = {"k": camk, "amp": round(CAM_AMP[tier] * (0.85 + 0.3 * r.random()), 3)}
+        if camk == "snapPan":
+            cam["at"] = round(0.42 + 0.16 * r.random(), 3)
+        if camk == "jelly" and entk != "slam":
+            cam["k"] = camk = "push"
+
 
         shots.append({
             "i": len(shots), "t0": round(t0, 3), "t1": round(t1, 3),
@@ -654,7 +736,7 @@ def main():
                  "text": ("VOCAL " + a.vocal if a.vocal else "") + ("  " + a.date if a.date else ""),
                  "size": 14, "a": 0.36, "at": 1.35, "fade": 0.7},
             ],
-            "post": [], "cam": {"zoom": -0.006}, "fig": None, "wobble": 0,
+            "post": [], "cam": {"k": "push", "amp": 0.55}, "fig": None, "wobble": 0,
             "unified": False, "note": "title card (整段前奏)",
         }]
         shots = title_card + shots
@@ -697,6 +779,8 @@ def main():
     if shots:
         shots[-1]["t1"] = round(dur, 3)
 
+    _band = fig_band_fix(shots)
+
     sb = {
         "version": 1,
         "meta": {
@@ -726,6 +810,10 @@ def main():
     print("[unify] 复用同一编排的重复句 %d 个" % cu)
     nf = sum(1 for s in shots if s.get("fig"))
     print("[figure] 出现人物层的镜头 %d 个（%.0f%%）" % (nf, 100.0 * nf / max(1, nl)))
+    if _band:
+        print("[band] 文字版心让开大幅人物 %d 个镜头" % len(_band))
+        for b in _band:
+            print("   #%s @%.1fs %s/%s → cx=%d availW=%.2f" % b)
     print("[out] %s  %.0fKB" % (a.out, os.path.getsize(a.out) / 1024.0))
 
 

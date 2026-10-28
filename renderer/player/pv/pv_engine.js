@@ -444,8 +444,29 @@
        双重计时 —— 实测 34 字的行要多等 1.5s 才铺满，而整句只有 3.6s，
        结果「唱完了字还没出齐」（t=24 的 diagonal 镜头整行只剩一两个笔画）。
        所以：有逐字轴 → 错相交给唱点；没有逐字轴（整行同 t0）→ 才用 stagger。 */
+    /* 每镜一个「词节奏」：整句在前 30% 时长内出齐，上限 0.26s/词（不抢戏），
+       下限 0.06s/词（再快就成一起出现了）。 */
+    let maxWi = 0;
+    for (const gg of glyphs) if (gg.wi != null && gg.wi > maxWi) maxWi = gg.wi;
+    const wantBy = Math.max(0.45, (shot.t1 - shot.t0) * 0.30);
+    const PACE = Math.max(0.06, Math.min(0.26, wantBy / Math.max(1, maxWi)));
     const rnd1 = []; const rnd2 = [];
     for (let i = 0; i < glyphs.length; i++) { rnd1.push(rndA()); rnd2.push(rndB()); }
+
+    /* 行距约束：多行排版里，入场位移与纵向拉伸都不许跨到相邻行。
+       dropBounce 起手在 -1.9×size，而 split 的行距只有 1.12~2.6×size ——
+       第二行的词是「穿过第一行」掉下来的：半透明 + 纵向拉长 1.4 倍，
+       两行字在半空中绞在一起（实测 20.0s 的 split 镜头，读作排版坏了）。
+       规则：纵向位移 ≤ 行距 38%，纵向拉伸让字高留在行距 84% 以内。
+       单行排版（无 rowGap）不受限，那里位移大反而是力度。 */
+    const rowClamp = g => {
+      const gap = g.rowGap;
+      if (!(gap > 0)) return;
+      const lim = gap * 0.38;
+      if (g.dy > lim) g.dy = lim; else if (g.dy < -lim) g.dy = -lim;
+      const maxSy = (gap * 0.84) / Math.max(1, g.size * 0.72);
+      if (g.sy > maxSy) g.sy = maxSy;
+    };
 
     for (let i = 0; i < glyphs.length; i++) {
       const g = glyphs[i];
@@ -464,11 +485,45 @@
          四个词铺了 4 秒），于是整句大部分时间画面上只有一个词，读作「卡住了」。
          规则：每个词最多只比**前一个词**晚 0.26s 出场 —— 句子在开头 1 秒内搭好，
          之后靠 size/颜色/保持动作继续动，而不是靠「一个字一个字蹦」。 */
-      const gT0 = charAxis ? Math.min(g.t0, shot.t0 + 0.10 + (g.wi || 0) * 0.26) : g.t0;
-      const inT0 = (charAxis ? gT0 : shot.t0) - LEAD + (charAxis ? 0 : STAG * idx);
+      /* 节奏上限还要**随句长自适应**：固定 0.26s/词 在 12 个词的长句上要铺 3.1s，
+         镜头才 4.7s —— 观众看到的是「第一行满了、第二行只有一个词」，读作排版坏了
+         （实测 20.0s 的 split 镜头就是 this）。改成「整句在镜头前 30% 时间里出齐」：
+         短句仍是 0.26s/词，长句自动压到 0.1s/词，节奏跟着句子密度走而不是跟着词数走。 */
+      const gT0 = charAxis
+        ? Math.min(g.t0, shot.t0 + 0.10 + (g.wi || 0) * PACE)
+        : g.t0;
+      /* 错相不等距：等距 stagger 读作「均匀打字机」，加一点随机让字像是被甩进来的。
+         幅度只 ±38%，不会破坏「整句一起出现」的节奏感。 */
+      const inT0 = (charAxis ? gT0 : shot.t0) - LEAD
+                 + (charAxis ? 0 : STAG * idx * (0.62 + 0.76 * rnd1[i]));
       const e = clamp((t - inT0) / EN_DUR, 0, 1);
       if (e <= 0) { g.vis = 0; continue; }
       re(g, e, rnd1[i], rnd2[i], enter);
+      rowClamp(g);
+
+      /* 运动残影：入场期按**瞬时速度**做一次挤压—拉伸。
+         一帧内位移越大，字被拉得越长越窄 —— 这是「动得快」最便宜的表达，
+         也是 fast 入场不读作「瞬移」的关键。取速度的方式是「把更早的进度再跑一遍」，
+         不做积分，所以同一 t 永远同一结果（确定性不受影响）。
+         擦除类入场（有 clip）自带方向感，跳过。 */
+      if (e < 0.999 && !g.clip && EN_DUR > 0.03) {
+        const bx0 = g.dx, by0 = g.dy, bs = g.sc, b_sx = g.sx, b_sy = g.sy, brot = g.rot, ba = g.alpha;
+        const eP = Math.max(0, e - (1 / (ST.fps || 60)) / EN_DUR);
+        g.dx = 0; g.dy = 0; g.rot = 0; g.sc = 1; g.sx = 1; g.sy = 1; g.alpha = 1;
+        re(g, eP, rnd1[i], rnd2[i], enter);
+        rowClamp(g);
+        const mx = bx0 - g.dx, my = by0 - g.dy;
+        g.dx = bx0; g.dy = by0; g.sc = bs; g.sx = b_sx; g.sy = b_sy; g.rot = brot; g.alpha = ba;
+        const sp = Math.sqrt(mx * mx + my * my) / Math.max(1, g.size);
+        /* 上限 0.26（原 0.42）：0.42 时字高被拉到 1.42 倍，行距不够就会骑到上一行；
+           再加 dropBounce 自带的 0.26 拉伸，两个来源叠起来正好 1.5 倍 —— 太浊。 */
+        if (sp > 0.010) {
+          const k2 = Math.min(0.26, sp * 1.15);
+          g.sy *= 1 + k2;
+          g.sx *= 1 - k2 * 0.32;
+        }
+        rowClamp(g);
+      }
 
       /* 签名是 (g,t,ph,spec,amp)：第 4 个参数必须是 hold 规格本身。
          早先传成 (…, breath, hold, 1) —— spec 收到数字 1、amp 收到对象，
@@ -610,21 +665,15 @@
     }
     const en = shot._en == null ? 0.5 : shot._en;
 
-    // 相机：推/摇/震，围绕画面中心
-    const cam = shot.cam || null;
-    const zoom = cam ? 1 + (cam.zoom || 0) : 1;
-    let sx = 0, sy = 0;
-    if (cam && cam.shake) {
-      const r = PV.rng(ST.sb.meta.seed, shot.i, 9);
-      const amp = cam.shake * (0.5 + en);
-      sx = Math.sin(t * 53.1 + r() * 6.28) * amp;
-      sy = Math.cos(t * 47.7 + r() * 6.28) * amp;
-    }
+    // 相机：整帧运动（pv_cam.js）。每个镜头都有一台在动的机器 —— 静止的镜头连起来就是幻灯片。
+    const cam = (PV.camAt ? PV.camAt(shot, t) : { x: 0, y: 0, s: 1, sx: 1, sy: 1, rot: 0, skx: 0 });
 
     ctx.save();
-    if (zoom !== 1 || sx || sy) {
-      ctx.translate(PV.W / 2 + sx, PV.H / 2 + sy);
-      ctx.scale(zoom, zoom);
+    if (cam.x || cam.y || cam.rot || cam.skx || cam.s !== 1 || cam.sx !== 1 || cam.sy !== 1) {
+      ctx.translate(PV.W / 2 + cam.x, PV.H / 2 + cam.y);
+      if (cam.rot) ctx.rotate(cam.rot * Math.PI / 180);
+      if (cam.skx) ctx.transform(1, 0, Math.tan(cam.skx * Math.PI / 180), 1, 0, 0);
+      ctx.scale(cam.s * cam.sx, cam.s * cam.sy);
       ctx.translate(-PV.W / 2, -PV.H / 2);
     }
 
@@ -653,6 +702,16 @@
 
     // 后期（不受相机影响）
     drawPost(ctx, shot.post, t, en);
+    /* 存 A：退场开始前那一刻的完整画面（每镜只存一次，窗口 0.12s ≈ 7 帧） */
+    const xd = shot.exit && shot.exit.dur != null ? shot.exit.dur : 0.42;
+    if (t >= shot.t1 - xd - 0.02 && t <= shot.t1 - xd + 0.10) saveCross(ctx, shot);
+    /* 切间过渡：把**上一镜的最后一帧**按一个方向擦掉，露出这一镜。
+       参考 JIZURA 的 TRANS 分组（wipe / pushSlide / zoomThrough…）。没有这一步，
+       48 个镜头就是 48 次硬切 —— 实测帧间差异曲线在 8.1s 只有一个 16.8 的尖峰，
+       其余全在 2~3.8，那根尖峰就是「生硬」剩下的全部来源。
+       实现上用「延迟擦除」而不是 A/B 双层合成：逐帧顺序渲染时画布上已经有上一镜的
+       画面，把它存成一张 cross 缓存即可，不必把上一镜重新渲一遍（4K 重渲要 40ms/帧）。 */
+    crossFade(ctx, shot, t);
     if (!(shot.post || []).some(f => f.k === 'vignette')) {
       /* 默认暗角：让画面四周沉下去，是「电影感」最便宜也最有效的一步 */
       /* 暗角 0.40 / r0 0.46：原来是 0.60，四角直接压成纯黑 ——
@@ -669,6 +728,61 @@
     }
     ctx.globalAlpha = 1;
   };
+
+  /* ---------------- 切间过渡（crossFade） ----------------
+     JIZURA 的 TRANS 分组是把「上一 cut 的静止帧」和当前帧合成。我们逐帧顺序渲染，
+     画布上本来就有上一镜的画面，所以只要在退场开始前存一张快照，切镜时按方向擦掉它。
+     比重新渲染上一镜便宜一个数量级（4K 重渲 40ms/帧 × 20 帧 × 48 镜 = 38s）。
+
+     为什么要存「退场开始前」而不是「最后一帧」：exit 在 t1 时已经把字淡完了，
+     拿那一帧当 A 等于拿一张空画面去擦，读作「黑场过场」而不是「换镜」。 */
+  /* 0.22s：文字 PV 的换镜要「干脆地擦过去」。0.32s 时观众有两三帧看见两套字并排，
+     读作「画面没刷新」而不是「过场」。 */
+  const XFADE = { dur: 0.22 };
+  let XC = null, XCFrom = -1, XCValid = false;
+
+  function saveCross(src, shot) {
+    if (XCFrom === shot.i) return;
+    if (!XC) XC = document.createElement('canvas');
+    const w = src.canvas.width, h = src.canvas.height;
+    if (XC.width !== w || XC.height !== h) { XC.width = w; XC.height = h; }
+    XC.getContext('2d').drawImage(src.canvas, 0, 0);
+    XCFrom = shot.i;
+    XCValid = true;
+  }
+
+  function crossFade(ctx, shot, t) {
+    if (!XCValid || XCFrom !== shot.i - 1) return;
+    /* 片头卡不参与：它是标题+档案行，被拦腰切开只会读作「排版炸了」，
+       而且它和大字歌词交错出现，怎么看都像 bug。片头直接硬切进第一句。 */
+    if (shot.i <= 1) return;
+    const q = PV.clamp((t - shot.t0) / XFADE.dur);
+    if (q >= 1) return;
+    /* 快起慢收：inOutCubic 前 6% 几乎不动，等于切镜后先「卡」一下再擦。 */
+    const e = 1 - Math.pow(1 - q, 2.2), W = PV.W, H = PV.H;
+    /* 只用左右两个方向：横切会把一行字拦腰截断（竖排/大标题尤其明显），
+       而且横切时保留下来的上半屏经常正好是上一句的标题行。 */
+    const dir = (shot.i % 2) ? 0 : 2;
+    const lw = Math.max(2.5, W * 0.0032);
+    ctx.save();
+    ctx.beginPath();
+    if (dir === 0) ctx.rect(0, 0, W * (1 - e), H);
+    else ctx.rect(W * e, 0, W * (1 - e), H);
+    ctx.clip();
+    ctx.drawImage(XC, 0, 0, W, H);
+    ctx.restore();
+
+    /* 前沿的一道光：没有它，擦除读作「方块滑过」；有了它，读作「一道光扫过去」 */
+    if (q > 0.02 && q < 0.98) {
+      ctx.save();
+      ctx.globalAlpha = 0.55 * Math.sin(Math.PI * q);
+      ctx.fillStyle = PV.rgba((shot._S || ST.S).accentRGB, 1);
+      if (dir === 0) ctx.fillRect(W * (1 - e) - lw / 2, 0, lw, H);
+      else ctx.fillRect(W * e - lw / 2, 0, lw, H);
+      ctx.restore();
+    }
+  }
+  PV.crossFade = crossFade;
 
   /* 统一的安全网：任何布局算完都过一遍「塞进安全区」检查。
      布局内部已经各自适配过字号，这里是最后一道闸 —— 宁可等比缩一点，

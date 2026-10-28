@@ -85,6 +85,44 @@
         const r = 0.6 + rnd() * 1.5;
         g.beginPath(); g.arc(px, py, r, 0, 6.283185307); g.fill();
       }
+    } else if (kind === 'topo') {
+      /* 等高线：参考 JIZURA 的 topoLines。闭合环 + 多频正弦扰动 = 「地形」；
+         环数固定时相位必须一次算好，否则同一条环画出来的两半接不上（会露裂缝）。 */
+      const rings = extra ? +extra : 13;
+      g.strokeStyle = rgba(rgb, 1);
+      g.lineWidth = 1.5;
+      for (let k = 1; k <= rings; k++) {
+        const r0 = (N * 0.5) * (k / rings);
+        const p1 = k * 0.83, p2 = k * 1.37, p3 = k * 2.11;
+        g.globalAlpha = 0.30 + 0.30 * rnd();
+        g.beginPath();
+        const seg = 112;
+        for (let i = 0; i <= seg; i++) {
+          const a = i / seg * 6.283185307;
+          const wob = 1
+            + 0.105 * Math.sin(a * 3 + p1)
+            + 0.058 * Math.sin(a * 5 - p2)
+            + 0.026 * Math.sin(a * 9 + p3);
+          const px = N / 2 + Math.cos(a) * r0 * wob;
+          const py = N / 2 + Math.sin(a) * r0 * wob;
+          if (i) g.lineTo(px, py); else g.moveTo(px, py);
+        }
+        g.closePath(); g.stroke();
+      }
+    } else if (kind === 'rays') {
+      /* 光芒：从中心发散的长条扇形（JIZURA 的 godRays / 光芒）。
+         只做「几束很宽的光」，不做密密麻麻的放射线 —— 后者会读作 starburst 图标。 */
+      const n = extra ? +extra : 14;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * 6.283185307 + rnd() * 0.16;
+        const w = 0.030 + rnd() * 0.055;
+        g.globalAlpha = 0.07 + rnd() * 0.16;
+        g.fillStyle = rgba(rgb, 1);
+        g.beginPath();
+        g.moveTo(N / 2, N / 2);
+        g.arc(N / 2, N / 2, N * 0.80, a - w, a + w);
+        g.closePath(); g.fill();
+      }
     }
 
     /* 边缘羽化：用 destination-in 抹一圈径向遮罩。
@@ -310,6 +348,40 @@
     ctx.restore();
   };
 
-  PV.BGORDER = ['wash', 'mega', 'ink', 'halftone', 'grid', 'hatch', 'panel', 'rings',
+  /* ⑫ 等高线：一张烘焙好的「地形」环纹，极慢自转。
+        用途是给长镜头一个「地理感」的底 —— 它比网点更软，比排线更「有机」，
+        抒情段用它可以不加亮任何东西就有了纵深。 */
+  BG.topo = (ctx, s, env) => {
+    const img = fieldCanvas('topo', s.col === 'accent' ? '#E2604A' : '#F4EEE1',
+      s.rings == null ? '' : String(s.rings), s.mask || 'radial');
+    const cx = (s.x == null ? 0.5 : s.x) * PV.W;
+    const cy = (s.y == null ? 0.5 : s.y) * PV.H;
+    const r = (s.r == null ? 1.20 : s.r) * Math.max(PV.W, PV.H) * 0.5;
+    ctx.save();
+    ctx.globalAlpha = (s.a == null ? 0.15 : s.a);
+    ctx.translate(cx, cy);
+    ctx.rotate((s.rot || 0) * Math.PI / 180 + env.t * (s.spin == null ? 0.010 : s.spin));
+    ctx.drawImage(img, -r, -r, r * 2, r * 2);
+    ctx.restore();
+  };
+
+  /* ⑬ 光芒：几束极宽的光从画面外斜切进来，随镜头极缓摆动。
+        副歌/抬头看的句子用它，比「加亮背景」有效得多 —— 亮的是「光」，不是「底」。 */
+  BG.rays = (ctx, s, env) => {
+    const img = fieldCanvas('rays', s.col === 'accent' ? '#E2604A' : '#F4EEE1',
+      s.n == null ? '' : String(s.n), s.mask || 'radial');
+    const cx = (s.x == null ? 0.5 : s.x) * PV.W;
+    const cy = (s.y == null ? 0.34 : s.y) * PV.H;
+    const r = (s.r == null ? 1.35 : s.r) * Math.max(PV.W, PV.H) * 0.5;
+    ctx.save();
+    ctx.globalAlpha = (s.a == null ? 0.16 : s.a);
+    if (s.blend) ctx.globalCompositeOperation = s.blend;
+    ctx.translate(cx, cy);
+    ctx.rotate((s.rot || 0) * Math.PI / 180 + Math.sin(env.t * 0.21 + (s.ph || 0)) * 0.035);
+    ctx.drawImage(img, -r, -r, r * 2, r * 2);
+    ctx.restore();
+  };
+
+  PV.BGORDER = ['wash', 'mega', 'topo', 'rays', 'ink', 'halftone', 'grid', 'hatch', 'panel', 'rings',
                'leak', 'dust', 'edge'];
 })();
