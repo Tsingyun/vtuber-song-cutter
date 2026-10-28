@@ -344,7 +344,13 @@ async function cleanupArtifacts() {
     /* pageerror 只捕 JS 抛错，捕不到 renderer 进程被杀（OOM/GPU 崩）——那才是 4K 长片最常见的死法 */
     page.on('crash', () => console.error('[pagecrash] 渲染实例的 renderer 进程崩溃（多为内存/GPU 超限）'));
     browser.on('disconnected', () => console.error('[browserclosed] Chromium 连接断开'));
-    page.on('console', m => { if (m.type() === 'error') console.error('[console.error]', m.text()); });
+    /* [pv] 开头的行要放出来：人物装载、字体就绪这些信息只有在渲染日志里才能看见，
+       以前一律静默，于是「成片里一个人都没有」只能靠事后看图发现。 */
+    page.on('console', m => {
+      const t = m.text();
+      if (m.type() === 'error') console.error('[console.error]', t);
+      else if (t.startsWith('[pv]')) console.log(t);
+    });
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForFunction('window.HL && HL.ready', null, { timeout: 60000 });
     await page.setInputFiles('#mediaFile', job.audio);

@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--manifest", default="")
     ap.add_argument("--sheet", default="")
     ap.add_argument("--n", type=int, default=16)
+    ap.add_argument("--fig-sheet", default="",
+                    help="额外从成片里抽含人物的镜头拼成接触表（必须走成片，不能用 pv_stills）")
     a = ap.parse_args()
 
     info = probe(a.mp4)
@@ -93,7 +95,7 @@ def main():
     # 抽帧（--sheet 只决定要不要出接触表，抽样与判据始终执行）
     if True:
         from PIL import Image
-        tmp = os.path.join(os.path.dirname(a.sheet) or ".", "_chk")
+        tmp = os.path.join(os.path.dirname(a.sheet or a.fig_sheet) or ".", "_chk")
         os.makedirs(tmp, exist_ok=True)
         d = info["dur"]
         files, lum, fill = [], [], []
@@ -111,16 +113,41 @@ def main():
         thin = [(round(d * (i + 0.5) / a.n, 1), round(v, 3)) for i, v in enumerate(fill) if v < 0.94]
         print("[fill] 最小铺满率 %.3f  未铺满 %s" % (min(fill), thin or "无"))
         ok &= not thin
-        if not a.sheet:
+        # 人物层：必须从**成片**里抽，不能用 pv_stills（那条路是预览接口，绕开了缺陷本身）。
+        # 这一条是被「成片里一个人都没有、抽帧却每格都有」逼出来的。
+        if a.fig_sheet:
+            from PIL import Image
+            figs = [x for x in (sb.get("shots") or []) if x.get("fig")]
+            if not figs:
+                print("[fig] 编排稿里没有含人物的镜头")
+                ok = False
+            else:
+                k = min(8, len(figs))
+                pick = [figs[round(i * (len(figs) - 1) / max(1, k - 1))] for i in range(k)]
+                W, H = 480, 270
+                sh_img = Image.new("RGB", (W * 4, H * 2), (8, 10, 14))
+                for i, x in enumerate(pick):
+                    t = (float(x["t0"]) + float(x["t1"])) / 2
+                    p = os.path.join(tmp, "fig%02d.png" % i)
+                    subprocess.run([FFMPEG, "-y", "-v", "error", "-ss", "%.2f" % t, "-i", a.mp4,
+                                    "-frames:v", "1", p], check=True)
+                    im = Image.open(p).convert("RGB").resize((W, H), Image.LANCZOS)
+                    sh_img.paste(im, ((i % 4) * W, (i // 4) * H))
+                sh_img.save(a.fig_sheet)
+                print("[fig] 成片里含人物的镜头 %d 个，抽 %d 帧 → %s" % (len(figs), k, a.fig_sheet))
+                print("[fig] 时刻 %s" % ", ".join("%.1f" % ((float(x["t0"]) + float(x["t1"])) / 2) for x in pick))
+
+        if not a.sheet and not a.fig_sheet:
             print("\n结论：%s" % ("全部通过" if ok else "有项目未通过（见上）"))
             sys.exit(0 if ok else 1)
-        W, H = 480, 270
-        sheet = Image.new("RGB", (W * 4, H * 4))
-        for i, f in enumerate(files):
-            im = Image.open(f).convert("RGB").resize((W, H), Image.LANCZOS)
-            sheet.paste(im, ((i % 4) * W, (i // 4) * H))
-        sheet.save(a.sheet)
-        print("[sheet] %s" % a.sheet)
+        if a.sheet:
+            W, H = 480, 270
+            sheet = Image.new("RGB", (W * 4, H * 4))
+            for i, f in enumerate(files):
+                im = Image.open(f).convert("RGB").resize((W, H), Image.LANCZOS)
+                sheet.paste(im, ((i % 4) * W, (i // 4) * H))
+            sheet.save(a.sheet)
+            print("[sheet] %s" % a.sheet)
 
     print("\n结论：%s" % ("全部通过" if ok else "有项目未通过（见上）"))
     sys.exit(0 if ok else 1)

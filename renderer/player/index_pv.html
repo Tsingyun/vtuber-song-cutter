@@ -150,7 +150,10 @@ window.__frame = async (i, opts) => {
      快进阶段（fast）不装载：那里只为推排版状态，逐镜解码会白烧几分钟。 */
   if (!fast) {
     const pend = PV.ensureWindow ? PV.ensureWindow(t) : null;
-    if (pend) { await pend; FIG_SHOTS++; }
+    if (pend) {
+      await pend; FIG_SHOTS++;
+      if (FIG_SHOTS % 6 === 1) console.log('[pv] 人物装载第 %d 镜 @%.1fs', FIG_SHOTS, t);
+    }
   }
   applyScale();
   ctx.setTransform(OUT_SCALE, 0, 0, OUT_SCALE, 0, 0);
