@@ -30,6 +30,15 @@
     didoneIt:  { family: '"Bodoni Moda"', weight: 700, kind: 'serif', italic: true },
     mono:      { family: '"IBM Plex Mono"', weight: 400, kind: 'mono' },
     monoB:     { family: '"IBM Plex Mono"', weight: 600, kind: 'mono' },
+    /* 晨光绘本（Innocence v2）：拉丁抒情专用。
+       Nunito 圆润收笔 = 温柔正文；Fraunces 斜体软衬线 = 情感词签名笔触。
+       英文歌词全靠这两把 —— Zen Kaku 的拉丁太「网页」，Archivo Black 是冲击型。 */
+    nunito:     { family: '"Nunito"', weight: 400, kind: 'sans' },
+    nunitoMed:  { family: '"Nunito"', weight: 600, kind: 'sans' },
+    nunitoSemi: { family: '"Nunito"', weight: 700, kind: 'sans' },
+    nunitoB:    { family: '"Nunito"', weight: 800, kind: 'sans' },
+    frauncesIt:  { family: '"Fraunces"', weight: 400, kind: 'serif', italic: true },
+    frauncesItB: { family: '"Fraunces"', weight: 700, kind: 'serif', italic: true },
   };
   const FALLBACK = '"Noto Sans SC", "HarmonyOS Sans SC", sans-serif';
   PV.cssFace = (key, size) => {
@@ -74,6 +83,18 @@
     v[0] = 0;
     for (let i = 1; i <= text.length; i++) v[i] = ctx.measureText(text.slice(0, i)).width;
     ctx.restore();
+    /* 空格最小步进：显示级字体自带空格常太窄（Fraunces italic ≈0.13em），
+       叠上负 track / 光学收紧后词黏成一串（"It'ssobeautiful" 实测 2026-10-29）。
+       步进强制 ≥0.30em（标准词距）—— 在测量层修，布局 / fitSize / glyphWidth 全部同源一致。 */
+    const MINSP = 0.30 * size;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] !== ' ') continue;
+      const adv = v[i + 1] - v[i];
+      if (adv < MINSP) {
+        const d = MINSP - adv;
+        for (let j = i + 1; j <= text.length; j++) v[j] += d;
+      }
+    }
     if (_mcache.size > 4000) _mcache.clear();
     _mcache.set(key, v);
     return v;

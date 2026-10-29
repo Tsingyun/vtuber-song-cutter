@@ -29,6 +29,8 @@ const argOf = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0
     if (lj.face) live.face = lj.face;
   }
 
+  /* GPU 首触 ±1 抖动由 __pvShot 内部的「首渲丢弃」双渲补丁兜住（RULES 76）；
+     4K 长片必须 GPU（CPU 光栅化 0.4fps），补丁与 GPU 成对使用。 */
   const browser = await chromium.launch({ args: ['--allow-file-access-from-files', '--enable-gpu'] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', e => console.error('[pageerror]', e.message));

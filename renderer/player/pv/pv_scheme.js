@@ -81,8 +81,31 @@
       texture: { grain: 0.9, paper: 0, scan: 0.3 }, ghost: 1.3,
       decor: { cropMarks: 0.5, rule: 1, barcode: 0.4, dots: 1, chapter: 1 },
     },
+    /* ---------------- 晨光绘本（Innocence v2 专用） ----------------
+       与前 5 个相反：全部浅底暖色。故障印刷语法（暗底/色差/碎字）与钢琴抒情曲
+       的「温柔软暖」是反义词，所以情绪改用「光」表达：
+       破晓 → 晴昼 → 辉 → 梦 → 暮 五段光色弧。
+       ghost 压到 0.5（柔双影不是故障）；paper 常开 = 绘本质感。 */
+    dawn: {
+      name: 'ダーン・ピクチャーブック',
+      schemes: [
+        /* 0 破晓：奶油底暖褐墨，杏橙 × 晨蓝 —— 醒来、第一道光 */
+        { bg: '#F7F0E4', fg: '#4A3527', sub: '#8A6F58', accent: '#E8833A', accent2: '#6B9BC9', ink: '#4A3527', dim: '#E5D5BD', ghostA: '#E8833A', ghostB: '#6B9BC9', glow: '#FFD9A0', paper: true },
+        /* 1 晴昼：青白底松墨，青瓷 × 蜜金 —— 安全之地 */
+        { bg: '#EFF4EE', fg: '#2F4438', sub: '#6E8575', accent: '#5B9A7E', accent2: '#D9A441', ink: '#2F4438', dim: '#D5E2D5', ghostA: '#5B9A7E', ghostB: '#D9A441', glow: '#DCEBDD', paper: true },
+        /* 2 辉：金奶底焦糖墨，辉金 × 珊瑚 —— 全部副歌 */
+        { bg: '#FFF3DC', fg: '#5A3B12', sub: '#A67C3B', accent: '#E4A11B', accent2: '#E86A5C', ink: '#5A3B12', dim: '#F0DDB4', ghostA: '#E4A11B', ghostB: '#E86A5C', glow: '#FFE9B8', paper: true },
+        /* 3 梦：淡薰底藤墨，兰紫 × 梦蓝 —— 桥段「美到想哭」 */
+        { bg: '#F2ECF7', fg: '#443361', sub: '#8A76AC', accent: '#B072C7', accent2: '#7FA8E0', ink: '#443361', dim: '#DDD0EC', ghostA: '#B072C7', ghostB: '#7FA8E0', glow: '#E7D9F5', paper: true },
+        /* 4 暮：暮杏底深栗墨，落日 × 暮紫 —— 尾奏收束 */
+        { bg: '#EFD9BE', fg: '#6B4A2E', sub: '#A98562', accent: '#D96C3F', accent2: '#8E6AA8', ink: '#6B4A2E', dim: '#DCC0A0', ghostA: '#D96C3F', ghostB: '#8E6AA8', glow: '#F5C99B', paper: true },
+      ],
+      fonts: { display: ['frauncesItB'], serif: ['frauncesIt'], body: ['nunitoSemi'], mono: ['mono'] },
+      texture: { grain: 0.6, paper: 1, scan: 0 }, ghost: 0.5,
+      decor: { cropMarks: 0, rule: 0.3, barcode: 0, dots: 0.2, chapter: 0 },
+    },
   };
-  PV.PACK_ORDER = ['noir', 'crimson', 'paper', 'hud', 'mono'];
+  PV.PACK_ORDER = ['dawn', 'noir', 'crimson', 'paper', 'hud', 'mono'];
 
   const lum = hex => {
     const c = PV.hex(hex);
@@ -102,6 +125,9 @@
       accent: s.accent, accent2: s.accent2,
       inkBox: s.ink, dim: s.dim,
       ghostA: s.ghostA, ghostB: s.ghostB,
+      /* glow：晨光绘本的光晕色（halo/sunrise/windowLight 等 bg 件读它）。
+         旧 pack 没有它 → undefined，画光晕的部件各自兑底即可。 */
+      glow: s.glow,
       /* 兼容旧字段：paper/ink 是上一版的名字，渲染层其余部分仍在用 */
       paper: s.bg, ink: s.fg, void: s.dim, paper2: s.dim,
       fonts: p.fonts, texture: p.texture, decor: p.decor, ghostK: p.ghost,

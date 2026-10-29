@@ -521,6 +521,369 @@ def fig_band_fix(shots, w=1920):
 
 
 # ----------------------------------------------------------------- 主流程
+# =====================================================================
+# 晨光绘本（Innocence v2）：意象驱动模式（--concept dawn）
+# 与默认的「抽卡」模式相反：逐句视觉**由歌词意象决定**，不是摇出来的。
+# 输入 = docs/innocence-v2-imagery-map.json（47 句逐句：意象标签 / 版面 /
+# 背景件 / 装饰件 / 入退场 / special 特判），本文件只做「字符串 → 引擎参数」翻译。
+# =====================================================================
+D_ENTER = {
+    # 抒情曲的入场是「浮现/托起」，时长比 v1 长一档（0.85~1.2s），不做甩炸
+    "softIn":     {"k": "softIn",     "dur": 0.85, "stagger": 0.045, "lead": 0.12},
+    "fadeSlow":   {"k": "fadeSlow",   "dur": 1.20, "stagger": 0.060, "lead": 0.20},
+    "typeOn":     {"k": "typeOn",     "dur": 0.34, "stagger": 0.050, "lead": 0.06},
+    "dropBounce": {"k": "dropBounce", "dur": 0.72, "stagger": 0.050, "lead": 0.08},
+}
+D_EXIT = {
+    "fade":      {"k": "fade",   "dur": 0.85},
+    "fadeUp":    {"k": "fadeUp", "dur": 1.05},
+    "pFallSlow": {"k": "pFall",  "dur": 1.25},   # 碎块慢落（时间流逝语义，全片仅 4 处）
+}
+D_BG = {
+    "sunrise":     {"a": 0.17, "y": 0.74},
+    "windowLight": {"a": 0.12, "n": 3, "ang": -28, "motes": 12},
+    "halo":        {"a": 0.20, "r": 0.58, "x": 0.5, "y": 0.45},
+    "watercolor":  {"a": 0.14, "n": 4},
+    "arch":        {"a": 0.22},
+    "petal":       {"a": 0.15, "n": 14},
+    # 复用件（极淡）
+    "dust":        {"a": 0.11},
+    "leak":        {"a": 0.070},
+    "rays":        {"a": 0.095},
+}
+D_DECOR = {
+    "stitchLines":  {"a": 0.13, "m": 64},
+    "photoCorners": {"a": 0.20, "m": 56},
+    "tinyStars":    {"a": 0.28, "n": 10},
+    "teardrop":     {"a": 0.24, "n": 5},
+    "softCorners":  {"a": 0.15, "m": 48},
+}
+D_TRANS_POOL = [("wipe", 4), ("ink", 3), ("flash", 2), ("iris", 2), ("push", 2), ("zoom", 1)]
+D_TRANS_DUR = {"wipe": 0.42, "ink": 0.48, "flash": 0.34, "iris": 0.44, "push": 0.40, "zoom": 0.40}
+
+
+def _dawn_face(spec):
+    """字重/字族：正文 Nunito，情感短句 Fraunces 斜体，weight:max 上 Nunito 最粗。"""
+    img = set(spec.get("img") or [])
+    nw = len((spec.get("text") or "").split())
+    if (img & {"brill", "cry"}) and nw <= 7:
+        return "frauncesItB"
+    if spec.get("weight") == "max":
+        return "nunitoB"
+    return "nunitoSemi"
+
+
+def _dawn_layout(spec):
+    sp = spec.get("special") or ""
+    face = _dawn_face(spec)
+    layk = spec.get("layout") or "block"
+    nw = len((spec.get("text") or "").split())
+    # scaleSteps 是 bleed=true（不过安全网），词多时堆叠总高会顶出画外：
+    # 8 词 × 0.17H 起步 ≈ 1.03H，首词直接被裁（实测桥段 t=127）。
+    # bigK 随词数收：词越多起始越小，总高压进 0.72H 内。
+    step_k = round(0.17 * 6.0 / max(6, nw), 3)
+    if "offsetPair" in sp:
+        # 双行错位的近似：scaleSteps 的逐词台阶读作「词在错位」，dir 逐句交替
+        return {"k": "scaleSteps", "face": face, "bigK": step_k,
+                "dir": "up" if (spec.get("line", 0) % 2 == 0) else "down"}
+    if "threeWordCascade" in sp:
+        return {"k": "scaleSteps", "face": face, "bigK": step_k, "dir": "up"}
+    if sp == "cryGiant":
+        return {"k": "center", "face": "frauncesItB", "track": -0.015}
+    return {"k": layk, "face": face}
+
+
+def build_dawn_shots(a, lines, m, dur):
+    """把意象映射表翻译成编排稿镜头（不抽卡：一切由歌词意象决定）。"""
+    from collections import Counter
+    ml = m["lines"]
+    if len(ml) != len(lines):
+        raise SystemExit("[dawn] 映射 %d 句 ≠ 窗口内 %d 句，先对齐 timing.json"
+                         % (len(ml), len(lines)))
+    for i, (spec, l) in enumerate(zip(ml, lines)):
+        t1 = (spec.get("text") or "").strip()
+        t2 = (l.get("text") or "").strip()
+        if t1 != t2:
+            raise SystemExit("[dawn] 第 %d 句文本不一致：映射=%r 时机=%r" % (i, t1, t2))
+
+    secs = m.get("sections") or []
+    def sec_at(t):
+        for s in secs:
+            if s["t0"] <= t < s["t1"]:
+                return s
+        return secs[-1] if secs else {"name": "V1", "scheme": 0}
+
+    outro_t0 = None
+    for s in secs:
+        if s.get("name") == "outro":
+            outro_t0 = s["t0"]
+    if outro_t0 is None:
+        outro_t0 = ml[-1]["t1"]
+
+    # pal 字符串 "2→4"：同标签的第 1 镜取左值、之后取右值（跨镜渐溶由转场承担）
+    pal_span = {}
+
+    shots = []
+    recall_trans = {}
+    seen_key = Counter()
+    # 转场用「确定性轮转」而不是逐镜抽签：回访组会把同一次抽签放大 3~5 倍
+    # （实测 zoom 权重 1/14 却占了 32% 的镜头）。轮转按权重铺开一个序列，
+    # 每出现一个**新**分组就前进一格 —— 分布精确、同组复用、双渲一致。
+    _tpool = []
+    for _k, _w in D_TRANS_POOL:
+        _tpool += [_k] * _w
+    _tseq = rng(a.seed, 777, 3)          # 只洗一次牌（确定性）
+    _perm = list(range(len(_tpool)))
+    for _i in range(len(_perm) - 1, 0, -1):
+        _j = int(_tseq.integers(0, _i + 1))
+        _perm[_i], _perm[_j] = _perm[_j], _perm[_i]
+    _tpool = [_tpool[_p] for _p in _perm]
+    _tpos = [0]
+
+    def pick_trans(key):
+        if key and key in recall_trans:
+            return json.loads(json.dumps(recall_trans[key]))
+        k = _tpool[_tpos[0] % len(_tpool)]
+        _tpos[0] += 1
+        tr = {"k": k, "dur": D_TRANS_DUR[k]}
+        if key:
+            recall_trans[key] = json.loads(json.dumps(tr))
+        return tr
+
+    def bg_items(spec):
+        out = []
+        for name in spec.get("bg") or []:
+            if name not in D_BG:
+                continue
+            d = dict(D_BG[name])
+            # boost / haloR：统一感回访时 halo 递进（记忆点越来越亮/越来越大）
+            if name == "halo":
+                if spec.get("haloR"):
+                    d["r"] = round(d["r"] * spec["haloR"], 3)
+                if spec.get("boost"):
+                    d["a"] = round(min(0.30, d["a"] * spec["boost"]), 3)
+            out.append(dict(d, k=name))
+        return out
+
+    def decor_items(spec, i):
+        out = []
+        for name in spec.get("decor") or []:
+            if name not in D_DECOR:
+                continue
+            out.append(dict(D_DECOR[name], k=name, seed=11 + i * 7))
+        return out
+
+    def pal_idx(spec, sec):
+        pv = spec.get("pal")
+        if pv is None:
+            return int(sec.get("scheme", 0))
+        if isinstance(pv, str) and "→" in pv:
+            lo, hi = pv.split("→", 1)
+            if pv not in pal_span:
+                pal_span[pv] = 0
+            pal_span[pv] += 1
+            return int(lo) if pal_span[pv] == 1 else int(hi)
+        return int(pv)
+
+    # ---- 片头卡（钢琴前奏 0 ~ 第一句）
+    shots.append({
+        "i": 0, "t0": 0.0, "t1": round(ml[0]["t0"], 3),
+        "line": -1, "kind": "card", "tier": 1, "section": "intro",
+        "text": a.title or m.get("_meta", {}).get("song", "Innocence"),
+        "layout": {"k": "titleCard", "face": "frauncesItB",
+                   "kicker": "ORIGINAL SONG", "artist": a.artist,
+                   "meta": "VOCAL %s · %s" % (a.vocal, a.date), "shadow": True},
+        "enter": {"k": "fadeSlow", "dur": 1.2, "stagger": 0.05, "lead": 0.20},
+        "hold": {"k": "breathe", "amp": 0.55},
+        "exit": {"k": "fade", "dur": 0.85},
+        "type": {}, "treat": {"k": "solid"},
+        "pal": {"pack": "dawn", "idx": 0},
+        "bgl": [dict(D_BG["sunrise"], k="sunrise"),
+                dict(D_BG["windowLight"], k="windowLight", n=2, a=0.10)],
+        "bg": [], "decor": [dict(D_DECOR["softCorners"], k="softCorners", seed=3)],
+        "post": [], "cam": {"k": "push", "amp": 0.5},
+        "energy": 0.30, "sync": False, "wobble": 0, "unified": False,
+        "special": "intro-card", "note": "intro / 破晓 / titleCard",
+    })
+
+    # ---- 逐句
+    for i, spec in enumerate(ml):
+        t0 = round(spec["t0"], 3)
+        t1 = round(ml[i + 1]["t0"], 3) if i + 1 < len(ml) else round(outro_t0, 3)
+        t1 = max(t1, t0 + 0.30)
+        sec = sec_at(spec["t0"])
+        sp = spec.get("special") or ""
+        key = spec.get("recallKey")
+        img = spec.get("img") or []
+
+        ent = dict(D_ENTER.get(spec.get("enter") or "softIn", D_ENTER["softIn"]))
+        xit = dict(D_EXIT.get(spec.get("exit") or "fade", D_EXIT["fade"]))
+        hold = {"k": "none"} if spec.get("hold") == "none" else {"k": "breathe", "amp": 0.55}
+        cam = {"k": "float", "amp": 0.45}
+        if spec.get("cam") == "push":
+            cam = {"k": "push", "amp": 0.62}
+        elif spec.get("cam") == "drift" and sp != "slowPan":
+            cam = {"k": "drift", "amp": 0.9}
+        if sp == "slowPan":
+            cam = {"k": "drift", "amp": 2.6}      # 全片唯一横移长镜
+        if "freeze2s" in sp:
+            hold = {"k": "none"}                  # 「不变」= 字完全静止
+        if "drag3px" in sp:
+            hold = {"k": "counterDrift", "amp": 0.40}   # 挽留的拉扯感
+        wob = 0.0
+        if sp.startswith("wobble"):
+            try:
+                wob = float(sp.replace("wobble", ""))
+            except ValueError:
+                wob = 0.5
+
+        bgl = bg_items(spec)
+        if sp == "mirrorDust":
+            bgl += [{"k": "halo", "x": 0.22, "y": 0.5, "r": 0.26, "a": 0.13},
+                    {"k": "halo", "x": 0.78, "y": 0.5, "r": 0.26, "a": 0.13}]
+        post = []
+        if sp == "ghostFlash":
+            post.append({"k": "chromaBurst", "a": 0.55, "at": round(t0 + 0.06, 3),
+                         "decay": 0.32})
+        if spec.get("desat"):
+            post.append({"k": "desat", "a": float(spec["desat"])})
+
+        energy = 0.40
+        if "brill" in img:
+            energy = 0.85
+        elif "cry" in img:
+            energy = 0.70
+        elif "hold" in img:
+            energy = 0.62
+
+        sh = {
+            "i": len(shots), "t0": t0, "t1": t1,
+            "line": i, "kind": "line",
+            "tier": 1 if energy < 0.6 else (2 if energy < 0.8 else 3),
+            "section": sec.get("name", ""),
+            "energy": energy,
+            "layout": _dawn_layout(spec),
+            "type": {},
+            "enter": ent, "hold": hold, "exit": xit,
+            "treat": {"k": "solid"},
+            "pal": {"pack": "dawn", "idx": pal_idx(spec, sec)},
+            "bgl": bgl, "bg": [], "decor": decor_items(spec, i),
+            "post": post, "cam": cam,
+            "fig": None, "sync": False, "wobble": wob,
+            "unified": False,
+            "special": sp,
+            "note": "%s / %s / %s" % (sec.get("name", ""), "+".join(img), sp or "-"),
+        }
+        if spec.get("scale"):
+            sh["sc"] = float(spec["scale"])
+        if "pieces" in sp:
+            sh["exit"] = dict(D_EXIT["pFallSlow"])
+        if key:
+            if seen_key[key]:
+                sh["unified"] = True
+            seen_key[key] += 1
+        if i > 0:   # 片头卡→第一句不带转场（从黑柔溶进来）
+            sh["trans"] = pick_trans(key)
+        shots.append(sh)
+
+    # ---- 尾奏卡（字退去后只剩花瓣与署名）
+    shots.append({
+        "i": len(shots), "t0": round(outro_t0, 3), "t1": round(dur, 3),
+        "line": -1, "kind": "card", "tier": 1, "section": "outro",
+        "text": "",
+        "layout": {"k": "titleCard", "face": "frauncesItB",
+                   "kicker": "", "artist": "",
+                   "meta": "%s — %s ｜ 歌切：%s ｜ %s"
+                           % (m.get("_meta", {}).get("song", "Innocence"),
+                              a.artist, a.vocal, a.date), "shadow": False},
+        "enter": {"k": "fadeSlow", "dur": 1.4, "stagger": 0.05, "lead": 0.20},
+        "hold": {"k": "breathe", "amp": 0.4},
+        "exit": {"k": "fade", "dur": 1.6},
+        "type": {}, "treat": {"k": "solid"},
+        "pal": {"pack": "dawn", "idx": 4},
+        "bgl": [dict(D_BG["petal"], k="petal", n=16, a=0.16),
+                dict(D_BG["sunrise"], k="sunrise", y=0.9, a=0.10)],
+        "bg": [], "decor": [],
+        "post": [], "cam": {"k": "float", "amp": 0.3},
+        "energy": 0.20, "sync": False, "wobble": 0, "unified": False,
+        "special": "outro-card", "note": "outro / 暮 / petal+credits",
+    })
+
+    # 半拍吸附在 dawn_main 里做（只吸动效时长；镜头边界锁人声，不动）
+    return shots
+
+
+def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
+    """意象驱动模式的出口：建镜头 → 吸半拍 → 组 sb → 写盘 → 报告。"""
+    from collections import Counter
+    path = a.imagery or os.path.join("docs", "innocence-v2-imagery-map.json")
+    m = json.load(open(path, encoding="utf-8"))
+    mm = m.get("_meta", {})
+    # 元数据：CLI 空着时用映射表的曲目信息（原唱必须是 Avril Lavigne）
+    if not a.title:
+        a.title = mm.get("song", "Innocence")
+    if not a.artist:
+        a.artist = mm.get("artist", "Avril Lavigne")
+    if not a.vocal:
+        a.vocal = mm.get("vocal", "")
+
+    shots = build_dawn_shots(a, lines, m, dur)
+
+    # 半拍吸附（只吸动效时长；镜头边界锁人声，不动）
+    beat = 60.0 / ana["bpm"] if ana.get("bpm") else 0.0
+    if beat > 0:
+        half = beat * 0.5
+        for s in shots:
+            for kk in ("enter", "exit"):
+                d = s.get(kk) or {}
+                if d.get("dur"):
+                    d["dur"] = round(max(half, round(d["dur"] / half) * half), 3)
+
+    sb = {
+        "version": 2,
+        "meta": {
+            "title": a.title, "artist": a.artist, "vocal": a.vocal,
+            "source": a.source, "date": a.date,
+            "seed": a.seed, "dur": dur, "fps": 60, "start": w0,
+            "koma": a.koma, "keyBg": a.keyBg or None,
+            "concept": "dawn", "imagery": path.replace("\\", "/"),
+            # 绘本纸底非平涂（bg 件柔光/水彩会进四角）→ pv_check 四角判据豁免
+            "paper_ok": True,
+            "mark": "",
+        },
+        "palette": {"pack": "dawn", "idx": 0},
+        "audio": {"bpm": ana["bpm"], "barSec": ana["bar_sec"],
+                  "sections": [[s["t0"], s["t1"], s["name"]] for s in secs]},
+        "lines": lines,
+        "shots": shots,
+    }
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    json.dump(sb, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+    # ---- 报告
+    nl = sum(1 for s in shots if s["kind"] == "line")
+    print("[concept] dawn 意象驱动（不抽卡，逐句由映射表决定）")
+    print("[shots] %d 句 → %d 镜（片头/尾各 1）  %.2fs" % (len(lines), len(shots), dur))
+    print("[imagery] %s" % dict(Counter(
+        i for s in shots if s["kind"] == "line" for i in (s["note"].split(" / ")[1].split("+")) if i and i != "-"
+    ).most_common()))
+    print("[layout] %s" % dict(Counter(s["layout"]["k"] for s in shots if s["kind"] == "line").most_common()))
+    print("[face] %s" % dict(Counter(s["layout"].get("face", "") for s in shots if s["kind"] == "line").most_common()))
+    print("[pal] %s" % dict(Counter("dawn/%d" % s["pal"]["idx"] for s in shots).most_common()))
+    print("[trans] %s" % dict(Counter(s["trans"]["k"] for s in shots if s.get("trans")).most_common()))
+    print("[hold] %s" % dict(Counter(s["hold"]["k"] for s in shots).most_common()))
+    nuni = sum(1 for s in shots if s.get("unified"))
+    print("[unity] 统一感回访 %d 镜" % nuni)
+    npieces = sum(1 for s in shots if "pieces" in (s.get("special") or ""))
+    print("[pieces] 碎块慢落 %d 处" % npieces)
+    nsc = sum(1 for s in shots if s.get("sc"))
+    print("[scale] 整镜缩放 %d 处  [desat] %d 处"
+          % (nsc, sum(1 for s in shots if any(f.get("k") == "desat" for f in (s.get("post") or [])))))
+    print("[beat] 动效时长吸半拍  bpm=%.1f  一拍=%.3fs" % (ana.get("bpm") or 0, beat))
+    print("[out] %s  %.0fKB" % (a.out, os.path.getsize(a.out) / 1024.0))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--timing", required=True)
@@ -540,6 +903,10 @@ def main():
                     help="二帧量化：每秒画几张（JIZURA 默认 12，0=不量化）")
     ap.add_argument("--keyBg", default="", choices=["", "green", "black", "white"],
                     help="绿幕/黑幕导出（JIZURA 的 keyBg），空=正常纸底")
+    ap.add_argument("--concept", default="", choices=["", "dawn"],
+                    help="dawn=意象驱动（读 --imagery 映射表，不抽卡）")
+    ap.add_argument("--imagery", default="",
+                    help="逐句意象映射 JSON（--concept dawn 用），默认 docs/innocence-v2-imagery-map.json")
     a = ap.parse_args()
 
     tdoc = json.load(open(a.timing, encoding="utf-8"))
@@ -592,6 +959,10 @@ def main():
             freq[w] = freq.get(w, 0) + 1
     kw = {w for w, c in freq.items() if c >= 3} | set(re.findall(r"[a-z']{3,}", a.title.lower()))
     kw -= {"the", "and", "that", "this", "you", "your", "with", "for", "was", "are", "its"}
+
+    # ---- 意象驱动模式：跳过全部抽卡，直接由映射表建镜头
+    if a.concept == "dawn":
+        return dawn_main(a, tdoc, ana, lines, secs, dur, w0)
 
     print("[look] 段落 → 纸")
     for s in secs:

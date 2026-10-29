@@ -193,7 +193,8 @@ def main():
                     badpaper.append((tag, "#%02X%02X%02X" % tuple(bg), "#%02X%02X%02X" % tuple(want), round(dp)))
             # 巨影版面跳过：cropGiant 的巨字本来就要被画缘切掉，它会占满左下与右下角
             # （实测 t=79.8 四角差 35.3，而画面无暗角、无残幅）。残幅由 [residue] 负责。
-            if flat > 10 and lay != "cropGiant":
+            # paper_ok（晨光绘本等非平涂纸底）：bg 件柔光/水彩有意进四角，四角不平≠暗角/残幅。
+            if flat > 10 and lay != "cropGiant" and not (a.manifest and sb.get("meta", {}).get("paper_ok")):
                 badflat.append((tag, round(flat, 1)))
             if want is not None and abs(float(grain) - sum(want) / 3.0) > 10:
                 badgrain.append((tag, round(grain, 1), round(sum(want) / 3.0, 1)))

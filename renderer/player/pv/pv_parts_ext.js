@@ -250,6 +250,136 @@
   };
 
   /* ============================================================
+     decor 晨光绘本五件（Innocence v2）
+     与上面的「印刷元信息」相反：这五件是**手账/相册**语汇 —— 缝线、角贴、
+     微星、泪滴、圆角框。它们的任务是把「纸」变成「被珍藏的一页」。
+     ============================================================ */
+
+  /* 缝线：沿内框走一圈虚线针脚（手账的「缝边」）。极淡，只在近看时读得出 */
+  D.stitchLines = (ctx, s, st) => {
+    const m = s.m == null ? 64 : s.m;
+    const dash = s.dash == null ? 14 : s.dash, gap = s.gap == null ? 10 : s.gap;
+    const a = s.a == null ? 0.16 : s.a;
+    const x0 = m, y0 = m, x1 = PV.W - m, y1 = PV.H - m;
+    ctx.save();
+    ctx.strokeStyle = st.S.ink;
+    ctx.globalAlpha = a;
+    ctx.lineWidth = s.lw == null ? 1.6 : s.lw;
+    ctx.setLineDash([dash, gap]);
+    ctx.lineDashOffset = -(st.t || 0) * 6;    // 针脚极缓「走线」
+    const r = s.r == null ? 22 : s.r;
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, y0);
+    ctx.lineTo(x1 - r, y0); ctx.quadraticCurveTo(x1, y0, x1, y0 + r);
+    ctx.lineTo(x1, y1 - r); ctx.quadraticCurveTo(x1, y1, x1 - r, y1);
+    ctx.lineTo(x0 + r, y1); ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
+    ctx.lineTo(x0, y0 + r); ctx.quadraticCurveTo(x0, y0, x0 + r, y0);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  };
+
+  /* 相册角贴：四角的三角形护角（老相册固定照片的黑角）。
+        「初见 / 小事物」用它 —— 语义是「这张照片被好好收着」 */
+  D.photoCorners = (ctx, s, st) => {
+    const m = s.m == null ? 56 : s.m, L = s.len == null ? 46 : s.len;
+    const a = s.a == null ? 0.22 : s.a;
+    const P = [[m, m, 1, 1], [PV.W - m, m, -1, 1], [m, PV.H - m, 1, -1], [PV.W - m, PV.H - m, -1, -1]];
+    ctx.save();
+    ctx.fillStyle = st.S.ink;
+    ctx.globalAlpha = a;
+    for (const [x, y, sx, sy] of P) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + L * sx, y);
+      ctx.lineTo(x, y + L * sy);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
+  /* 微星群：撒在版面外围的小四角星（「小事物」的"小确幸"）。
+        位置由 hash(i) 决定、闪烁由 st.t 相位决定 —— 双渲字节一致 */
+  D.tinyStars = (ctx, s, st) => {
+    const n = s.n || 10, a = s.a == null ? 0.30 : s.a;
+    const R = s.r == null ? 5.5 : s.r;
+    const rnd = PV.rng(0x9e3779b9, s.seed | 0, 13);
+    ctx.save();
+    ctx.fillStyle = st.S.accent;
+    for (let i = 0; i < n; i++) {
+      const x = (0.05 + 0.90 * rnd()) * PV.W;
+      const y = (0.05 + 0.90 * rnd()) * PV.H;
+      const ph = rnd() * TAU, sz = R * (0.55 + 0.75 * rnd());
+      const tw = 0.55 + 0.45 * Math.sin((st.t || 0) * 1.7 + ph);
+      // 四角星（两条正交的细菱形）
+      ctx.globalAlpha = a * tw;
+      ctx.beginPath();
+      for (let k = 0; k < 4; k++) {
+        const ang = k * Math.PI / 2 + Math.PI / 4;
+        const ox = Math.cos(ang) * sz, oy = Math.sin(ang) * sz;
+        if (k === 0) ctx.moveTo(x + ox, y + oy); else ctx.lineTo(x + ox, y + oy);
+        const ang2 = ang + Math.PI / 4;
+        ctx.lineTo(x + Math.cos(ang2) * sz * 0.30, y + Math.sin(ang2) * sz * 0.30);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
+  /* 泪滴：下落的水滴。「美到想哭」用 —— 不是悲伤的雨，是"幸福到涌出来"。
+        下落是闭式解（(y0 + t*spd) % 1），不累积状态 */
+  D.teardrop = (ctx, s, st) => {
+    const n = s.n || 5, a = s.a == null ? 0.26 : s.a;
+    const spd = s.spd == null ? 0.035 : s.spd;
+    const sz = s.size == null ? 12 : s.size;
+    const rnd = PV.rng(0x51ed270b, s.seed | 0, 17);
+    ctx.save();
+    ctx.fillStyle = st.S.acc2;
+    for (let i = 0; i < n; i++) {
+      const x0 = 0.12 + 0.76 * rnd(), y0 = rnd(), ph = rnd() * TAU;
+      const k = (y0 + (st.t || 0) * spd * (0.7 + 0.6 * rnd())) % 1;
+      const x = x0 * PV.W + Math.sin((st.t || 0) * 0.8 + ph) * PV.W * 0.008;
+      const y = k * PV.H * 1.1 - PV.H * 0.05;
+      const r = sz * (0.6 + 0.7 * rnd());
+      ctx.globalAlpha = a * Math.sin(Math.PI * k);    // 首尾淡出
+      // 泪滴 = 圆 + 上尖
+      ctx.beginPath();
+      ctx.moveTo(x, y - r * 1.9);
+      ctx.quadraticCurveTo(x + r * 0.95, y - r * 0.2, x, y + r * 0.55);
+      ctx.quadraticCurveTo(x - r * 0.95, y - r * 0.2, x, y - r * 1.9);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
+  /* 圆角框：一圈柔和的圆角矩形描边。「安全之地 / 绘本页」用 ——
+        直角框是"版面"，圆角框是"被捧着的一页" */
+  D.softCorners = (ctx, s, st) => {
+    const m = s.m == null ? 48 : s.m;
+    const a = s.a == null ? 0.18 : s.a;
+    const r = s.r == null ? 36 : s.r;
+    ctx.save();
+    ctx.strokeStyle = st.S.ink;
+    ctx.globalAlpha = a;
+    ctx.lineWidth = s.lw == null ? 2 : s.lw;
+    const w = PV.W - m * 2, h = PV.H - m * 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(m, m, w, h, r);
+    else {   // 兜底：老内核没有 roundRect
+      ctx.moveTo(m + r, m);
+      ctx.arcTo(m + w, m, m + w, m + h, r); ctx.arcTo(m + w, m + h, m, m + h, r);
+      ctx.arcTo(m, m + h, m, m, r); ctx.arcTo(m, m, m + w, m, r);
+      ctx.closePath();
+    }
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  /* ============================================================
      bg 扩充（P1-4）：背景图形层
      ============================================================ */
   const BG = PV.BG;
@@ -501,5 +631,21 @@
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, PV.W, PV.H);
     ctx.restore();
+  };
+
+  /* 去饱和：用 saturation 混合把全屏饱和度往下压（「眼泪里的世界」）。
+        混合模式的 source 灰度 = 0 饱和度，dest 就被拉向灰；alpha 控强度。
+        4K 下就是一次 fillRect，比任何滤镜都便宜。 */
+  F.desat = (ctx, s, st) => {
+    const a = st.fx && st.fx.a != null ? st.fx.a : 0;
+    if (a <= 0.002) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'saturation';
+    ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.fillStyle = '#808080';
+    ctx.fillRect(0, 0, PV.W, PV.H);
+    ctx.restore();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
   };
 })();

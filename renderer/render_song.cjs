@@ -289,7 +289,10 @@ async function cleanupArtifacts() {
               标记为 tainted ⇒ toBlob 直接 SecurityError。这个 flag 让所有 file URL
               同源；封面/水印/贴纸仍走 dataURL 注入（更稳），两条路并存。 */
            '--allow-file-access-from-files',
-           '--enable-gpu'],
+           /* GPU 光栅化有「首触 ±1 抖动」（RULES 76）：已由 __frame 的 koma 换态
+              首渲丢弃 + __pvShot 双渲补丁兜住。4K 走 CPU 光栅化实测 0.4fps（9+ 小时），
+              GPU ~18fps，所以 GPU 必开、补丁必带 —— 两者成对，拆开就会出
+              「koma 同一张画 5 帧字节不一致」或「渲到天荒地老」。 */],
   };
   /* 页面入口：job.page 可指定同目录下的另一份播放器（如 index_v10.html）。
      缺省 index.html ⇒ 旧行为完全不变；两版共用 fonts/ 与 assets/，不必复制 18MB 字体。 */

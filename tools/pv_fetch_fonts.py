@@ -51,6 +51,15 @@ FAMILIES = [
     # 用户说的「部分段落字体廉价」，一部分就是它。
     ("Zen+Kaku+Gothic+New:wght@500;700;900", "zenkakugothicnew", "OFL_zenkakugothicnew.txt",
      "https://raw.githubusercontent.com/google/fonts/main/ofl/zenkakugothicnew/OFL.txt"),
+    # ---- 晨光绘本（Innocence v2）专用：拉丁抒情 ----
+    # Nunito：圆润人文无衬线，笔画收尾是圆的 —— 钢琴抒情曲的「温柔」要靠它，
+    # Zen Kaku 是日系黑体，英文太「网页」；Archivo Black 是冲击型，更不对。
+    ("Nunito:wght@400;600;700;800", "nunito", "OFL_nunito.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/nunito/OFL.txt"),
+    # Fraunces Italic：软衬线斜体，「Innocence / brilliant / cry」这类情感词专用。
+    # 只要 italic —— 正体由 Nunito 承担，斜体衬线是签名笔触。
+    ("Fraunces:ital,wght@1,400;1,600;1,700", "fraunces", "OFL_fraunces.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/fraunces/OFL.txt"),
     # 注意：本机代理下 fonts.gstatic.com 偶发 rc=35（SSL connect），全量重抓会失败。
     # 只抓需要的族：`--only zenkakugothicnew`。
 ]

@@ -34,14 +34,17 @@
     const dim = PV.hex(pal.dim || pal.void || '#2A2A2E');
     const ghostA = PV.hex(pal.ghostA || '#39C6E0');
     const ghostB = PV.hex(pal.ghostB || '#C8373A');
+    /* glow：晨光绘本的光晕色（halo/sunrise/windowLight 读它）。缺省回落 accent。 */
+    const glow = PV.hex(pal.glow || pal.accent || '#FFD9A0');
     const voidc = dim;
     return {
       inkRGB: ink, paperRGB: paper, accentRGB: accent, acc2RGB: accent2,
       subRGB: sub, dimRGB: dim,
       ghostARGB: ghostA, ghostBRGB: ghostB, voidRGB: voidc,
+      glowRGB: glow,
       ink: rgba(ink, 1), paper: rgba(paper, 1), accent: rgba(accent, 1),
       acc2: rgba(accent2, 1), sub: rgba(sub, 1), dim: rgba(dim, 1),
-      ghostA: rgba(ghostA, 1), ghostB: rgba(ghostB, 1),
+      ghostA: rgba(ghostA, 1), ghostB: rgba(ghostB, 1), glow: rgba(glow, 1),
       flat: !!pal.flat, texture: pal.texture || null,
       /* 深底还是浅底，决定了「分离字与底」的手法完全不同：
          浅底靠描边（暗边压在纸上），深底靠加粗 + 硬投影。
@@ -545,6 +548,9 @@
       // 重置：所有变换每帧从零开始，避免上一帧残留
       g.dx = 0; g.dy = 0; g.rot = 0; g.sc = 1; g.sx = 1; g.sy = 1;
       g.alpha = 1; g.vis = 1; g.clip = null;
+      /* shot.sc：整镜缩放系数（晨光绘本「桥段逐句放大」用）。
+         必须在重置之后乘进去 —— 放在重置前会被下一帧清掉。 */
+      if (shot.sc) g.sc *= shot.sc;
       /* 零件驱动源同理必须每帧清空：它是数组（入场、退场各能 push 一层），
          留着上一帧的会逐帧累积，零件越飞越野且没有任何报错。 */
       g.pfns = null;

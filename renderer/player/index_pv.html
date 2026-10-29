@@ -146,6 +146,7 @@ window.__setup = async (meta) => {
    用来确认「每个该有人的镜头都装载过」——这是那次「成片里一个人都没有」
    唯一能被自动发现的信号（画面、时长、码率、帧数全都正常）。 */
 let FIG_SHOTS = 0;
+let _lastQt = null;      // __frame 上次渲染的 koma 量化态（RULES 76 首触丢弃）
 window.__frame = async (i, opts) => {
   const t = i / HL.fps;
   const fast = !!(opts && opts.fast);
@@ -168,6 +169,14 @@ window.__frame = async (i, opts) => {
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#07090C';
   ctx.fillRect(0, 0, VW, VH);
+  /* koma 换态首渲丢弃（RULES 76）：GPU 光栅化对每种绘制状态的首次执行会漏 ±1 抖动，
+     同一张画的 5 个输出帧里第 1 帧会与后 4 帧字节不一致。量化态切换时先渲一遍丢弃，
+     再渲正式帧；同 koma 的后续帧天然已是热态，单渲即可。fast 预推不产出画面，跳过。 */
+  if (!fast) {
+    const K = (CFG && CFG.storyboard && CFG.storyboard.meta && CFG.storyboard.meta.koma) || 0;
+    const qt = K > 0 ? Math.floor(t * K + 1e-6) / K : t;
+    if (qt !== _lastQt) { _lastQt = qt; PV.renderAt(ctx, t); }
+  }
   PV.renderAt(ctx, t);
   HL.prog = i;
 };
@@ -186,6 +195,9 @@ window.__pvShot = async (cfg) => {
   const pend = PV.ensureWindow ? PV.ensureWindow(cfg.t) : null;
   if (pend) { await pend; FIG_SHOTS++; }
   applyScale();
+  /* 首渲丢弃（RULES 76）：GPU 首触 ±1 抖动，第二次渲染起才字节稳定。
+     确定性验收（同 t 双渲一致）比的是两个热态；冷触是一次性光栅化噪声。 */
+  PV.renderAt(ctx, cfg.t);
   PV.renderAt(ctx, cfg.t);
   return cv.toDataURL('image/png');
 };
