@@ -327,8 +327,7 @@ async function cleanupArtifacts() {
     artImage: job.artImage || null,  // dataURL（右侧装饰层，与封面互不干扰）
     proAnalysis: job.proAnalysis || null,   // 真实音频分析（tools/analyze_music.py），供 pro_bg.js
     bg: job.bg || '',                        // 专业背景层方案：daw | spec | vocal | ''
-    live: job.live ? Object.assign({}, job.live, job.figs ? { figs: job.figs } : {})
-                   : (job.figs ? { figs: job.figs } : null),  // figs: 静态立绘 name→path（photoCircle 等蒙版器件）
+    live: job.live || null,   // 直播画面序列（head 圆窗 / body 竖幅 / wide 底衬）
     /* 文字 PV 导演层的产物（tools/pv_direct.py）。只有 index_pv.html 读它；
        其余页面忽略未知字段，所以传了也不影响 v9/v10。 */
     storyboard: job.storyboard || null,
@@ -377,7 +376,7 @@ async function cleanupArtifacts() {
     process.exit(3);
   }
   const setup = handles[0].setup;
-  console.log(`[setup] ${1920 * RES}x${1080 * RES} 时长 ${setup.dur.toFixed(2)}s，共 ${setup.total} 帧${FPS}fps），` +
+  console.log(`[setup] ${1920 * RES}x${1080 * RES} 时长 ${setup.dur.toFixed(2)}s，共 ${setup.total} 帧（${FPS}fps），` +
               `歌词 ${setup.lyrics} 行，码率 ${(BITRATE / 1e6).toFixed(1)} Mbps，${PAGES} 个渲染实例`);
 
   // 4. 渲染

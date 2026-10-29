@@ -165,14 +165,7 @@
    ],
    "decor": [
     "photoCorners"
-   ],
-   "fig": {
-    "k": "photoCircle",
-    "img": "sailor_wink",
-    "x": 0.76,
-    "y": 0.44,
-    "r": 175
-   }
+   ]
   },
   {
    "line": 2,
@@ -189,15 +182,7 @@
     "windowLight"
    ],
    "cam": "drift",
-   "special": "slowPan",
-   "fig": {
-    "k": "photoSquare",
-    "img": "angel_face",
-    "x": 0.26,
-    "y": 0.5,
-    "w": 330,
-    "h": 420
-   }
+   "special": "slowPan"
   },
   {
    "line": 3,
@@ -217,15 +202,7 @@
     "tinyStars",
     "photoCorners"
    ],
-   "scale": 0.85,
-   "fig": {
-    "k": "photoSticker",
-    "img": "chibi_flower",
-    "x": 0.72,
-    "y": 0.56,
-    "size": 250,
-    "rot": 4
-   }
+   "scale": 0.85
   },
   {
    "line": 4,
@@ -240,15 +217,7 @@
    "exit": "fade",
    "hold": "none",
    "special": "freeze2s",
-   "recallKey": "wouldnt-change",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "wouldnt-change"
   },
   {
    "line": 5,
@@ -264,15 +233,7 @@
    "bg": [
     "halo"
    ],
-   "recallKey": "best-feeling",
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "recallKey": "best-feeling"
   },
   {
    "line": 6,
@@ -290,15 +251,7 @@
     "rays"
    ],
    "recallKey": "brilliant",
-   "emphasis": "brilliant",
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "emphasis": "brilliant"
   },
   {
    "line": 7,
@@ -312,15 +265,7 @@
    "enter": "softIn",
    "exit": "fade",
    "special": "drag3px",
-   "recallKey": "hope-stay",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "hope-stay"
   },
   {
    "line": 8,
@@ -338,15 +283,7 @@
     "halo"
    ],
    "special": "mirrorDust",
-   "recallKey": "moment-perfect",
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "recallKey": "moment-perfect"
   },
   {
    "line": 9,
@@ -360,15 +297,7 @@
    "enter": "softIn",
    "exit": "fadeUp",
    "special": "wobble0.5",
-   "recallKey": "dont-go",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "dont-go"
   },
   {
    "line": 10,
@@ -383,15 +312,7 @@
    "exit": "fade",
    "cam": "push",
    "weight": "max",
-   "recallKey": "need-you",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "need-you"
   },
   {
    "line": 11,
@@ -405,15 +326,7 @@
    "enter": "softIn",
    "exit": "fade",
    "letterSpacing": -0.01,
-   "recallKey": "hold-on",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "hold-on"
   },
   {
    "line": 12,
@@ -427,15 +340,7 @@
    "enter": "softIn",
    "exit": "pFallSlow",
    "special": "pieces-1st",
-   "recallKey": "pass-by",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "pass-by"
   },
   {
    "line": 13,
@@ -451,15 +356,7 @@
    "bg": [
     "arch"
    ],
-   "pal": 1,
-   "fig": {
-    "k": "photoSquare",
-    "img": "white_dress",
-    "x": 0.28,
-    "y": 0.48,
-    "w": 310,
-    "h": 400
-   }
+   "pal": 1
   },
   {
    "line": 14,
@@ -477,14 +374,7 @@
     "halo"
    ],
    "pal": 1,
-   "recallKey": "first-time",
-   "fig": {
-    "k": "photoCircle",
-    "img": "sailor_wink",
-    "x": 0.76,
-    "y": 0.44,
-    "r": 175
-   }
+   "recallKey": "first-time"
   },
   {
    "line": 15,
@@ -501,15 +391,7 @@
     "arch"
    ],
    "pal": 1,
-   "special": "threeWordCascade",
-   "fig": {
-    "k": "photoSquare",
-    "img": "white_dress",
-    "x": 0.28,
-    "y": 0.48,
-    "w": 310,
-    "h": 400
-   }
+   "special": "threeWordCascade"
   },
   {
    "line": 16,
@@ -524,15 +406,7 @@
    "exit": "fadeUp",
    "pal": 1,
    "weight": "max",
-   "underline": "accent2",
-   "fig": {
-    "k": "photoSquare",
-    "img": "white_dress",
-    "x": 0.28,
-    "y": 0.48,
-    "w": 310,
-    "h": 400
-   }
+   "underline": "accent2"
   },
   {
    "line": 17,
@@ -547,15 +421,7 @@
    "exit": "fade",
    "pal": 1,
    "hold": "none",
-   "recallKey": "wouldnt-change",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "wouldnt-change"
   },
   {
    "line": 18,
@@ -572,15 +438,7 @@
     "halo"
    ],
    "recallKey": "best-feeling",
-   "boost": 1.2,
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "boost": 1.2
   },
   {
    "line": 19,
@@ -598,15 +456,7 @@
     "rays"
    ],
    "recallKey": "brilliant",
-   "boost": 1.2,
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "boost": 1.2
   },
   {
    "line": 20,
@@ -620,15 +470,7 @@
    "enter": "softIn",
    "exit": "fade",
    "special": "drag3px",
-   "recallKey": "hope-stay",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "hope-stay"
   },
   {
    "line": 21,
@@ -646,15 +488,7 @@
     "halo"
    ],
    "special": "mirrorDust",
-   "recallKey": "moment-perfect",
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "recallKey": "moment-perfect"
   },
   {
    "line": 22,
@@ -668,15 +502,7 @@
    "enter": "softIn",
    "exit": "fadeUp",
    "special": "wobble0.5",
-   "recallKey": "dont-go",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "dont-go"
   },
   {
    "line": 23,
@@ -691,15 +517,7 @@
    "exit": "fade",
    "cam": "push",
    "weight": "max",
-   "recallKey": "need-you",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "need-you"
   },
   {
    "line": 24,
@@ -713,15 +531,7 @@
    "enter": "softIn",
    "exit": "fade",
    "letterSpacing": -0.01,
-   "recallKey": "hold-on",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "hold-on"
   },
   {
    "line": 25,
@@ -735,15 +545,7 @@
    "enter": "softIn",
    "exit": "pFallSlow",
    "special": "pieces-2nd",
-   "recallKey": "pass-by",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "pass-by"
   },
   {
    "line": 26,
@@ -764,15 +566,7 @@
    "offsetY": [
     -18,
     18
-   ],
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   ]
   },
   {
    "line": 27,
@@ -793,15 +587,7 @@
    "offsetY": [
     18,
     -18
-   ],
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   ]
   },
   {
    "line": 28,
@@ -821,15 +607,7 @@
    "decor": [
     "teardrop"
    ],
-   "blurBottom": 2,
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   "blurBottom": 2
   },
   {
    "line": 29,
@@ -848,15 +626,7 @@
    "pal": 3,
    "desat": 0.15,
    "scale": 1.05,
-   "recallKey": "bliss",
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   "recallKey": "bliss"
   },
   {
    "line": 30,
@@ -875,15 +645,7 @@
    "pal": 3,
    "desat": 0.25,
    "scale": 1.08,
-   "recallKey": "happiness",
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   "recallKey": "happiness"
   },
   {
    "line": 31,
@@ -905,15 +667,7 @@
    ],
    "desat": 0.35,
    "scale": 1.12,
-   "recallKey": "cry",
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   "recallKey": "cry"
   },
   {
    "line": 32,
@@ -932,15 +686,7 @@
    "pal": 3,
    "special": "cryGiant",
    "scale": 1.25,
-   "recallKey": "cry",
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   "recallKey": "cry"
   },
   {
    "line": 33,
@@ -958,15 +704,7 @@
     "rays"
    ],
    "recallKey": "brilliant",
-   "haloR": 1.12,
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "haloR": 1.12
   },
   {
    "line": 34,
@@ -984,15 +722,7 @@
    ],
    "pal": 3,
    "special": "ghostFlash",
-   "recallKey": "cry",
-   "fig": {
-    "k": "photoSticker",
-    "img": "angel_wing",
-    "x": 0.72,
-    "y": 0.5,
-    "size": 330,
-    "rot": 2
-   }
+   "recallKey": "cry"
   },
   {
    "line": 35,
@@ -1010,15 +740,7 @@
     "rays"
    ],
    "recallKey": "brilliant",
-   "haloR": 1.24,
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "haloR": 1.24
   },
   {
    "line": 36,
@@ -1032,15 +754,7 @@
    "enter": "softIn",
    "exit": "fadeUp",
    "special": "wobble0.5",
-   "recallKey": "dont-go",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "dont-go"
   },
   {
    "line": 37,
@@ -1055,15 +769,7 @@
    "exit": "fade",
    "cam": "push",
    "weight": "max",
-   "recallKey": "need-you",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "need-you"
   },
   {
    "line": 38,
@@ -1077,15 +783,7 @@
    "enter": "softIn",
    "exit": "fade",
    "letterSpacing": -0.01,
-   "recallKey": "hold-on",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "hold-on"
   },
   {
    "line": 39,
@@ -1099,15 +797,7 @@
    "enter": "softIn",
    "exit": "pFallSlow",
    "special": "pieces-3rd",
-   "recallKey": "pass-by",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "pass-by"
   },
   {
    "line": 40,
@@ -1125,15 +815,7 @@
     "rays"
    ],
    "recallKey": "brilliant",
-   "haloR": 1.36,
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "haloR": 1.36
   },
   {
    "line": 41,
@@ -1147,15 +829,7 @@
    "enter": "softIn",
    "exit": "fade",
    "special": "drag3px",
-   "recallKey": "hope-stay",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "hope-stay"
   },
   {
    "line": 42,
@@ -1173,15 +847,7 @@
     "halo"
    ],
    "special": "mirrorDust",
-   "recallKey": "moment-perfect",
-   "fig": {
-    "k": "photoSticker",
-    "img": "idol_pink",
-    "x": 0.7,
-    "y": 0.5,
-    "size": 340,
-    "rot": -3
-   }
+   "recallKey": "moment-perfect"
   },
   {
    "line": 43,
@@ -1196,15 +862,7 @@
    "exit": "fadeUp",
    "special": "wobble0.5",
    "pal": "2→4",
-   "recallKey": "dont-go",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "dont-go"
   },
   {
    "line": 44,
@@ -1220,15 +878,7 @@
    "cam": "push",
    "weight": "max",
    "pal": "2→4",
-   "recallKey": "need-you",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "need-you"
   },
   {
    "line": 45,
@@ -1243,15 +893,7 @@
    "exit": "fade",
    "letterSpacing": -0.01,
    "pal": 4,
-   "recallKey": "hold-on",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "hold-on"
   },
   {
    "line": 46,
@@ -1266,15 +908,7 @@
    "exit": "pFallSlow",
    "special": "pieces-final",
    "pal": 4,
-   "recallKey": "pass-by",
-   "fig": {
-    "k": "photoCircle",
-    "img": "idol_purple",
-    "x": 0.24,
-    "y": 0.48,
-    "r": 195,
-    "ticks": 16
-   }
+   "recallKey": "pass-by"
   }
  ],
  "transitions": {
@@ -1311,20 +945,5 @@
   "boost": "回访时 halo/rays 强度乘数",
   "haloR": "回访时 halo 半径乘数（记忆点递进）",
   "pal 2→4": "辉金渐溶入暮杏（时间在走）"
- },
- "figs": {
-  "sailor_wink": "D:/岁己歌切/_media_cache/sui_figs/260ded80-4a8e-4fcc-afc5-c580a9641acb_cut.png",
-  "sailor_pose5": "D:/岁己歌切/_media_cache/sui_figs/3754bc1b5bcff927504d4f769a6cd6ac1954091502_cut.png",
-  "idol_pink": "D:/岁己歌切/_media_cache/sui_figs/IMG_3822_cut.png",
-  "idol_purple": "D:/岁己歌切/_media_cache/sui_figs/4b71fa14-b072-40e9-b829-8fdb0e895057_cut.png",
-  "angel_wing": "D:/岁己歌切/_media_cache/sui_figs/IMG_3827_cut.png",
-  "angel_face": "D:/岁己歌切/_media_cache/sui_figs/IMG_3826_cut.png",
-  "chibi_flower": "D:/岁己歌切/_media_cache/sui_figs/0d045921-b6da-4da4-8f27-446aa074858d_cut.png",
-  "chibi_angel": "D:/岁己歌切/_media_cache/sui_figs/f5cebc3d-72cb-4d5c-b45c-22a8b8875319_cut.png",
-  "gothic_cat": "D:/岁己歌切/_media_cache/sui_figs/e95c4efa7e3c77dbbf93c31060df7b941954091502_cut.png",
-  "bunny_red": "D:/岁己歌切/_media_cache/sui_figs/皱眉外套_cut.png",
-  "white_dress": "D:/岁己歌切/_media_cache/sui_figs/IMG_3824_cut.png",
-  "sailor_full": "D:/岁己歌切/_media_cache/sui_figs/IMG_3510_cut.png",
-  "gothic_full": "D:/岁己歌切/_media_cache/sui_figs/IMG_5248_cut.png"
  }
 }

@@ -13,13 +13,12 @@
 
   const ST = {
     sb: null, S: null, live: null,
-    shots: [], seq: {}, figCache: {}, figs: {}, face: { cx: 0.5, cy: 0.5 },
+    shots: [], seq: {}, figCache: {}, face: { cx: 0.5, cy: 0.5 },
     dur: 0, fps: 60, dpr: 1, ready: false,
     lay: new Map(),            // shot.i → layout 结果缓存（构图只算一次）
     stats: { glyphs: 0, shots: 0 },
   };
   PV.ST = ST;
-  PV.FIGIMG = ST.figs;   // 静态立绘注册表（photoCircle 等几何蒙版器件读它）
 
   /* ---------------- 调色板 ---------------- */
   function buildStyle(pal, dpr) {
@@ -59,21 +58,6 @@
   /* ---------------- 素材：图片序列 ----------------
      离线渲染是同步循环，<video> 的 seek 是异步的、会丢帧 —— 一律用图片序列。
      缺帧时回落到最近的已加载帧，绝不黑屏。 */
-  /* 静态立绘（几何蒙版器件用）：单张 PNG/JPG，key → HTMLImageElement。
-     与 seq 不同，不需要滑窗释放——一张 2K PNG 约 10MB 解码后，全量 28 张也才 280MB。
-     路径走 file:/// 协议（离线渲染），data URL 也直接接受。 */
-  const _figPromises = [];
-  function loadFigImg(name, src) {
-    if (!name || !src) return null;
-    const im = new Image();
-    im.src = String(src).startsWith('data:') ? src
-      : ('file:///' + String(src).replace(/\\/g, '/'));
-    ST.figs[name] = im;
-    _figPromises.push(im.decode ? im.decode().catch(() => {}) : new Promise(r => { im.onload = im.onerror = r; }));
-    return im;
-  }
-  PV.figsReady = () => Promise.all(_figPromises);
-
   function loadSeq(name, info) {
     if (!info || !info.dir) return null;
     ST.seq[name] = {
@@ -1004,16 +988,16 @@
        单镜头也能用 shot.keyBg 覆写（演示片里混一段色键素材就是这么做的）。 */
     ST.keyBg = opt.keyBg || (opt.storyboard.meta && opt.storyboard.meta.keyBg) || null;
 
-    const live = opt.live || {};
+    /* live 序列（head 圆窗 / body 竖幅 / wide 底衬）：优先用调用方传的，
+       没传时回落到 storyboard.meta.live —— 静帧工具只交 storyboard，靠这条兜底。 */
+    const live = (opt.live && Object.keys(opt.live).length)
+      ? opt.live
+      : ((opt.storyboard && opt.storyboard.meta && opt.storyboard.meta.live) || {});
     if (live.head) loadSeq('head', live.head);
     if (live.body) loadSeq('body', live.body);
     if (live.wide) loadSeq('wide', live.wide);
     if (live.face) ST.face = live.face;
-    const figsMap = live.figs || (opt.storyboard && opt.storyboard.meta && opt.storyboard.meta.figs) || null;
-    if (figsMap) {
-      for (const [k, v] of Object.entries(figsMap)) loadFigImg(k, v);
-      console.log('[pv] 静态立绘 %d 张', Object.keys(figsMap).length);
-    }
+
 
     const ctx = opt.ctx;
     const LINES = opt.storyboard.lines || [];

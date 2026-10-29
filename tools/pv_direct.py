@@ -573,10 +573,27 @@ def _dawn_face(spec):
     return "nunitoSemi"
 
 
-def _dawn_layout(spec):
+def _dawn_layout(spec, fig=None):
     sp = spec.get("special") or ""
     face = _dawn_face(spec)
     layk = spec.get("layout") or "block"
+    if fig:
+        # 现场画面入框时，**文字必须让位**：center/scaleSteps 不支持版心参数，
+        # 一律换 block 并把版心挤到「没图的那一侧」。只靠 placeFigure 的 bbox
+        # 避让是不够的 —— 文字块本身占满中段时，六锚点里没有一个能躲开
+        # （实测 t=24.5 圆窗压住 "I wouldn't change"、t=30.5 方框压住 "feeling"）。
+        band = fig.get("mode") != "disc"
+        fw = ((2 * int(fig["r"]) + 40) if not band
+              else (int(int(fig["h"]) * fig.get("wRatio", 0.752)) + 24))
+        frac = fw / 1920.0
+        if fig.get("side") == "l":
+            x = round(0.075 + frac + 0.02, 3)
+            aw = round(max(0.30, 0.94 - x), 3)
+        else:
+            x = 0.075
+            aw = round(max(0.30, 0.94 - frac - 0.075), 3)
+        return {"k": "block", "face": face, "x": x, "availW": aw,
+                "cy": 0.47, "hK": 0.125, "lead": 1.18, "maxRows": 3}
     nw = len((spec.get("text") or "").split())
     # scaleSteps 是 bleed=true（不过安全网），词多时堆叠总高会顶出画外：
     # 8 词 × 0.17H 起步 ≈ 1.03H，首词直接被裁（实测桥段 t=127）。
@@ -591,6 +608,30 @@ def _dawn_layout(spec):
     if sp == "cryGiant":
         return {"k": "center", "face": "frauncesItB", "track": -0.015}
     return {"k": layk, "face": face}
+
+
+# 1027 演唱原视频的「入框」节点（2026-10-29 二版）。
+# ★ 一律 layer="avoid"：图先画、字后画 ⇒ 字永远在图之上；disc 还会按文字 bbox
+#   避让选位（placeFigure），所以既不会压字，文字也不会被框切。
+# band（3:4 竖幅）贴边不避让 ⇒ 只挂给短句（≤26 字符），文字本身不占满才有空。
+# 参数是 1920×1080 设计坐标（4K 渲染整体 scale×2）。
+# ★ 静态 PNG 立绘（photoCircle/Square/Sticker/Strip）已整套移除：
+#   固定坐标必然压字，且抠图贴纸的质感与晨光绘本语法不合。原视频入框才是正解。
+DAWN_LIVE = {
+    4:  dict(mode="disc", seq="head", layer="avoid", side="r", r=215, y=0.42, a=0.90, motion=1.0, ph=0.12),
+    5:  dict(mode="band", seq="body", layer="avoid", side="r", h=540, y=0.17, a=0.88, motion=0.9, ph=0.37),
+    8:  dict(mode="disc", seq="head", layer="avoid", side="l", r=205, y=0.43, a=0.90, motion=1.0, ph=0.58),
+    10: dict(mode="band", seq="body", layer="avoid", side="l", h=520, y=0.19, a=0.88, motion=0.9, ph=0.83),
+    13: dict(mode="disc", seq="head", layer="avoid", side="l", r=220, y=0.41, a=0.90, motion=1.0, ph=0.21),
+    18: dict(mode="band", seq="body", layer="avoid", side="r", h=536, y=0.18, a=0.88, motion=0.9, ph=0.46),
+    21: dict(mode="disc", seq="head", layer="avoid", side="l", r=208, y=0.43, a=0.90, motion=1.0, ph=0.69),
+    23: dict(mode="band", seq="body", layer="avoid", side="r", h=516, y=0.20, a=0.88, motion=0.9, ph=0.05),
+    26: dict(mode="disc", seq="head", layer="avoid", side="r", r=200, y=0.42, a=0.84, motion=1.1, ph=0.77),
+    34: dict(mode="band", seq="body", layer="avoid", side="r", h=504, y=0.20, a=0.86, motion=0.9, ph=0.31),
+    38: dict(mode="disc", seq="head", layer="avoid", side="r", r=210, y=0.42, a=0.90, motion=1.0, ph=0.91),
+    42: dict(mode="band", seq="body", layer="avoid", side="l", h=524, y=0.19, a=0.88, motion=0.9, ph=0.64),
+    45: dict(mode="disc", seq="head", layer="avoid", side="r", r=202, y=0.43, a=0.88, motion=1.1, ph=0.18),
+}
 
 
 def build_dawn_shots(a, lines, m, dur):
@@ -762,16 +803,16 @@ def build_dawn_shots(a, lines, m, dur):
             "tier": 1 if energy < 0.6 else (2 if energy < 0.8 else 3),
             "section": sec.get("name", ""),
             "energy": energy,
-            "layout": _dawn_layout(spec),
+            "layout": _dawn_layout(spec, DAWN_LIVE.get(i)),
             "type": {},
             "enter": ent, "hold": hold, "exit": xit,
             "treat": {"k": "solid"},
             "pal": {"pack": "dawn", "idx": pal_idx(spec, sec)},
             "bgl": bgl, "bg": [],
-            "decor": decor_items(spec, i) + ([dict(spec["fig"], seed=21 + i * 5)]
-                                             if spec.get("fig") else []),
+            "decor": decor_items(spec, i),
             "post": post, "cam": cam,
-            "fig": None, "sync": False, "wobble": wob,
+            "fig": (dict(DAWN_LIVE[i]) if i in DAWN_LIVE else None),
+            "sync": False, "wobble": wob,
             "unified": False,
             "special": sp,
             "note": "%s / %s / %s" % (sec.get("name", ""), "+".join(img), sp or "-"),
@@ -831,6 +872,27 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
 
     shots = build_dawn_shots(a, lines, m, dur)
 
+    # 1027 演唱原视频的序列描述（静帧工具靠 storyboard.meta.live 兜底装载）
+    live_desc = None
+    if getattr(a, "live_json", ""):
+        lj = json.load(open(a.live_json, encoding="utf-8"))
+        root = os.path.dirname(os.path.abspath(a.live_json)).replace("\\", "/")
+        def _seq(e):
+            if not e:
+                return None
+            d = (e.get("dir") or "").replace("\\", "/")
+            if d and not os.path.isabs(d):
+                # prepare_live 写的 dir 是「相对项目根」，也可能「相对 live.json」——
+                # 两个候选都试，取真实存在的那个（之前直接拼 root 导致路径重复一层）
+                cands = [os.path.abspath(d).replace("\\", "/"), root + "/" + d]
+                d = next((c for c in cands if os.path.isdir(c)), cands[0])
+            return dict(e, dir=d)
+        live_desc = {"face": lj.get("face") or {"cx": 0.5, "cy": 0.5}}
+        for _k in ("head", "body", "wide"):
+            s = _seq(lj.get(_k))
+            if s:
+                live_desc[_k] = s
+
     # 半拍吸附（只吸动效时长；镜头边界锁人声，不动）
     beat = 60.0 / ana["bpm"] if ana.get("bpm") else 0.0
     if beat > 0:
@@ -849,7 +911,7 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
             "seed": a.seed, "dur": dur, "fps": 60, "start": w0,
             "koma": a.koma, "keyBg": a.keyBg or None,
             "concept": "dawn", "imagery": path.replace("\\", "/"),
-            "figs": m.get("figs") or None,
+            "live": live_desc,   # head 圆窗 / body 竖幅（1027 演唱原视频）
             # 绘本纸底非平涂（bg 件柔光/水彩会进四角）→ pv_check 四角判据豁免
             "paper_ok": True,
             "mark": "",
@@ -908,6 +970,8 @@ def main():
                     help="绿幕/黑幕导出（JIZURA 的 keyBg），空=正常纸底")
     ap.add_argument("--concept", default="", choices=["", "dawn"],
                     help="dawn=意象驱动（读 --imagery 映射表，不抽卡）")
+    ap.add_argument("--live-json", default="",
+                    help="1027 原视频序列的 live.json（prepare_live.py 产出）")
     ap.add_argument("--imagery", default="",
                     help="逐句意象映射 JSON（--concept dawn 用），默认 docs/innocence-v2-imagery-map.json")
     a = ap.parse_args()
