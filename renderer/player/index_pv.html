@@ -130,8 +130,9 @@ window.__setup = async (meta) => {
       storyboard: meta.storyboard,
       live: meta.live || {},
       dur: meta.pvDur || meta.dur || 0,
-      fps: HL.fps,
+      fps: meta.fps || HL.fps || 60,
     });
+    if (PV.figsReady) await PV.figsReady();
     console.log('[pv] setup 镜头 %d 字形 %d 字体 %d 序列 %s',
       r.shots, r.glyphs, r.fonts, JSON.stringify(r.seqs));
     if (r.missing.length) console.warn('[pv] 字体未就绪：%s', JSON.stringify(r.missing));

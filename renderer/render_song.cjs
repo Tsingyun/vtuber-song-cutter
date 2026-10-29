@@ -112,6 +112,8 @@ async function cleanupArtifacts() {
   /* 输出倍率：1 → 1920×1080，2 → 3840×2160（4K60）。设计坐标恒为 1920×1080。 */
   const RES = Number(argOf('res') || job.res || 1);
   const BITRATE = Number(argOf('bitrate') || job.bitrate || 18000000);
+  const FPS = Number(argOf('fps') || job.fps
+    || (job.storyboard && job.storyboard.meta && job.storyboard.meta.fps) || 60);
   const ENCODER = argOf('encoder') || job.encoder || (RES >= 2 ? 'ffmpeg' : 'webcodecs');
   const PRESET = argOf('preset') || job.preset || 'fast';
   /* 视频编码器：h264_nvenc（NVENC 硬编，默认） / libx264（CPU 软编回退）。
@@ -183,11 +185,11 @@ async function cleanupArtifacts() {
     ...(VCODEC === 'h264_nvenc' ? ['-bsf:v', 'h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1'] : []),
     '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-level:v', '5.2',
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
-    '-r', '60', '-an', '-movflags', '+faststart',
+    '-r', String(FPS), '-an', '-movflags', '+faststart',
   ];
   function spawnFfmpeg(inputSrc, outPath, isPart) {
     const args = ['-y', '-hide_banner', '-loglevel', 'warning', '-stats',
-                  '-f', 'mjpeg', '-framerate', '60',
+                  '-f', 'mjpeg', '-framerate', String(FPS),
                   '-i', inputSrc === 'pipe' ? 'pipe:0' : inputSrc,
                   ...outArgs(isPart), outPath];
     const f = spawn(FFMPEG, args, { stdio: [inputSrc === 'pipe' ? 'pipe' : 'ignore', 'inherit', 'inherit'] });
@@ -325,7 +327,8 @@ async function cleanupArtifacts() {
     artImage: job.artImage || null,  // dataURL（右侧装饰层，与封面互不干扰）
     proAnalysis: job.proAnalysis || null,   // 真实音频分析（tools/analyze_music.py），供 pro_bg.js
     bg: job.bg || '',                        // 专业背景层方案：daw | spec | vocal | ''
-    live: job.live || null,                  // 直播画面融合层（tools/prepare_live.py 产出的图片序列）
+    live: job.live ? Object.assign({}, job.live, job.figs ? { figs: job.figs } : {})
+                   : (job.figs ? { figs: job.figs } : null),  // figs: 静态立绘 name→path（photoCircle 等蒙版器件）
     /* 文字 PV 导演层的产物（tools/pv_direct.py）。只有 index_pv.html 读它；
        其余页面忽略未知字段，所以传了也不影响 v9/v10。 */
     storyboard: job.storyboard || null,
@@ -333,6 +336,7 @@ async function cleanupArtifacts() {
        否则 PV 页会退回「读音频时长」，音频是整首歌 ⇒ 尾巴全是最后一镜的定格。 */
     pvDur: (job.pvDur != null) ? Number(job.pvDur)
       : (job.storyboard && job.storyboard.meta && job.storyboard.meta.dur) || null,
+    fps: FPS,
     lrcOffset: (job.lrcOffset == null ? null : Number(job.lrcOffset)),  // 歌词时间偏移（测试片段用整份 LRC + 偏移）
     scheme: (job.scheme == null ? null : Number(job.scheme)),  // 标题装饰方案 0~4（自动匹配/手动覆盖）
     bitrate: BITRATE,           // 成片视频码率(bps)：4K 走 B站不二压区间 16~18.5 Mbps
@@ -373,7 +377,7 @@ async function cleanupArtifacts() {
     process.exit(3);
   }
   const setup = handles[0].setup;
-  console.log(`[setup] ${1920 * RES}x${1080 * RES} 时长 ${setup.dur.toFixed(2)}s，共 ${setup.total} 帧（60fps），` +
+  console.log(`[setup] ${1920 * RES}x${1080 * RES} 时长 ${setup.dur.toFixed(2)}s，共 ${setup.total} 帧${FPS}fps），` +
               `歌词 ${setup.lyrics} 行，码率 ${(BITRATE / 1e6).toFixed(1)} Mbps，${PAGES} 个渲染实例`);
 
   // 4. 渲染

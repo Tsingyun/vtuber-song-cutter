@@ -1,105 +1,1330 @@
 {
-  "_meta": {
-    "song": "Innocence",
-    "artist": "Avril Lavigne",
-    "vocal": "岁己SUI",
-    "concept": "dawn-picture-book",
-    "pack": "dawn",
-    "koma": 12,
-    "dur": 232.171,
-    "fps": 60,
-    "res": [3840, 2160],
-    "ghost": 0.5,
-    "note": "逐句意象→器件映射。line 下标 = pv__timing.json lines 数组下标。scheme: 0破晓 1晴昼 2辉 3梦 4暮。"
-  },
-  "sections": [
-    { "name": "intro", "scheme": 0, "t0": 0.0, "t1": 8.3, "note": "钢琴前奏 titleCard" },
-    { "name": "V1", "scheme": 0, "t0": 8.3, "t1": 36.4 },
-    { "name": "C1", "scheme": 2, "t0": 36.4, "t1": 67.6 },
-    { "name": "V2", "scheme": 1, "t0": 70.7, "t1": 91.3 },
-    { "name": "C2", "scheme": 2, "t0": 91.9, "t1": 124.1 },
-    { "name": "Br", "scheme": 3, "t0": 126.4, "t1": 157.2 },
-    { "name": "FC", "scheme": 2, "t0": 157.3, "t1": 215.3, "note": "末段渐入 scheme 4" },
-    { "name": "outro", "scheme": 4, "t0": 215.3, "t1": 232.17 }
+ "_meta": {
+  "song": "Innocence",
+  "artist": "Avril Lavigne",
+  "vocal": "岁己SUI",
+  "concept": "dawn-picture-book",
+  "pack": "dawn",
+  "koma": 12,
+  "dur": 232.171,
+  "fps": 60,
+  "res": [
+   3840,
+   2160
   ],
-  "imagery": {
-    "wake":    { "label": "醒来",   "bg": ["sunrise", "windowLight"], "motion": "softIn+weightGrow" },
-    "first":   { "label": "初见",   "bg": ["halo"], "motion": "slowScale 1.00→1.03" },
-    "slow":    { "label": "慢下来", "bg": ["windowLight"], "motion": "slowPan(全片唯一)" },
-    "little":  { "label": "小事物", "bg": ["dust"], "decor": ["tinyStars", "photoCorners"], "layout": "marginNote" },
-    "brill":   { "label": "闪耀纯真", "bg": ["halo", "rays"], "motion": "scaleSteps" },
-    "hold":    { "label": "挽留",   "motion": "drag3px/wobble/tight", "exit": "fadeUp不舍" },
-    "safe":    { "label": "安全之地", "bg": ["arch"], "layout": "block-center" },
-    "cry":     { "label": "美到想哭", "bg": ["watercolor"], "decor": ["teardrop"], "motion": "float/desat" }
+  "ghost": 0.5,
+  "note": "逐句意象→器件映射。line 下标 = pv__timing.json lines 数组下标。scheme: 0破晓 1晴昼 2辉 3梦 4暮。"
+ },
+ "sections": [
+  {
+   "name": "intro",
+   "scheme": 0,
+   "t0": 0.0,
+   "t1": 8.3,
+   "note": "钢琴前奏 titleCard"
   },
-  "lines": [
-    { "line": 0,  "t0": 8.30,   "t1": 11.66,  "text": "Waking up I see that everything is ok",              "img": ["wake"],       "layout": "block",      "enter": "softIn",      "exit": "fadeUp",   "bg": ["sunrise", "windowLight"] },
-    { "line": 1,  "t0": 11.72,  "t1": 15.24,  "text": "The first time in my life and now it's so great",   "img": ["first"],      "layout": "center",     "enter": "fadeSlow",    "exit": "fade",     "bg": ["halo"],         "decor": ["photoCorners"] },
-    { "line": 2,  "t0": 15.30,  "t1": 18.65,  "text": "Slowing down I look around and I am so amazed",    "img": ["slow"],       "layout": "lowerThird", "enter": "softIn",      "exit": "fade",     "bg": ["windowLight"],  "cam": "drift", "special": "slowPan" },
-    { "line": 3,  "t0": 18.71,  "t1": 23.35,  "text": "I think about the little things that make life great", "img": ["little"],  "layout": "marginNote", "enter": "typeOn",      "exit": "fade",     "bg": ["dust"],         "decor": ["tinyStars", "photoCorners"], "scale": 0.85 },
-    { "line": 4,  "t0": 23.41,  "t1": 29.24,  "text": "I wouldn't change a thing about it",                "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "hold": "none",         "special": "freeze2s", "recallKey": "wouldnt-change" },
-    { "line": 5,  "t0": 29.30,  "t1": 36.42,  "text": "This is the best feeling",                          "img": ["brill"],      "layout": "center",     "enter": "fadeSlow",    "exit": "fadeUp",   "bg": ["halo"],         "recallKey": "best-feeling" },
-    { "line": 6,  "t0": 36.48,  "t1": 40.59,  "text": "This innocence is brilliant",                       "img": ["brill"],      "layout": "scaleSteps", "enter": "softIn",      "exit": "fade",     "bg": ["halo", "rays"], "recallKey": "brilliant", "emphasis": "brilliant" },
-    { "line": 7,  "t0": 40.65,  "t1": 41.03,  "text": "I hope that it will stay",                          "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "special": "drag3px",   "recallKey": "hope-stay" },
-    { "line": 8,  "t0": 43.39,  "t1": 47.53,  "text": "This moment is perfect",                            "img": ["brill", "hold"], "layout": "center",  "enter": "fadeSlow",    "exit": "fade",     "bg": ["halo"],         "special": "mirrorDust", "recallKey": "moment-perfect" },
-    { "line": 9,  "t0": 47.59,  "t1": 50.33,  "text": "please don't go away",                              "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fadeUp",   "special": "wobble0.5", "recallKey": "dont-go" },
-    { "line": 10, "t0": 50.39,  "t1": 55.83,  "text": "I need you now",                                    "img": ["hold"],       "layout": "block",      "enter": "dropBounce",  "exit": "fade",     "cam": "push",          "weight": "max", "recallKey": "need-you" },
-    { "line": 11, "t0": 55.89,  "t1": 59.83,  "text": "And I'll hold on to it",                            "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "letterSpacing": -0.01, "recallKey": "hold-on" },
-    { "line": 12, "t0": 60.00,  "t1": 67.63,  "text": "don't you let it pass you by",                       "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "pFallSlow", "special": "pieces-1st", "recallKey": "pass-by" },
-    { "line": 13, "t0": 70.71,  "t1": 74.04,  "text": "I found a place so safe not a single tear",          "img": ["safe"],       "layout": "block",      "enter": "fadeSlow",    "exit": "fade",     "bg": ["arch"],         "pal": 1 },
-    { "line": 14, "t0": 74.10,  "t1": 77.72,  "text": "The first time in my life and now it's so clear",   "img": ["first", "safe"], "layout": "center",  "enter": "softIn",      "exit": "fade",     "bg": ["halo"],         "pal": 1, "recallKey": "first-time" },
-    { "line": 15, "t0": 77.78,  "t1": 81.21,  "text": "Feel calm I belong I'm so happy here",               "img": ["safe"],       "layout": "scaleSteps", "enter": "typeOn",      "exit": "fade",     "bg": ["arch"],         "pal": 1, "special": "threeWordCascade" },
-    { "line": 16, "t0": 81.39,  "t1": 86.01,  "text": "It's so strong and now I let myself be sincere",    "img": ["safe"],       "layout": "block",      "enter": "softIn",      "exit": "fadeUp",   "pal": 1, "weight": "max", "underline": "accent2" },
-    { "line": 17, "t0": 86.07,  "t1": 91.28,  "text": "I wouldn't change a thing about it",                "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "pal": 1, "hold": "none", "recallKey": "wouldnt-change" },
-    { "line": 18, "t0": 91.88,  "t1": 98.57,  "text": "This is the best feeling",                          "img": ["brill"],      "layout": "center",     "enter": "fadeSlow",    "exit": "fadeUp",   "bg": ["halo"],         "recallKey": "best-feeling", "boost": 1.2 },
-    { "line": 19, "t0": 98.63,  "t1": 103.30, "text": "This innocence is brilliant",                       "img": ["brill"],      "layout": "scaleSteps", "enter": "softIn",      "exit": "fade",     "bg": ["halo", "rays"], "recallKey": "brilliant", "boost": 1.2 },
-    { "line": 20, "t0": 103.36, "t1": 105.76, "text": "I hope that it will stay",                          "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "special": "drag3px",   "recallKey": "hope-stay" },
-    { "line": 21, "t0": 105.82, "t1": 107.43, "text": "This moment is perfect",                            "img": ["brill", "hold"], "layout": "center",  "enter": "fadeSlow",    "exit": "fade",     "bg": ["halo"],         "special": "mirrorDust", "recallKey": "moment-perfect" },
-    { "line": 22, "t0": 109.96, "t1": 112.85, "text": "please don't go away",                              "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fadeUp",   "special": "wobble0.5", "recallKey": "dont-go" },
-    { "line": 23, "t0": 112.93, "t1": 118.35, "text": "I need you now",                                    "img": ["hold"],       "layout": "block",      "enter": "dropBounce",  "exit": "fade",     "cam": "push",          "weight": "max", "recallKey": "need-you" },
-    { "line": 24, "t0": 118.41, "t1": 122.22, "text": "And I'll hold on to it",                            "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "letterSpacing": -0.01, "recallKey": "hold-on" },
-    { "line": 25, "t0": 122.28, "t1": 124.05, "text": "don't you let it pass you by",                       "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "pFallSlow", "special": "pieces-2nd", "recallKey": "pass-by" },
-    { "line": 26, "t0": 126.40, "t1": 129.27, "text": "It's the state of bliss you think you're dreaming",   "img": ["cry"],        "layout": "block",      "enter": "fadeSlow",    "exit": "fade",     "bg": ["watercolor"],   "pal": 3, "special": "offsetPair", "offsetY": [-18, 18] },
-    { "line": 27, "t0": 129.58, "t1": 132.94, "text": "It's the happiness inside that you're feeling",     "img": ["cry"],        "layout": "block",      "enter": "fadeSlow",    "exit": "fade",     "bg": ["watercolor"],   "pal": 3, "special": "offsetPair", "offsetY": [18, -18] },
-    { "line": 28, "t0": 133.00, "t1": 139.33, "text": "It's so beautiful, it makes you wanna cry",          "img": ["cry"],        "layout": "center",     "enter": "softIn",      "exit": "fadeUp",   "bg": ["watercolor"],   "pal": 3, "decor": ["teardrop"], "blurBottom": 2 },
-    { "line": 29, "t0": 139.39, "t1": 142.26, "text": "It's the state of bliss you think you're dreaming",   "img": ["cry"],        "layout": "block",      "enter": "fadeSlow",    "exit": "fade",     "bg": ["watercolor"],   "pal": 3, "desat": 0.15, "scale": 1.05, "recallKey": "bliss" },
-    { "line": 30, "t0": 142.79, "t1": 143.30, "text": "It's the happiness inside that you're feeling",     "img": ["cry"],        "layout": "block",      "enter": "fadeSlow",    "exit": "fade",     "bg": ["watercolor"],   "pal": 3, "desat": 0.25, "scale": 1.08, "recallKey": "happiness" },
-    { "line": 31, "t0": 146.62, "t1": 148.93, "text": "It's so beautiful, it makes you wanna cry",          "img": ["cry"],        "layout": "center",     "enter": "softIn",      "exit": "fade",     "bg": ["watercolor"],   "pal": 3, "decor": ["teardrop"], "desat": 0.35, "scale": 1.12, "recallKey": "cry" },
-    { "line": 32, "t0": 153.41, "t1": 157.24, "text": "It's so beautiful, it makes you wanna cry",          "img": ["cry"],        "layout": "center",     "enter": "dropBounce",  "exit": "fadeUp",   "bg": ["watercolor"],   "pal": 3, "special": "cryGiant", "scale": 1.25, "recallKey": "cry" },
-    { "line": 33, "t0": 157.30, "t1": 160.15, "text": "This innocence is brilliant",                       "img": ["brill"],      "layout": "scaleSteps", "enter": "softIn",      "exit": "fade",     "bg": ["halo", "rays"], "recallKey": "brilliant", "haloR": 1.12 },
-    { "line": 34, "t0": 161.81, "t1": 163.92, "text": "it makes you wanna cry",                            "img": ["cry"],        "layout": "center",     "enter": "fadeSlow",    "exit": "fade",     "bg": ["watercolor"],   "pal": 3, "special": "ghostFlash", "recallKey": "cry" },
-    { "line": 35, "t0": 163.98, "t1": 168.64, "text": "This innocence is brilliant",                       "img": ["brill"],      "layout": "scaleSteps", "enter": "softIn",      "exit": "fade",     "bg": ["halo", "rays"], "recallKey": "brilliant", "haloR": 1.24 },
-    { "line": 36, "t0": 168.70, "t1": 170.92, "text": "please don't go away",                              "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fadeUp",   "special": "wobble0.5", "recallKey": "dont-go" },
-    { "line": 37, "t0": 170.98, "t1": 176.55, "text": "Cause I need you now",                              "img": ["hold"],       "layout": "block",      "enter": "dropBounce",  "exit": "fade",     "cam": "push",          "weight": "max", "recallKey": "need-you" },
-    { "line": 38, "t0": 176.61, "t1": 180.53, "text": "And I'll hold on to it",                            "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "letterSpacing": -0.01, "recallKey": "hold-on" },
-    { "line": 39, "t0": 180.59, "t1": 184.86, "text": "don't you let it pass you by",                       "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "pFallSlow", "special": "pieces-3rd", "recallKey": "pass-by" },
-    { "line": 40, "t0": 184.92, "t1": 187.71, "text": "This innocence is brilliant",                       "img": ["brill"],      "layout": "scaleSteps", "enter": "softIn",      "exit": "fade",     "bg": ["halo", "rays"], "recallKey": "brilliant", "haloR": 1.36 },
-    { "line": 41, "t0": 189.19, "t1": 191.34, "text": "I hope that it will stay",                          "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "special": "drag3px",   "recallKey": "hope-stay" },
-    { "line": 42, "t0": 191.40, "t1": 192.87, "text": "This moment is perfect",                            "img": ["brill", "hold"], "layout": "center",  "enter": "fadeSlow",    "exit": "fade",     "bg": ["halo"],         "special": "mirrorDust", "recallKey": "moment-perfect" },
-    { "line": 43, "t0": 196.11, "t1": 198.66, "text": "please don't go away",                              "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fadeUp",   "special": "wobble0.5", "pal": "2→4", "recallKey": "dont-go" },
-    { "line": 44, "t0": 198.72, "t1": 203.93, "text": "I need you now",                                    "img": ["hold"],       "layout": "block",      "enter": "dropBounce",  "exit": "fade",     "cam": "push",          "weight": "max", "pal": "2→4", "recallKey": "need-you" },
-    { "line": 45, "t0": 203.99, "t1": 207.94, "text": "And I'll hold on to it",                            "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "fade",     "letterSpacing": -0.01, "pal": 4, "recallKey": "hold-on" },
-    { "line": 46, "t0": 208.00, "t1": 215.30, "text": "don't you let it pass you by",                       "img": ["hold"],       "layout": "block",      "enter": "softIn",      "exit": "pFallSlow", "special": "pieces-final", "pal": 4, "recallKey": "pass-by" }
-  ],
-  "transitions": {
-    "policy": "warm-soft",
-    "allow": { "wipe": 4, "ink": 3, "flash": 2, "iris": 2, "push": 2, "zoom": 1 },
-    "deny": ["blinds", "clock", "blocks"],
-    "dur": [0.34, 0.5]
+  {
+   "name": "V1",
+   "scheme": 0,
+   "t0": 8.3,
+   "t1": 36.4
   },
-  "specials": {
-    "slowPan": "全片唯一横移长镜，camera drift 0→120px over shot",
-    "freeze2s": "hold=none，字完全静止（'不变'语义）",
-    "drag3px": "字向后拖拽 3px 再回位（挽留拉扯）",
-    "wobble0.5": "边缘 0.5px 颤动",
-    "mirrorDust": "左右对称光斑各一",
-    "threeWordCascade": "calm/belong/happy 三词三行渐次浮现",
-    "offsetPair": "双行错位 ±offsetY，float 慢漂",
-    "cryGiant": "cry 独占一行巨字",
-    "ghostFlash": "梦紫残影一闪（桥段余韵）",
-    "pieces-1st/2nd/3rd/final": "pFall 慢速碎块缓落（时间流逝），全片仅此 4 处",
-    "boost": "回访时 halo/rays 强度乘数",
-    "haloR": "回访时 halo 半径乘数（记忆点递进）",
-    "pal 2→4": "辉金渐溶入暮杏（时间在走）"
+  {
+   "name": "C1",
+   "scheme": 2,
+   "t0": 36.4,
+   "t1": 67.6
+  },
+  {
+   "name": "V2",
+   "scheme": 1,
+   "t0": 70.7,
+   "t1": 91.3
+  },
+  {
+   "name": "C2",
+   "scheme": 2,
+   "t0": 91.9,
+   "t1": 124.1
+  },
+  {
+   "name": "Br",
+   "scheme": 3,
+   "t0": 126.4,
+   "t1": 157.2
+  },
+  {
+   "name": "FC",
+   "scheme": 2,
+   "t0": 157.3,
+   "t1": 215.3,
+   "note": "末段渐入 scheme 4"
+  },
+  {
+   "name": "outro",
+   "scheme": 4,
+   "t0": 215.3,
+   "t1": 232.17
   }
+ ],
+ "imagery": {
+  "wake": {
+   "label": "醒来",
+   "bg": [
+    "sunrise",
+    "windowLight"
+   ],
+   "motion": "softIn+weightGrow"
+  },
+  "first": {
+   "label": "初见",
+   "bg": [
+    "halo"
+   ],
+   "motion": "slowScale 1.00→1.03"
+  },
+  "slow": {
+   "label": "慢下来",
+   "bg": [
+    "windowLight"
+   ],
+   "motion": "slowPan(全片唯一)"
+  },
+  "little": {
+   "label": "小事物",
+   "bg": [
+    "dust"
+   ],
+   "decor": [
+    "tinyStars",
+    "photoCorners"
+   ],
+   "layout": "marginNote"
+  },
+  "brill": {
+   "label": "闪耀纯真",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "motion": "scaleSteps"
+  },
+  "hold": {
+   "label": "挽留",
+   "motion": "drag3px/wobble/tight",
+   "exit": "fadeUp不舍"
+  },
+  "safe": {
+   "label": "安全之地",
+   "bg": [
+    "arch"
+   ],
+   "layout": "block-center"
+  },
+  "cry": {
+   "label": "美到想哭",
+   "bg": [
+    "watercolor"
+   ],
+   "decor": [
+    "teardrop"
+   ],
+   "motion": "float/desat"
+  }
+ },
+ "lines": [
+  {
+   "line": 0,
+   "t0": 8.3,
+   "t1": 11.66,
+   "text": "Waking up I see that everything is ok",
+   "img": [
+    "wake"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fadeUp",
+   "bg": [
+    "sunrise",
+    "windowLight"
+   ]
+  },
+  {
+   "line": 1,
+   "t0": 11.72,
+   "t1": 15.24,
+   "text": "The first time in my life and now it's so great",
+   "img": [
+    "first"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "halo"
+   ],
+   "decor": [
+    "photoCorners"
+   ],
+   "fig": {
+    "k": "photoCircle",
+    "img": "sailor_wink",
+    "x": 0.76,
+    "y": 0.44,
+    "r": 175
+   }
+  },
+  {
+   "line": 2,
+   "t0": 15.3,
+   "t1": 18.65,
+   "text": "Slowing down I look around and I am so amazed",
+   "img": [
+    "slow"
+   ],
+   "layout": "lowerThird",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "windowLight"
+   ],
+   "cam": "drift",
+   "special": "slowPan",
+   "fig": {
+    "k": "photoSquare",
+    "img": "angel_face",
+    "x": 0.26,
+    "y": 0.5,
+    "w": 330,
+    "h": 420
+   }
+  },
+  {
+   "line": 3,
+   "t0": 18.71,
+   "t1": 23.35,
+   "text": "I think about the little things that make life great",
+   "img": [
+    "little"
+   ],
+   "layout": "marginNote",
+   "enter": "typeOn",
+   "exit": "fade",
+   "bg": [
+    "dust"
+   ],
+   "decor": [
+    "tinyStars",
+    "photoCorners"
+   ],
+   "scale": 0.85,
+   "fig": {
+    "k": "photoSticker",
+    "img": "chibi_flower",
+    "x": 0.72,
+    "y": 0.56,
+    "size": 250,
+    "rot": 4
+   }
+  },
+  {
+   "line": 4,
+   "t0": 23.41,
+   "t1": 29.24,
+   "text": "I wouldn't change a thing about it",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "hold": "none",
+   "special": "freeze2s",
+   "recallKey": "wouldnt-change",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 5,
+   "t0": 29.3,
+   "t1": 36.42,
+   "text": "This is the best feeling",
+   "img": [
+    "brill"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fadeUp",
+   "bg": [
+    "halo"
+   ],
+   "recallKey": "best-feeling",
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 6,
+   "t0": 36.48,
+   "t1": 40.59,
+   "text": "This innocence is brilliant",
+   "img": [
+    "brill"
+   ],
+   "layout": "scaleSteps",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "recallKey": "brilliant",
+   "emphasis": "brilliant",
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 7,
+   "t0": 40.65,
+   "t1": 41.03,
+   "text": "I hope that it will stay",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "special": "drag3px",
+   "recallKey": "hope-stay",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 8,
+   "t0": 43.39,
+   "t1": 47.53,
+   "text": "This moment is perfect",
+   "img": [
+    "brill",
+    "hold"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "halo"
+   ],
+   "special": "mirrorDust",
+   "recallKey": "moment-perfect",
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 9,
+   "t0": 47.59,
+   "t1": 50.33,
+   "text": "please don't go away",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fadeUp",
+   "special": "wobble0.5",
+   "recallKey": "dont-go",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 10,
+   "t0": 50.39,
+   "t1": 55.83,
+   "text": "I need you now",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "dropBounce",
+   "exit": "fade",
+   "cam": "push",
+   "weight": "max",
+   "recallKey": "need-you",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 11,
+   "t0": 55.89,
+   "t1": 59.83,
+   "text": "And I'll hold on to it",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "letterSpacing": -0.01,
+   "recallKey": "hold-on",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 12,
+   "t0": 60.0,
+   "t1": 67.63,
+   "text": "don't you let it pass you by",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "pFallSlow",
+   "special": "pieces-1st",
+   "recallKey": "pass-by",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 13,
+   "t0": 70.71,
+   "t1": 74.04,
+   "text": "I found a place so safe not a single tear",
+   "img": [
+    "safe"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "arch"
+   ],
+   "pal": 1,
+   "fig": {
+    "k": "photoSquare",
+    "img": "white_dress",
+    "x": 0.28,
+    "y": 0.48,
+    "w": 310,
+    "h": 400
+   }
+  },
+  {
+   "line": 14,
+   "t0": 74.1,
+   "t1": 77.72,
+   "text": "The first time in my life and now it's so clear",
+   "img": [
+    "first",
+    "safe"
+   ],
+   "layout": "center",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo"
+   ],
+   "pal": 1,
+   "recallKey": "first-time",
+   "fig": {
+    "k": "photoCircle",
+    "img": "sailor_wink",
+    "x": 0.76,
+    "y": 0.44,
+    "r": 175
+   }
+  },
+  {
+   "line": 15,
+   "t0": 77.78,
+   "t1": 81.21,
+   "text": "Feel calm I belong I'm so happy here",
+   "img": [
+    "safe"
+   ],
+   "layout": "scaleSteps",
+   "enter": "typeOn",
+   "exit": "fade",
+   "bg": [
+    "arch"
+   ],
+   "pal": 1,
+   "special": "threeWordCascade",
+   "fig": {
+    "k": "photoSquare",
+    "img": "white_dress",
+    "x": 0.28,
+    "y": 0.48,
+    "w": 310,
+    "h": 400
+   }
+  },
+  {
+   "line": 16,
+   "t0": 81.39,
+   "t1": 86.01,
+   "text": "It's so strong and now I let myself be sincere",
+   "img": [
+    "safe"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fadeUp",
+   "pal": 1,
+   "weight": "max",
+   "underline": "accent2",
+   "fig": {
+    "k": "photoSquare",
+    "img": "white_dress",
+    "x": 0.28,
+    "y": 0.48,
+    "w": 310,
+    "h": 400
+   }
+  },
+  {
+   "line": 17,
+   "t0": 86.07,
+   "t1": 91.28,
+   "text": "I wouldn't change a thing about it",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "pal": 1,
+   "hold": "none",
+   "recallKey": "wouldnt-change",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 18,
+   "t0": 91.88,
+   "t1": 98.57,
+   "text": "This is the best feeling",
+   "img": [
+    "brill"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fadeUp",
+   "bg": [
+    "halo"
+   ],
+   "recallKey": "best-feeling",
+   "boost": 1.2,
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 19,
+   "t0": 98.63,
+   "t1": 103.3,
+   "text": "This innocence is brilliant",
+   "img": [
+    "brill"
+   ],
+   "layout": "scaleSteps",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "recallKey": "brilliant",
+   "boost": 1.2,
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 20,
+   "t0": 103.36,
+   "t1": 105.76,
+   "text": "I hope that it will stay",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "special": "drag3px",
+   "recallKey": "hope-stay",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 21,
+   "t0": 105.82,
+   "t1": 107.43,
+   "text": "This moment is perfect",
+   "img": [
+    "brill",
+    "hold"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "halo"
+   ],
+   "special": "mirrorDust",
+   "recallKey": "moment-perfect",
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 22,
+   "t0": 109.96,
+   "t1": 112.85,
+   "text": "please don't go away",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fadeUp",
+   "special": "wobble0.5",
+   "recallKey": "dont-go",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 23,
+   "t0": 112.93,
+   "t1": 118.35,
+   "text": "I need you now",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "dropBounce",
+   "exit": "fade",
+   "cam": "push",
+   "weight": "max",
+   "recallKey": "need-you",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 24,
+   "t0": 118.41,
+   "t1": 122.22,
+   "text": "And I'll hold on to it",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "letterSpacing": -0.01,
+   "recallKey": "hold-on",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 25,
+   "t0": 122.28,
+   "t1": 124.05,
+   "text": "don't you let it pass you by",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "pFallSlow",
+   "special": "pieces-2nd",
+   "recallKey": "pass-by",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 26,
+   "t0": 126.4,
+   "t1": 129.27,
+   "text": "It's the state of bliss you think you're dreaming",
+   "img": [
+    "cry"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "special": "offsetPair",
+   "offsetY": [
+    -18,
+    18
+   ],
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 27,
+   "t0": 129.58,
+   "t1": 132.94,
+   "text": "It's the happiness inside that you're feeling",
+   "img": [
+    "cry"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "special": "offsetPair",
+   "offsetY": [
+    18,
+    -18
+   ],
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 28,
+   "t0": 133.0,
+   "t1": 139.33,
+   "text": "It's so beautiful, it makes you wanna cry",
+   "img": [
+    "cry"
+   ],
+   "layout": "center",
+   "enter": "softIn",
+   "exit": "fadeUp",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "decor": [
+    "teardrop"
+   ],
+   "blurBottom": 2,
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 29,
+   "t0": 139.39,
+   "t1": 142.26,
+   "text": "It's the state of bliss you think you're dreaming",
+   "img": [
+    "cry"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "desat": 0.15,
+   "scale": 1.05,
+   "recallKey": "bliss",
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 30,
+   "t0": 142.79,
+   "t1": 143.3,
+   "text": "It's the happiness inside that you're feeling",
+   "img": [
+    "cry"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "desat": 0.25,
+   "scale": 1.08,
+   "recallKey": "happiness",
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 31,
+   "t0": 146.62,
+   "t1": 148.93,
+   "text": "It's so beautiful, it makes you wanna cry",
+   "img": [
+    "cry"
+   ],
+   "layout": "center",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "decor": [
+    "teardrop"
+   ],
+   "desat": 0.35,
+   "scale": 1.12,
+   "recallKey": "cry",
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 32,
+   "t0": 153.41,
+   "t1": 157.24,
+   "text": "It's so beautiful, it makes you wanna cry",
+   "img": [
+    "cry"
+   ],
+   "layout": "center",
+   "enter": "dropBounce",
+   "exit": "fadeUp",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "special": "cryGiant",
+   "scale": 1.25,
+   "recallKey": "cry",
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 33,
+   "t0": 157.3,
+   "t1": 160.15,
+   "text": "This innocence is brilliant",
+   "img": [
+    "brill"
+   ],
+   "layout": "scaleSteps",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "recallKey": "brilliant",
+   "haloR": 1.12,
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 34,
+   "t0": 161.81,
+   "t1": 163.92,
+   "text": "it makes you wanna cry",
+   "img": [
+    "cry"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "pal": 3,
+   "special": "ghostFlash",
+   "recallKey": "cry",
+   "fig": {
+    "k": "photoSticker",
+    "img": "angel_wing",
+    "x": 0.72,
+    "y": 0.5,
+    "size": 330,
+    "rot": 2
+   }
+  },
+  {
+   "line": 35,
+   "t0": 163.98,
+   "t1": 168.64,
+   "text": "This innocence is brilliant",
+   "img": [
+    "brill"
+   ],
+   "layout": "scaleSteps",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "recallKey": "brilliant",
+   "haloR": 1.24,
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 36,
+   "t0": 168.7,
+   "t1": 170.92,
+   "text": "please don't go away",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fadeUp",
+   "special": "wobble0.5",
+   "recallKey": "dont-go",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 37,
+   "t0": 170.98,
+   "t1": 176.55,
+   "text": "Cause I need you now",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "dropBounce",
+   "exit": "fade",
+   "cam": "push",
+   "weight": "max",
+   "recallKey": "need-you",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 38,
+   "t0": 176.61,
+   "t1": 180.53,
+   "text": "And I'll hold on to it",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "letterSpacing": -0.01,
+   "recallKey": "hold-on",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 39,
+   "t0": 180.59,
+   "t1": 184.86,
+   "text": "don't you let it pass you by",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "pFallSlow",
+   "special": "pieces-3rd",
+   "recallKey": "pass-by",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 40,
+   "t0": 184.92,
+   "t1": 187.71,
+   "text": "This innocence is brilliant",
+   "img": [
+    "brill"
+   ],
+   "layout": "scaleSteps",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "recallKey": "brilliant",
+   "haloR": 1.36,
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 41,
+   "t0": 189.19,
+   "t1": 191.34,
+   "text": "I hope that it will stay",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "special": "drag3px",
+   "recallKey": "hope-stay",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 42,
+   "t0": 191.4,
+   "t1": 192.87,
+   "text": "This moment is perfect",
+   "img": [
+    "brill",
+    "hold"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "halo"
+   ],
+   "special": "mirrorDust",
+   "recallKey": "moment-perfect",
+   "fig": {
+    "k": "photoSticker",
+    "img": "idol_pink",
+    "x": 0.7,
+    "y": 0.5,
+    "size": 340,
+    "rot": -3
+   }
+  },
+  {
+   "line": 43,
+   "t0": 196.11,
+   "t1": 198.66,
+   "text": "please don't go away",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fadeUp",
+   "special": "wobble0.5",
+   "pal": "2→4",
+   "recallKey": "dont-go",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 44,
+   "t0": 198.72,
+   "t1": 203.93,
+   "text": "I need you now",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "dropBounce",
+   "exit": "fade",
+   "cam": "push",
+   "weight": "max",
+   "pal": "2→4",
+   "recallKey": "need-you",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 45,
+   "t0": 203.99,
+   "t1": 207.94,
+   "text": "And I'll hold on to it",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "letterSpacing": -0.01,
+   "pal": 4,
+   "recallKey": "hold-on",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  },
+  {
+   "line": 46,
+   "t0": 208.0,
+   "t1": 215.3,
+   "text": "don't you let it pass you by",
+   "img": [
+    "hold"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "pFallSlow",
+   "special": "pieces-final",
+   "pal": 4,
+   "recallKey": "pass-by",
+   "fig": {
+    "k": "photoCircle",
+    "img": "idol_purple",
+    "x": 0.24,
+    "y": 0.48,
+    "r": 195,
+    "ticks": 16
+   }
+  }
+ ],
+ "transitions": {
+  "policy": "warm-soft",
+  "allow": {
+   "wipe": 4,
+   "ink": 3,
+   "flash": 2,
+   "iris": 2,
+   "push": 2,
+   "zoom": 1
+  },
+  "deny": [
+   "blinds",
+   "clock",
+   "blocks"
+  ],
+  "dur": [
+   0.34,
+   0.5
+  ]
+ },
+ "specials": {
+  "slowPan": "全片唯一横移长镜，camera drift 0→120px over shot",
+  "freeze2s": "hold=none，字完全静止（'不变'语义）",
+  "drag3px": "字向后拖拽 3px 再回位（挽留拉扯）",
+  "wobble0.5": "边缘 0.5px 颤动",
+  "mirrorDust": "左右对称光斑各一",
+  "threeWordCascade": "calm/belong/happy 三词三行渐次浮现",
+  "offsetPair": "双行错位 ±offsetY，float 慢漂",
+  "cryGiant": "cry 独占一行巨字",
+  "ghostFlash": "梦紫残影一闪（桥段余韵）",
+  "pieces-1st/2nd/3rd/final": "pFall 慢速碎块缓落（时间流逝），全片仅此 4 处",
+  "boost": "回访时 halo/rays 强度乘数",
+  "haloR": "回访时 halo 半径乘数（记忆点递进）",
+  "pal 2→4": "辉金渐溶入暮杏（时间在走）"
+ },
+ "figs": {
+  "sailor_wink": "D:/岁己歌切/_media_cache/sui_figs/260ded80-4a8e-4fcc-afc5-c580a9641acb_cut.png",
+  "sailor_pose5": "D:/岁己歌切/_media_cache/sui_figs/3754bc1b5bcff927504d4f769a6cd6ac1954091502_cut.png",
+  "idol_pink": "D:/岁己歌切/_media_cache/sui_figs/IMG_3822_cut.png",
+  "idol_purple": "D:/岁己歌切/_media_cache/sui_figs/4b71fa14-b072-40e9-b829-8fdb0e895057_cut.png",
+  "angel_wing": "D:/岁己歌切/_media_cache/sui_figs/IMG_3827_cut.png",
+  "angel_face": "D:/岁己歌切/_media_cache/sui_figs/IMG_3826_cut.png",
+  "chibi_flower": "D:/岁己歌切/_media_cache/sui_figs/0d045921-b6da-4da4-8f27-446aa074858d_cut.png",
+  "chibi_angel": "D:/岁己歌切/_media_cache/sui_figs/f5cebc3d-72cb-4d5c-b45c-22a8b8875319_cut.png",
+  "gothic_cat": "D:/岁己歌切/_media_cache/sui_figs/e95c4efa7e3c77dbbf93c31060df7b941954091502_cut.png",
+  "bunny_red": "D:/岁己歌切/_media_cache/sui_figs/皱眉外套_cut.png",
+  "white_dress": "D:/岁己歌切/_media_cache/sui_figs/IMG_3824_cut.png",
+  "sailor_full": "D:/岁己歌切/_media_cache/sui_figs/IMG_3510_cut.png",
+  "gothic_full": "D:/岁己歌切/_media_cache/sui_figs/IMG_5248_cut.png"
+ }
 }

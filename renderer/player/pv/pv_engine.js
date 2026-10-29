@@ -13,12 +13,13 @@
 
   const ST = {
     sb: null, S: null, live: null,
-    shots: [], seq: {}, figCache: {}, face: { cx: 0.5, cy: 0.5 },
+    shots: [], seq: {}, figCache: {}, figs: {}, face: { cx: 0.5, cy: 0.5 },
     dur: 0, fps: 60, dpr: 1, ready: false,
     lay: new Map(),            // shot.i → layout 结果缓存（构图只算一次）
     stats: { glyphs: 0, shots: 0 },
   };
   PV.ST = ST;
+  PV.FIGIMG = ST.figs;   // 静态立绘注册表（photoCircle 等几何蒙版器件读它）
 
   /* ---------------- 调色板 ---------------- */
   function buildStyle(pal, dpr) {
@@ -58,6 +59,21 @@
   /* ---------------- 素材：图片序列 ----------------
      离线渲染是同步循环，<video> 的 seek 是异步的、会丢帧 —— 一律用图片序列。
      缺帧时回落到最近的已加载帧，绝不黑屏。 */
+  /* 静态立绘（几何蒙版器件用）：单张 PNG/JPG，key → HTMLImageElement。
+     与 seq 不同，不需要滑窗释放——一张 2K PNG 约 10MB 解码后，全量 28 张也才 280MB。
+     路径走 file:/// 协议（离线渲染），data URL 也直接接受。 */
+  const _figPromises = [];
+  function loadFigImg(name, src) {
+    if (!name || !src) return null;
+    const im = new Image();
+    im.src = String(src).startsWith('data:') ? src
+      : ('file:///' + String(src).replace(/\\/g, '/'));
+    ST.figs[name] = im;
+    _figPromises.push(im.decode ? im.decode().catch(() => {}) : new Promise(r => { im.onload = im.onerror = r; }));
+    return im;
+  }
+  PV.figsReady = () => Promise.all(_figPromises);
+
   function loadSeq(name, info) {
     if (!info || !info.dir) return null;
     ST.seq[name] = {
@@ -231,6 +247,8 @@
     const sx = (iw - sw) / 2, sy = (ih - sh) / 2;
     ctx.drawImage(im, sx, sy, sw, sh, dx, dy, dw, dh);
   }
+
+  PV.drawCover = drawCover;   // 几何蒙版器件（photoCircle 等）需要等比覆盖裁切
 
   /* 双色调（duotone）：直播截图直接贴上去永远是「贴了一张照片」，
      因为它的色温、对比、噪点都和纸面无关。去饱和后压一个冷调阴影 + 提一个暖调高光，
@@ -991,6 +1009,11 @@
     if (live.body) loadSeq('body', live.body);
     if (live.wide) loadSeq('wide', live.wide);
     if (live.face) ST.face = live.face;
+    const figsMap = live.figs || (opt.storyboard && opt.storyboard.meta && opt.storyboard.meta.figs) || null;
+    if (figsMap) {
+      for (const [k, v] of Object.entries(figsMap)) loadFigImg(k, v);
+      console.log('[pv] 静态立绘 %d 张', Object.keys(figsMap).length);
+    }
 
     const ctx = opt.ctx;
     const LINES = opt.storyboard.lines || [];

@@ -633,6 +633,267 @@
     ctx.restore();
   };
 
+  /* ============================================================
+     几蒙版贴纸（2026-10-29 手书方向）：岁己立绘以几何框呈现
+     photoCircle / photoSquare / photoSticker / photoStrip
+     图源走 PV.FIGIMG[name]（静态 PNG 注册表，引擎 setup 时装载）。
+     ============================================================ */
+  const _figImg = (s) => (PV.FIGIMG && PV.FIGIMG[s.img]) || null;
+  const _figImgs = (s) => (s.imgs || []).map(k => (PV.FIGIMG && PV.FIGIMG[k]) || null);
+
+  /* 圆框贴纸：双环描边 + 环上刻度针脚 + 纸色内衬
+     入场：圆弧画出 + 图 1.06→1.0 落位；保持：极缓浮漂 + 0.5° 摇 */
+  D.photoCircle = (ctx, s, st) => {
+    const im = _figImg(s); if (!im || !im.complete || !im.naturalWidth) return;
+    const S = st.S, t = st.t, ph = st.phase || 0;
+    const cx = (s.x != null ? s.x : 0.72) * PV.W;
+    const cy = (s.y != null ? s.y : 0.46) * PV.H;
+    const r = (s.r || 168) * (s.scale || 1);
+    const a = (s.a == null ? 1 : s.a);
+    if (a <= 0.003) return;
+
+    /* 入场：0→1 用 phase 推（fade 0.6s + 图 1.06→1.0） */
+    const k = clamp(ph / 0.6, 0, 1);
+    const ek = ease.outCubic(clamp(ph / 0.75, 0, 1));
+    const imgScale = 1.06 - 0.06 * ek;
+    const mo = s.motion == null ? 1 : s.motion;
+    const drift = Math.sin(t * 0.21 + (s.ph || 0)) * 5 * mo;
+    const driftY = Math.cos(t * 0.17 + (s.ph || 0) * 1.3) * 3.5 * mo;
+    const wob = Math.sin(t * 0.32 + (s.ph || 0) * 2) * 0.008 * mo;   // ≈0.5°
+
+    ctx.save();
+    ctx.globalAlpha = clamp(a * k, 0, 1);
+    ctx.translate(cx + drift, cy + driftY);
+    ctx.rotate(wob + (s.rot || 0) * Math.PI / 180);
+
+    /* 纸色内衬（图后一圈，防图缘与背景糊在一起） */
+    ctx.fillStyle = S.paper;
+    ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, TAU); ctx.fill();
+
+    /* 圆形裁切贴图 */
+    ctx.save();
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.clip();
+    const D2 = r * 2 * imgScale;
+    PV.drawCover(ctx, im, -D2 / 2, -D2 / 2, D2, D2, 1.05);
+    ctx.restore();
+
+    /* 双环：外粗 accent + 内细 ink */
+    const arcK = ease.outCubic(clamp(ph / 0.55, 0, 1));
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = S.accent;
+    ctx.lineWidth = s.ringW || 5;
+    ctx.beginPath(); ctx.arc(0, 0, r + 2, -Math.PI / 2, -Math.PI / 2 + TAU * arcK); ctx.stroke();
+    ctx.strokeStyle = S.ink;
+    ctx.lineWidth = 1.2;
+    ctx.globalAlpha = clamp(a * k * 0.55, 0, 1);
+    ctx.beginPath(); ctx.arc(0, 0, r - 4, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = clamp(a * k, 0, 1);
+
+    /* 环上刻度针脚（沿外环均匀分布，入场随弧线依次亮起） */
+    const nTick = s.ticks || 12;
+    for (let i = 0; i < nTick; i++) {
+      const ang = -Math.PI / 2 + (i / nTick) * TAU;
+      const tickK = clamp((arcK * nTick - i) * 0.5, 0, 1);
+      if (tickK <= 0) continue;
+      const r1 = r + 5, r0 = r + 5 + (s.tickLen || 8) * tickK;
+      ctx.globalAlpha = clamp(a * k * 0.45 * tickK, 0, 1);
+      ctx.strokeStyle = S.accent;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+      ctx.lineTo(Math.cos(ang) * r0, Math.sin(ang) * r0);
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+
+  /* 方框相片：圆角矩形 + 四角护角 + 底部署名条 + 偏移软影
+     入场：fadeUp + -1.5°→-0.5° 落定；保持：反向漂移 */
+  D.photoSquare = (ctx, s, st) => {
+    const im = _figImg(s); if (!im || !im.complete || !im.naturalWidth) return;
+    const S = st.S, t = st.t, ph = st.phase || 0;
+    const cx = (s.x != null ? s.x : 0.28) * PV.W;
+    const cy = (s.y != null ? s.y : 0.50) * PV.H;
+    const w = (s.w || 320) * (s.scale || 1);
+    const h = (s.h || 410) * (s.scale || 1);
+    const a = (s.a == null ? 1 : s.a);
+    if (a <= 0.003) return;
+
+    const k = clamp(ph / 0.55, 0, 1);
+    const ek = ease.outCubic(clamp(ph / 0.8, 0, 1));
+    const lift = (1 - ek) * 28;                          // fadeUp 位移
+    const rot = (-1.5 + 1.0 * ek + (s.rot || 0)) * Math.PI / 180;
+    const mo = s.motion == null ? 1 : s.motion;
+    const drift = Math.sin(t * 0.19 + (s.ph || 0) + Math.PI) * 4 * mo;
+    const driftY = Math.cos(t * 0.15 + (s.ph || 0)) * 3 * mo;
+
+    ctx.save();
+    ctx.globalAlpha = clamp(a * k, 0, 1);
+    ctx.translate(cx + drift, cy + driftY + lift);
+    ctx.rotate(rot);
+
+    /* 偏移软影 */
+    ctx.save();
+    ctx.globalAlpha = clamp(a * k * 0.18, 0, 1);
+    ctx.fillStyle = S.ink;
+    const rr = s.round == null ? 10 : s.round;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-w / 2 + 8, -h / 2 + 10, w, h, rr);
+    else ctx.rect(-w / 2 + 8, -h / 2 + 10, w, h);
+    ctx.fill();
+    ctx.restore();
+
+    /* 纸色衬底 */
+    ctx.fillStyle = S.paper;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-w / 2, -h / 2, w, h, rr);
+    else ctx.rect(-w / 2, -h / 2, w, h);
+    ctx.fill();
+
+    /* 圆角裁切贴图 */
+    ctx.save();
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-w / 2 + 6, -h / 2 + 6, w - 12, h - 12, rr - 2);
+    else ctx.rect(-w / 2 + 6, -h / 2 + 6, w - 12, h - 12);
+    ctx.clip();
+    PV.drawCover(ctx, im, -w / 2 + 6, -h / 2 + 6, w - 12, h - 12, 1.02);
+    ctx.restore();
+
+    /* 四角护角（细线三角） */
+    const m = 10, cs = 18;
+    ctx.strokeStyle = S.accent;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+    for (const [sx, sy] of corners) {
+      const x0 = sx * (w / 2 - m), y0 = sy * (h / 2 - m);
+      ctx.beginPath();
+      ctx.moveTo(x0 - sx * cs, y0);
+      ctx.lineTo(x0, y0);
+      ctx.lineTo(x0, y0 - sy * cs);
+      ctx.stroke();
+    }
+
+    /* 底部署名条 */
+    if (s.caption !== null) {
+      const capH = 26;
+      ctx.fillStyle = S.accent;
+      ctx.globalAlpha = clamp(a * k * 0.88, 0, 1);
+      ctx.fillRect(-w / 2 + 6, h / 2 - 6 - capH, w - 12, capH);
+      ctx.fillStyle = S.paper;
+      ctx.font = PV.cssFace(PV.FACES.mono, 13);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(s.caption || '岁己SUI', 0, h / 2 - 6 - capH / 2);
+    }
+    ctx.restore();
+  };
+
+  /* 自由贴：无框透明底图 + 白描边 sticker stroke + 微倾斜
+     入场：dropBounce；保持：wobble */
+  D.photoSticker = (ctx, s, st) => {
+    const im = _figImg(s); if (!im || !im.complete || !im.naturalWidth) return;
+    const S = st.S, t = st.t, ph = st.phase || 0;
+    const cx = (s.x != null ? s.x : 0.70) * PV.W;
+    const cy = (s.y != null ? s.y : 0.52) * PV.H;
+    const size = (s.size || 320) * (s.scale || 1);
+    const a = (s.a == null ? 1 : s.a);
+    if (a <= 0.003) return;
+
+    /* dropBounce：0→0.35s 下落 + 弹 */
+    const bk = clamp(ph / 0.35, 0, 1);
+    const bounce = 1 - Math.pow(1 - bk, 2.6) + Math.sin(bk * Math.PI * 1.8) * 0.04 * (1 - bk);
+    const dy = (1 - bounce) * -40;
+    const rot = ((s.rot || 3) * Math.PI / 180) + Math.sin(t * 0.28 + (s.ph || 0)) * 0.012;
+
+    ctx.save();
+    ctx.globalAlpha = clamp(a * bk, 0, 1);
+    ctx.translate(cx, cy + dy);
+    ctx.rotate(rot);
+
+    /* 白描边：沿 8 方向偏移画图 silhouette（白填充），再画本体 */
+    const iw = im.naturalWidth || 1, ih = im.naturalHeight || 1;
+    const ar = iw / ih;
+    const w2 = ar >= 1 ? size : size * ar;
+    const h2 = ar >= 1 ? size / ar : size;
+    const strokeW = s.strokeW || 5;
+    const offs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]];
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    for (const [ox, oy] of offs) {
+      ctx.drawImage(im, ox * strokeW - w2 / 2, oy * strokeW - h2 / 2, w2, h2);
+    }
+    /* 用白色滤镜把偏移副本染白 —— canvas 没有直接 filter 的可靠路径，
+       用「白矩形 destination-in」在离屏做一次描边层 */
+    ctx.restore();
+
+    /* 简化：直接画本体 + 外圈柔影（8 向描边需离屏，开销大且小图看不清，
+       sticker stroke 用 shadowBlur 近似——烘焙纪律下 shadowBlur 不用于大面积，
+       小面积 8 向描边可接受且量级固定） */
+    ctx.shadowColor = 'rgba(255,255,255,0.95)';
+    ctx.shadowBlur = strokeW * 2.2;
+    for (let i = 0; i < 4; i++) {       // 四向投影拼出白描边
+      const ang = i * Math.PI / 2;
+      ctx.drawImage(im, Math.cos(ang) * strokeW * 0.6 - w2 / 2,
+        Math.sin(ang) * strokeW * 0.6 - h2 / 2, w2, h2);
+    }
+    ctx.shadowBlur = 0;
+    ctx.drawImage(im, -w2 / 2, -h2 / 2, w2, h2);
+    ctx.restore();
+  };
+
+  /* 连拍条：2~3 张小方框横排（拍立得连拍排版）
+     入场：依次 stagger 亮起（配快句节奏） */
+  D.photoStrip = (ctx, s, st) => {
+    const ims = _figImgs(s).filter(Boolean);
+    if (!ims.length) return;
+    const S = st.S, t = st.t, ph = st.phase || 0;
+    const cx = (s.x != null ? s.x : 0.50) * PV.W;
+    const cy = (s.y != null ? s.y : 0.78) * PV.H;
+    const fw = (s.w || 130) * (s.scale || 1);
+    const gap = s.gap || 10;
+    const n = Math.min(ims.length, s.n || 3);
+    const a = (s.a == null ? 1 : s.a);
+    if (a <= 0.003) return;
+    const totalW = n * fw + (n - 1) * gap;
+    const fh = fw * 1.18;                // 拍立得比例
+
+    ctx.save();
+    for (let i = 0; i < n; i++) {
+      /* stagger：每张错 0.12s 亮起 */
+      const k = clamp((ph - i * 0.12) / 0.35, 0, 1);
+      if (k <= 0) continue;
+      const x0 = cx - totalW / 2 + i * (fw + gap);
+      const y0 = cy - fh / 2 + Math.sin(t * 0.22 + i * 0.8) * 2;
+      ctx.save();
+      ctx.globalAlpha = clamp(a * k, 0, 1);
+
+      /* 白框 */
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(x0, y0, fw, fh);
+      /* 图（上留 6px 边、下留 22px 拍立得白边） */
+      const pad = 5, capH = 20;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x0 + pad, y0 + pad, fw - pad * 2, fh - pad - capH);
+      ctx.clip();
+      PV.drawCover(ctx, ims[i], x0 + pad, y0 + pad, fw - pad * 2, fh - pad - capH, 1.04);
+      ctx.restore();
+
+      /* 细边框 + 底部小字 */
+      ctx.strokeStyle = S.ink;
+      ctx.globalAlpha = clamp(a * k * 0.35, 0, 1);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, fw - 1, fh - 1);
+      ctx.fillStyle = S.dim;
+      ctx.font = PV.cssFace(PV.FACES.mono, 10);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = clamp(a * k * 0.65, 0, 1);
+      ctx.fillText(String(i + 1).padStart(2, '0'), x0 + fw / 2, y0 + fh - capH / 2 - 2);
+      ctx.restore();
+    }
+    ctx.restore();
+  };
+
   /* 去饱和：用 saturation 混合把全屏饱和度往下压（「眼泪里的世界」）。
         混合模式的 source 灰度 = 0 饱和度，dest 就被拉向灰；alpha 控强度。
         4K 下就是一次 fillRect，比任何滤镜都便宜。 */

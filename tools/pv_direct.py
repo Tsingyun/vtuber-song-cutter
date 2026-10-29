@@ -767,7 +767,9 @@ def build_dawn_shots(a, lines, m, dur):
             "enter": ent, "hold": hold, "exit": xit,
             "treat": {"k": "solid"},
             "pal": {"pack": "dawn", "idx": pal_idx(spec, sec)},
-            "bgl": bgl, "bg": [], "decor": decor_items(spec, i),
+            "bgl": bgl, "bg": [],
+            "decor": decor_items(spec, i) + ([dict(spec["fig"], seed=21 + i * 5)]
+                                             if spec.get("fig") else []),
             "post": post, "cam": cam,
             "fig": None, "sync": False, "wobble": wob,
             "unified": False,
@@ -847,6 +849,7 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
             "seed": a.seed, "dur": dur, "fps": 60, "start": w0,
             "koma": a.koma, "keyBg": a.keyBg or None,
             "concept": "dawn", "imagery": path.replace("\\", "/"),
+            "figs": m.get("figs") or None,
             # 绘本纸底非平涂（bg 件柔光/水彩会进四角）→ pv_check 四角判据豁免
             "paper_ok": True,
             "mark": "",
