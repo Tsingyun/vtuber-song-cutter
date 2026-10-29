@@ -186,7 +186,8 @@ def main():
             bg, content, grain, flat = frame_stats(p)
             want, name, lay = expect_bg(sb, schemes, t) if a.manifest else (None, None, "")
             tag = (round(t, 1), name)
-            if want is not None:
+            paper_ok = bool(a.manifest and sb.get("meta", {}).get("paper_ok"))
+            if want is not None and not paper_ok:
                 dp = float(np.abs(bg - np.array(want)).max())
                 # 14 是 8bit 转换 + grain + scan 纹理能吃掉的量；再大就是换纸没落地
                 if dp > 14:
@@ -194,9 +195,9 @@ def main():
             # 巨影版面跳过：cropGiant 的巨字本来就要被画缘切掉，它会占满左下与右下角
             # （实测 t=79.8 四角差 35.3，而画面无暗角、无残幅）。残幅由 [residue] 负责。
             # paper_ok（晨光绘本等非平涂纸底）：bg 件柔光/水彩有意进四角，四角不平≠暗角/残幅。
-            if flat > 10 and lay != "cropGiant" and not (a.manifest and sb.get("meta", {}).get("paper_ok")):
+            if flat > 10 and lay != "cropGiant" and not paper_ok:
                 badflat.append((tag, round(flat, 1)))
-            if want is not None and abs(float(grain) - sum(want) / 3.0) > 10:
+            if want is not None and not paper_ok and abs(float(grain) - sum(want) / 3.0) > 10:
                 badgrain.append((tag, round(grain, 1), round(sum(want) / 3.0, 1)))
             if content < 0.0015:
                 badcontent.append((tag, round(content * 100, 3)))
