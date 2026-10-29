@@ -113,8 +113,13 @@ def main():
             n += 1
             fn = "f%04d.woff2" % n
             fp = os.path.join(d, fn)
-            if not os.path.exists(fp):
-                open(fp, "wb").write(get(m.group(1), binary=True))
+            # 0 字节=上次下载残骸：必须当「不存在」重下，否则永远修不好
+            # （实测留过 3 个 0 字节分片，字形在字体里、文件却加载不出来）
+            if not os.path.exists(fp) or os.path.getsize(fp) == 0:
+                data = get(m.group(1), binary=True)
+                if not data:
+                    raise RuntimeError("字体分片下载为空：%s" % m.group(1))
+                open(fp, "wb").write(data)
             return "url(%s/%s)" % (slug, fn)
         css2 = re.sub(r"url\((https://fonts\.gstatic\.com/[^)]+)\)", repl, css)
         open(os.path.join(d, "fonts.css"), "w", encoding="utf-8", newline="\n").write(css2)

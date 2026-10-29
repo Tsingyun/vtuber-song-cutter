@@ -747,7 +747,11 @@
       ctx.save();
       ctx.globalAlpha = a;
       ctx.fillStyle = col;
-      ctx.font = '400 ' + (m.size || 24) + 'px "IBM Plex Mono", "Zen Kaku Gothic New", monospace';
+      /* 字形回退是**逐字**的：日文黑体 Zen Kaku 有「己」但没有简体「岁」，
+         少了 SC 兜底就会让「岁」静默滑到泛型 monospace（Windows 中文环境=宋体），
+         同一个词里一半黑一半宋。Latin 走 IBM Plex Mono（档案行的 mono 质感），
+         中文一律 Noto Sans SC，日文假名才轮到 Zen Kaku。见 RULES §83。 */
+      ctx.font = '400 ' + (m.size || 24) + 'px "IBM Plex Mono", "Noto Sans SC", "Zen Kaku Gothic New", monospace';
       ctx.textBaseline = 'alphabetic';
       const tr = (m.track || 0.14) * (m.size || 24);
       const al = m.align || 'left';

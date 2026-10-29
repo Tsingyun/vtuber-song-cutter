@@ -90,7 +90,10 @@
   PV.label = (ctx, s, x, y, size, col, a, weight, align, trackingEm) => {
     if (a <= 0.002 || !s) return;
     ctx.globalAlpha = a; ctx.fillStyle = col;
-    ctx.font = (weight || 500) + ' ' + size + 'px "Zen Kaku Gothic New", "Noto Sans SC", sans-serif';
+    /* 中文族必须排在日本族**前面**：否则「己」走 Zen Kaku、「岁」走 Noto Sans SC，
+       一行小字里两个族。代价是这个 helper 的拉丁从小字从 Zen Kaku 换成 Noto Sans SC
+       （同为无衬线，观感差异极小），换来的是「一行内永不混族」。见 RULES §83。 */
+    ctx.font = (weight || 500) + ' ' + size + 'px "Noto Sans SC", "Zen Kaku Gothic New", sans-serif';
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     if (!trackingEm) { ctx.textAlign = align || 'left'; ctx.fillText(s, x, y); ctx.textAlign = 'left'; return; }
     const tr = trackingEm * size;
