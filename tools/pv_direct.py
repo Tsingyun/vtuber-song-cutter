@@ -785,6 +785,33 @@ DAWN_LIVE = {
 }
 
 
+# 演唱写法 vs 官方写法的规范化：同一句歌词在官方歌词里是 "wanna"，
+# 在实唱对齐的 cut.lrc 里可能是 "want to"（反之亦然）。只做「去掉标点/大小写差异 +
+# 合并已知同音缩写」，不做模糊匹配 —— 真错行时相似度会低到 0.2 以下。
+_LYR_ALIAS = [
+    (r"\bwant\s+to\b", "wanna"), (r"\bgoing\s+to\b", "gonna"),
+    (r"\bbecause\b", "cause"), (r"\byou\s+all\b", "yall"),
+    (r"\bgonna\b", "gonna"), (r"\bcannot\b", "cant"),
+]
+
+
+def _lyr_norm(s):
+    s = (s or "").lower().replace("\u2019", "'").replace("\u2018", "'")
+    s = re.sub(r"[^a-z0-9']+", " ", s)
+    for pat, rep in _LYR_ALIAS:
+        s = re.sub(pat, rep, s)
+    return re.sub(r"\s+", " ", s.replace("'", "")).strip()
+
+
+def _lyr_sim(a, b):
+    """两句的相似度 0~1（规范化后按字符相似）。错行时接近 0，写法差异时 ≥0.9。"""
+    import difflib
+    x, y = _lyr_norm(a), _lyr_norm(b)
+    if x == y:
+        return 1.0
+    return difflib.SequenceMatcher(None, x, y).ratio()
+
+
 def build_dawn_shots(a, lines, m, dur):
     """把意象映射表翻译成编排稿镜头（不抽卡：一切由歌词意象决定）。"""
     from collections import Counter
@@ -795,7 +822,12 @@ def build_dawn_shots(a, lines, m, dur):
     for i, (spec, l) in enumerate(zip(ml, lines)):
         t1 = (spec.get("text") or "").strip()
         t2 = (l.get("text") or "").strip()
-        if t1 != t2:
+        # 判据是「这两句是不是同一句」，不是「字面是否逐字相等」：
+        #   映射表按官方歌词写（"wanna" / 逗号后带空格），timing 来自实唱对齐的 cut.lrc
+        #   （"want to" / 逗号后不带空格）。同一句在歌里两种写法都出现，逐字比较会把
+        #   整份编排稿挡回去（第 28/34 句实测）。改成「规范化 + 相似度」，仍然能抓住
+        #   真正的错行 —— 错行的词重叠接近 0，ratio 会远低于阈值。
+        if _lyr_sim(t1, t2) < 0.85:
             raise SystemExit("[dawn] 第 %d 句文本不一致：映射=%r 时机=%r" % (i, t1, t2))
 
     secs = m.get("sections") or []

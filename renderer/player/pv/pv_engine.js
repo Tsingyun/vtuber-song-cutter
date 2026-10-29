@@ -455,8 +455,15 @@
       }
     }
     if (fig.fadeIn) ra *= sm(clamp((t - st0) / fig.fadeIn, 0, 1));
-    /* 退场叠化：切点上硬切一块照片最扎眼，末段淡出才接得住转场 */
-    if (fig.out) ra *= sm(clamp((st1 - t) / fig.out, 0, 1));
+    /* 退场叠化：切点上硬切一块照片最扎眼，末段淡出才接得住转场。
+       同样受 _xcap 约束：照片停在 ~45% 把剩下的交给转场，否则字还半透明、
+       照片已经清零，切点上照片会被快照 A 弹回来一次。 */
+    if (fig.out) {
+      const oc = shot && shot._xcap != null ? shot._xcap : 1;
+      const ow = Math.max(0.04, fig.out * oc);
+      const oq = clamp((t - (st1 - ow)) / ow, 0, 1) * oc;
+      ra *= sm(1 - oq);
+    }
 
     const a = (fig.a == null ? 1 : fig.a) * (1 + en * 0.06) * ra;
     if (a <= 0.004) return;
@@ -753,7 +760,11 @@
     const rh = PV.HOLD[hold.k] || PV.HOLD.none;
     const rx = PV.EXIT[exit.k] || PV.EXIT.fade;
     const breath = 1;
-    const x0 = shot.t1 - (exit.dur == null ? 0.42 : exit.dur);
+    /* 退场窗口与上界：有转场的镜头只走到 _xcap（见 setup 里的 X_KEEP），
+       速率不变 —— 起点后移、终点停在 55%，切点那一刻屏幕与快照 A 同形。 */
+    const xcap = shot._xcap == null ? 1 : shot._xcap;
+    const xwin = shot._xout == null ? (exit.dur == null ? 0.42 : exit.dur) : shot._xout;
+    const x0 = shot.t1 - xwin;
     let k = -1;                                   // 第几个可见字（空格不计入节奏）
     const EN_DUR = enter.dur == null ? 0.30 : enter.dur;
     const STAG = enter.stagger == null ? 0 : enter.stagger;
@@ -862,7 +873,7 @@
          jitter/trackIn 里出现 NaN，整行甚至整面墙一个字都不画（且毫无报错）。 */
       if (e >= 0.999) rh(g, t, rnd1[i], hold, 1, idx);
 
-      const xe = clamp((t - x0) / (exit.dur == null ? 0.42 : exit.dur), 0, 1);
+      const xe = clamp((t - x0) / Math.max(0.02, xwin), 0, 1) * xcap;
       if (xe > 0) rx(g, xe, rnd1[i], rnd2[i], exit, PV.W / 2, PV.H * 0.5);
 
       // 逐字错相：让同一行不像一整块板
@@ -910,11 +921,14 @@
     const lay = shot._lay;
     const dur = Math.max(0.01, shot.t1 - shot.t0);
     const lt = t - shot.t0;
-    const outDur = (shot.exit && shot.exit.dur != null) ? shot.exit.dur : 0.42;
+    const xcap = shot._xcap == null ? 1 : shot._xcap;
+    const outDur = shot._xout != null ? shot._xout
+      : ((shot.exit && shot.exit.dur != null) ? shot.exit.dur : 0.42);
     /* 版面层：巨型暗影在最下，规则线/注记在字下，遮带在字上。
-       全部由 layout 自己产出 —— 这样「字和它的线」永远同源，不会各摆各的。 */
-    if (lay && PV.drawGiant) PV.drawGiant(ctx, lay.giant, lt, outDur, dur);
-    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'under');
+       全部由 layout 自己产出 —— 这样「字和它的线」永远同源，不会各摆各的。
+       xcap 必须一起传下去：字停在 55% 而线淡到 0，就是「字没了线还在」的反向版。 */
+    if (lay && PV.drawGiant) PV.drawGiant(ctx, lay.giant, lt, outDur, dur, xcap);
+    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'under', xcap);
     const glyphs = applyParts(shot, t);
     const base = paintFor(shot.treat && shot.treat.k);
     const emph = shot.treatEmph ? paintFor(shot.treatEmph.k) : base;
@@ -962,7 +976,7 @@
     if (shot.treatEmph) PV.drawGlyphs(ctx, glyphs.filter(g => g.emph), bindS(emph, specE), { S: specE });
     ctx.filter = 'none';
     ctx.globalAlpha = 1;
-    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'over');
+    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'over', xcap);
   }
 
   /* ---------------- 背景层次 ----------------
@@ -1095,11 +1109,10 @@
 
     // 后期（不受相机影响）
     drawPost(ctx, shot.post, t, en);
-    /* 存 A：退场开始前那一刻的完整画面（每镜只存一次，窗口 0.12s ≈ 7 帧） */
-    const xd = shot.exit && shot.exit.dur != null ? shot.exit.dur : 0.42;
-    if (t >= shot.t1 - xd - 0.02 && t <= shot.t1 - xd + 0.10) saveCross(ctx, shot);
-    /* 切间过渡（TRANS 分组）：把上一镜快照按转场几何让掉，露出这一镜。 */
-    crossFade(ctx, shot, t);
+    /* 转场放在**画框饰件之后**：暗角/颗粒/角落标记都是「贴在整幅画面上的」，
+       必须齐了之后再把上一镜整幅盖回去。顺序错一步就多跳一次亮度 ——
+       先转场后暗角时，切点帧 = A + 新镜的暗角（两层暗角），实测差 0.77；
+       再往前 A 干脆没带暗角，差 3.0。两次都被误当成转场几何问题。 */
     /* 平涂底（JIZURA 风格）不加暗角：暗角是「电影感」的语法，
        而 JIZURA 的语法是「印刷品」—— 四角必须和中心一样平，版面才立得住。 */
     /* 注意这里必须用**本镜头**的 S：renderAt 顶上的 S 是全局 ST.S，
@@ -1122,6 +1135,12 @@
       PV.label(ctx, mark, PV.W - 64, PV.H - 52, 15, S.ink, 0.17, 500, 'right', 0.16);
     }
     ctx.globalAlpha = 1;
+    /* 切间过渡（TRANS 分组）：把上一镜快照按转场几何让掉，露出这一镜。
+       p=0 时整幅盖 A、p=1 时什么都不画（契约见 pv_trans.js 文件头）。 */
+    crossFade(ctx, shot, t);
+    /* 存 A：**屏幕上真正的那一帧**（含暗角/颗粒/角落标记），且必须在 crossFade
+       之后 —— 拍的是「这一帧最终长什么样」，不是「镜头内容长什么样」。 */
+    saveCross(ctx, shot, t);
   };
 
   /* ---------------- 切间过渡（TRANS 分组，pv_trans.js） ----------------
@@ -1129,26 +1148,42 @@
      画布上本来就有新镜头的画面，所以只要在退场开始前存一张上一镜快照，
      切镜时按转场几何把它让掉 —— 比重新渲染上一镜便宜一个数量级。
 
-     为什么要存「退场开始前」而不是「最后一帧」：exit 在 t1 时已经把字淡完了，
-     拿那一帧当 A 等于拿一张空画面去擦，读作「黑场过场」而不是「换镜」。
+     为什么存「切点前最后一两帧」而不是「退场开始前」：转场是在**切点之后**
+     才把 A 盖上去的，此刻屏幕上是退场末态。若拿退场起点的满墨帧当 A，
+     退场已经淡掉的东西会被 A 原样弹回来 —— 也就是「切点上闪一下」。
+     存最后一帧则 A ≡ 屏幕上正在显示的那张画，转场从它开始让位，零跳变。
+     （A 会不会是一张空画面，取决于退场有没有把画面淡空 —— 那一半由 X_KEEP
+      在编排阶段就压住了：有转场的镜头退场只走到 55%，永远留得下东西给转场擦。）
 
      转场种类在 pv_trans.js（wipe/blinds/clock/iris/blocks/flash/push/zoom/slice/ink
      十种，对齐 JIZURA 的 TRANS 分组）。编排稿写 `shot.trans = {k, ...params}`；
      不写时按镜头号确定性推一个 —— 同一 t 两次渲染永远同一种转场。 */
   const XFADE = { dur: 0.30 };
-  let XC = null, XCFrom = -1, XCValid = false;
+  /* 有转场时退场最多走到这里（55%）：剩下的 45% 墨量留给转场去抹掉。
+     0 会让转场无内容可擦（等于硬切），1 会让画面在切点前先变空再被快照弹回来。 */
+  const X_KEEP = 0.55;
+  /* 快照抓取窗：只在这个窗口里抓，且越晚越好（同字母的后续帧覆盖前者） */
+  const XC_WIN = 0.20;
+  let XC = null, XCFrom = -1, XCValid = false, XCAt = -1;
+  /* 本帧是否正在放转场：正在放的时候画面不是「纯某一镜」，不能拿去当快照，
+     否则极短的镜头会把自己的转场残影拍进 A，一路叠下去。 */
+  let XBusy = false;
 
-  function saveCross(src, shot) {
-    if (XCFrom === shot.i) return;
+  function saveCross(src, shot, t) {
+    if (XBusy) return;
+    if (shot.t1 - t > XC_WIN) return;
+    if (XCFrom === shot.i && t <= XCAt) return;
     if (!XC) XC = document.createElement('canvas');
     const w = src.canvas.width, h = src.canvas.height;
     if (XC.width !== w || XC.height !== h) { XC.width = w; XC.height = h; }
     XC.getContext('2d').drawImage(src.canvas, 0, 0);
     XCFrom = shot.i;
+    XCAt = t;
     XCValid = true;
   }
 
   function crossFade(ctx, shot, t) {
+    XBusy = false;
     if (!XCValid || XCFrom !== shot.i - 1) return;
     /* 片头卡不参与：它是标题+档案行，被拦腰切开只会读作「排版炸了」，
        而且它和大字歌词交错出现，怎么看都像 bug。片头直接硬切进第一句。 */
@@ -1156,7 +1191,20 @@
     const td = shot.trans && PV.TRANS && PV.TRANS[shot.trans.k] ? shot.trans : null;
     const dur = (td && td.dur != null) ? td.dur
       : (PV.TRANS && td && PV.TRANS[td.k].dur) ? PV.TRANS[td.k].dur : XFADE.dur;
-    const q = PV.clamp((t - shot.t0) / Math.max(0.08, dur));
+    const raw = (t - shot.t0) / Math.max(0.08, dur);
+    /* ---- 进度按 koma 栅格归一（RULES §84 第四条根因）----
+       koma 下转场只会被真正画出来 floor(dur·KOMA) 次，相邻两张画的间隔是
+       1/KOMA 秒 ⇒ 每一步的进度增量 dq = 1/(KOMA·dur)。于是**最后一个样本**
+       永远停在 p = 1 - dq 上：0.30s 的转场（dq≈0.28）最后一格还在 p≈0.72，
+       0.46s 的（dq≈0.18）停在 p≈0.82。转场「差一格没走完」，剩下那部分
+       在下一帧被整层丢掉 —— 这就是切点上「闪一下」的最后一种来源，
+       而且它跟几何写错无关，是**采样率**造成的：不管把曲线修得多对，
+       只要终点落在两个样本之间，就一定会剩。
+       除以 (1-dq)：最后一个样本正好 p=1（各转场此时都画不出东西），
+       切点前后两侧严丝合缝；此前的样本略微提前，步长仍然均匀。 */
+    const stepT = (ST.koma || 0) > 0 ? 1 / ST.koma : 0;
+    const dq = stepT > 0 ? Math.min(0.45, stepT / Math.max(0.08, dur)) : 0;
+    const q = PV.clamp(dq > 0 ? raw / (1 - dq) : raw);
     if (q >= 1) return;
     /* 参数：derive 按镜头号推一套确定性默认值做基底，编排稿显式参数再覆盖它。
        早先只有「完全没写 trans」才走 derive —— 于是编排稿写 {k:'wipe'} 时
@@ -1172,6 +1220,11 @@
     }
     const fn = PV.TRANS && PV.TRANS[par.k];
     if (!fn || !fn.draw) return;
+    XBusy = true;
+    /* 只读诊断口：门禁脚本要能看见「这一刻转场走到几分、用的是哪一种」。
+       出问题时最贵的信息就是「q 卡在 0.06 一直不动」这类事实，靠肉眼看缩略图
+       只能看到「画面不动」，看不到「为什么不动」。 */
+    PV.__xdbg = { t, q, k: par.k, dur, dq, from: shot.i - 1 };
     const S = shot._S || ST.S;
     fn.draw(ctx, XC, q, {
       W: PV.W, H: PV.H, S,
@@ -1179,6 +1232,9 @@
       seed: par.seed != null ? par.seed : ((shot.i | 0) * 2654435761) >>> 0,
       dir: par.dir, n: par.n, nx: par.nx, ny: par.ny,
       x: par.x, y: par.y, a0: par.a0, spin: par.spin, flashCol: par.flashCol,
+      /* 装饰件的收尾窗口要按 dq 自适应：只有 4~6 个样本时，「p→1 才归零」
+         必然表现为一次跳变（见 TR.deco）。 */
+      dq,
     });
   }
   PV.crossFade = crossFade;
@@ -1282,6 +1338,21 @@
       sh._lay = r;
       sh._en = sh.energy == null ? 0.5 : sh.energy;
       total += r.glyphs.length;
+    }
+    /* 退场与转场的**交接点**（单一真源，RULES §84）。
+       判定看「下一镜会不会转场进来」，所以除片尾外每镜都要留墨：
+         · 片尾（没有下一镜）→ 退场完整淡出，片子才收得住；
+         · 其余镜头 → 退场只走到 X_KEEP，剩下的交给下一镜的转场带走。
+       退场速率不变，只是起点后移、终点停在 55% —— 于是「切点那一刻屏幕上的样子」
+       与「快照 A」是同一张画。
+       不这么做就会：退场先把整幅淡空 → 转场把退场**起点**的满墨快照盖回来
+       → 再抹掉。观感正是「动画已经走完了，画的还是上一镜，然后闪一下」。 */
+    for (let k = 0; k < ST.shots.length; k++) {
+      const sh = ST.shots[k];
+      const hasNext = k + 1 < ST.shots.length;
+      const xd0 = (sh.exit && sh.exit.dur != null) ? sh.exit.dur : 0.42;
+      sh._xcap = (hasNext && PV.TRANS) ? X_KEEP : 1;
+      sh._xout = Math.max(0.05, xd0 * sh._xcap);
     }
     ST.stats = { glyphs: total, shots: ST.shots.length };
     /* 调试口：抽帧探针要读每镜解算后的构图（巨影 bbox / 版心 / 人物占位），

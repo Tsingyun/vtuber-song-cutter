@@ -23,14 +23,39 @@
   /* 前沿光条：擦到哪里亮到哪里。bell(p) 中段最亮、两端收掉。 */
   const bell = p => Math.sin(Math.PI * clamp(p, 0, 1));
 
+  /* 装饰件（前沿亮线 / 光圈环 / 暗角 / 光晕）的 alpha 系数。
+   *
+   * **契约：必须在最后一个 koma 样本之前就归零。**
+   * koma 下一张画占 1/KOMA 秒，转场只被画 floor(dur·KOMA) 次，最后那个样本
+   * 停在 p = 1 - dq 上（0.30s 的转场 dq≈0.28 ⇒ 停在 0.72）。而 bell(0.72)=0.77：
+   * 装饰件在最后一格还亮着大半，下一帧整层被丢掉 —— 观感与「转场几何写反」
+   * 完全一样（动画走完了还留着上一镜的东西，然后闪一下）。
+   * 所以收尾窗口按 dq 自适应：提前约两个样本开始淡，到 p=1 时已经为 0。 */
+  function deco(p, I, pw) {
+    const dq = (I && I.dq) || 0.18;
+    const tail = clamp((1 - p) / Math.max(0.10, 2.2 * dq), 0, 1);
+    return Math.pow(bell(p), pw == null ? 0.8 : pw) * tail;
+  }
+
   /* 转场加速色：优先用本镜 accent，退而求其次用 ink。 */
   function acc(I) {
     return I.accent || (I.S && I.S.accent) || '#FFFFFF';
   }
 
-  /* ---------- 1. wipe：方向性边缘擦除 + 亮边 ---------- */
+  /* ---------- 1. wipe：方向性边缘擦除 + 亮边 ----------
+   *  dir = **前沿移动的方向**（不是 A 缩向哪一侧）。A 永远留在前沿的「后面」，
+   *  B 在前沿前面被露出来。所以 A 的覆盖区域随 e 增大而**收缩**：
+   *      dir L：前沿从右边走向左边 → A 占 [0, W(1-e)]
+   *      dir R：前沿从左走向右   → A 占 [W·e, W]
+   *      dir U：前沿从下往上     → A 占 [0, H(1-e)]
+   *      dir D：前沿从上往下     → A 占 [H·e, H]
+   *  ★ 这里曾经把「A 还占的区域」写成随 e 增长 —— 于是 p=0 时 A 一点不画
+   *    （切点瞬间就变成新镜，等于没有转场），p→1 时 A 盖满全屏（画面还是上一镜），
+   *    到 p=1 覆盖层被丢掉，新镜**瞬切**进来。观感就是「动画走完了还是上一张，
+   *    然后闪一下」。契约写在本文件头（p<=0 全盖、p>=1 全让），实现曾经偏离了它。
+   */
   TR.wipe = {
-    name: '边缘擦除', dur: 0.30,
+    name: '边缘擦除', dur: 0.42,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H, e = ease.inOutCubic(p);
       const dir = I.dir || 'L';
@@ -38,15 +63,15 @@
       ctx.save();
       ctx.beginPath();
       let bar;
-      if (dir === 'R') { const x = W * e; ctx.rect(0, 0, x, H); bar = [x - lw / 2, 0, lw, H, -1]; }
-      else if (dir === 'U') { const y = H * (1 - e); ctx.rect(0, y, W, H - y); bar = [0, y - lw / 2, W, lw, 1]; }
-      else if (dir === 'D') { const y = H * e; ctx.rect(0, 0, W, y); bar = [0, y - lw / 2, W, lw, -1]; }
-      else { const x = W * (1 - e); ctx.rect(x, 0, W - x, H); bar = [x - lw / 2, 0, lw, H, 1]; }
+      if (dir === 'R') { const x = W * e; ctx.rect(x, 0, W - x, H); bar = [x - lw / 2, 0, lw, H, -1]; }
+      else if (dir === 'U') { const y = H * (1 - e); ctx.rect(0, 0, W, y); bar = [0, y - lw / 2, W, lw, 1]; }
+      else if (dir === 'D') { const y = H * e; ctx.rect(0, y, W, H - y); bar = [0, y - lw / 2, W, lw, -1]; }
+      else { const x = W * (1 - e); ctx.rect(0, 0, x, H); bar = [x - lw / 2, 0, lw, H, 1]; }
       ctx.clip();
       ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
       /* 前沿亮条 + 一根拖尾细线：没有它们，擦除读作「方块滑过」 */
-      const a = Math.pow(bell(p), 0.6);
+      const a = deco(p, I, 0.6);
       ctx.save();
       ctx.globalAlpha = a; ctx.fillStyle = acc(I);
       ctx.fillRect(bar[0], bar[1], bar[2], bar[3]);
@@ -60,7 +85,7 @@
 
   /* ---------- 2. blinds：百叶窗（横/竖条各自收窄） ---------- */
   TR.blinds = {
-    name: '百叶窗', dur: 0.34,
+    name: '百叶窗', dur: 0.44,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H, e = ease.inOutCubic(p);
       const n = I.n || 10;
@@ -79,7 +104,7 @@
       ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
       /* 条与条之间的亮缝 */
-      const a = Math.pow(bell(p), 0.7) * 0.55;
+      const a = deco(p, I, 0.7) * 0.55;
       if (a > 0.01) {
         ctx.save();
         ctx.globalAlpha = a; ctx.fillStyle = acc(I);
@@ -96,7 +121,7 @@
 
   /* ---------- 3. clockWipe：钟表扫（径向扇形收） ---------- */
   TR.clock = {
-    name: '钟表扫', dur: 0.38,
+    name: '钟表扫', dur: 0.46,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H, e = ease.inOutCubic(p);
       const cx = W * (I.x == null ? 0.5 : I.x), cy = H * (I.y == null ? 0.5 : I.y);
@@ -113,7 +138,7 @@
       ctx.clip();
       ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
-      const a = Math.pow(bell(p), 0.5), lw = Math.max(3, Math.min(W, H) * 0.005);
+      const a = deco(p, I, 0.5), lw = Math.max(3, Math.min(W, H) * 0.005);
       ctx.save();
       ctx.globalAlpha = a; ctx.strokeStyle = acc(I); ctx.lineWidth = lw; ctx.lineCap = 'round';
       ctx.beginPath();
@@ -128,7 +153,7 @@
 
   /* ---------- 4. iris：圆孔打开（A 只剩圆外） ---------- */
   TR.iris = {
-    name: '光圈开', dur: 0.34,
+    name: '光圈开', dur: 0.44,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H, e = ease.inOutCubic(p);
       const cx = W * (I.x == null ? 0.5 : I.x), cy = H * (I.y == null ? 0.5 : I.y);
@@ -145,7 +170,7 @@
       } else {
         ctx.drawImage(A, 0, 0, I.W, I.H);
       }
-      const a = Math.pow(bell(p), 0.6), lw = Math.max(3, Math.min(W, H) * 0.008);
+      const a = deco(p, I, 0.6), lw = Math.max(3, Math.min(W, H) * 0.008);
       ctx.save();
       ctx.globalAlpha = a; ctx.strokeStyle = acc(I); ctx.lineWidth = lw;
       ctx.beginPath(); ctx.arc(cx, cy, r + lw / 2, 0, TAU); ctx.stroke();
@@ -157,7 +182,7 @@
 
   /* ---------- 5. blocks：方格按种子顺序消解 ---------- */
   TR.blocks = {
-    name: '方格消解', dur: 0.36,
+    name: '方格消解', dur: 0.46,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H;
       const nx = I.nx || 8, ny = I.ny || 5;
@@ -215,7 +240,7 @@
       const fl = bell(p);
       if (fl > 0.01) {
         ctx.save();
-        ctx.globalAlpha = Math.pow(fl, 1.6) * 0.92;
+        ctx.globalAlpha = deco(p, I, 1.6) * 0.92;
         ctx.fillStyle = I.flashCol || '#FFFFFF';
         ctx.fillRect(0, 0, W, H);
         ctx.restore();
@@ -225,7 +250,7 @@
 
   /* ---------- 7. push：A 整幅推走（B 在底下被露出来） ---------- */
   TR.push = {
-    name: '推走', dur: 0.30,
+    name: '推走', dur: 0.42,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H, e = ease.inOutCubic(p);
       const dir = I.dir || 'L';
@@ -234,6 +259,13 @@
       const sg = (dir === 'L' || dir === 'U') ? -1 : 1;
       const off = Math.round(e * L) * sg;
       ctx.save();
+      /* 压暗**只作用在 A 那一块**（clip 到 A 的新位置）。
+         整幅压暗会在 A 已经离场后仍留一层 27% 的黑幕，转场一结束黑幕整层消失
+         ⇒ 切点上整屏一亮：实测该切点帧差 60.2，是全片最大的一处「闪」。 */
+      ctx.beginPath();
+      if (h) ctx.rect(off, 0, W, H);
+      else ctx.rect(0, off, W, H);
+      ctx.clip();
       if (h) ctx.drawImage(A, off, 0, I.W, I.H);
       else ctx.drawImage(A, 0, off, I.W, I.H);
       /* 推走时上一镜压暗一点，避免两屏内容同时抢注意力 */
@@ -245,7 +277,7 @@
       const lw = Math.max(3, Math.min(W, H) * 0.005);
       const q = h ? (sg < 0 ? W + off : off) : (sg < 0 ? H + off : off);
       ctx.save();
-      ctx.globalAlpha = Math.pow(bell(p), 0.6) * 0.85;
+      ctx.globalAlpha = deco(p, I, 0.6) * 0.85;
       ctx.fillStyle = acc(I);
       if (h) ctx.fillRect(q - lw / 2, 0, lw, H);
       else ctx.fillRect(0, q - lw / 2, W, lw);
@@ -255,7 +287,7 @@
 
   /* ---------- 8. zoom：A 放大冲出画面（透视穿越） ---------- */
   TR.zoom = {
-    name: '穿越放大', dur: 0.30,
+    name: '穿越放大', dur: 0.42,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H, e = ease.inCubic(p);
       const s = 1 + e * 1.6;
@@ -272,7 +304,7 @@
       const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.12,
         W / 2, H / 2, Math.max(W, H) * 0.62);
       g.addColorStop(0, rgba([255, 255, 255], 0));
-      g.addColorStop(1, rgba([255, 255, 255], 0.16 * bell(p)));
+      g.addColorStop(1, rgba([255, 255, 255], 0.16 * deco(p, I, 1.0)));
       ctx.save();
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
       ctx.restore();
@@ -281,7 +313,7 @@
 
   /* ---------- 9. slice：短册错位（横条交替平移后淡出） ---------- */
   TR.slice = {
-    name: '短册错位', dur: 0.32,
+    name: '短册错位', dur: 0.44,
     draw(ctx, A, p, I) {
       const W = I.W, H = I.H, e = ease.inOutCubic(p);
       const n = I.n || 9;
@@ -314,7 +346,10 @@
       const seed = (I.seed | 0) || 11;
       const r = (j, k) => PV.rng(seed, j, k)();
       const N = 6;
-      const R0 = Math.hypot(W, H) * 0.52;
+      /* R0 与半径系数决定「墨能不能铺满」。墨斑是 6 个随机位置的有限圆，
+         光靠长大保证不了盖满画幅（实测 p→1 仍有 58% 的 A 留在四角），
+         所以下面还有一道整体淡出兜底；这里先把斑做大，让淡出接得自然。 */
+      const R0 = Math.hypot(W, H) * 0.80;
       ctx.save();
       /* 圆外保留 A：把 N 个「已经长起来的墨斑」从 A 上挖掉 */
       ctx.beginPath();
@@ -336,6 +371,11 @@
         ctx.closePath();
       }
       ctx.clip('evenodd');
+      /* 契约兜底：p→1 时 A 必须一点不剩。墨斑盖不满的四角在这里淡掉，
+         观感是「剩下的边角被墨吃掉」，不是「忽然消失」。 */
+      const fade = clamp(1 - (p - 0.56) / 0.44, 0, 1);
+      if (fade <= 0.004) { ctx.restore(); return; }
+      ctx.globalAlpha = fade;
       ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
     },
@@ -363,7 +403,9 @@
   TR.grad = {
     name: '渐变擦除', dur: 0.52,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      /* 前沿走**线性**：软坡宽 34% 画幅，一旦加缓动，两端几乎不动、中段猛推，
+         在 4~5 张画的采样下就是「停一下、猛化开、停一下」。 */
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);
       const aw = A.width || W, ah = A.height || H;
       const o = PV.offscreen('transGrad', aw, ah, 1);
       o.ctx.drawImage(A, 0, 0);
@@ -396,9 +438,17 @@
   TR.mask = {
     name: '遮罩扩张', dur: 0.46,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.outCubic(p);
+      /* 进度走 √p：遮罩是二维的，被吃掉的面积 ∝ k²。k 线性增长时
+         「每一格吃掉多少」会越来越快（4~5 张画里表现为中段一次突跳），
+         开方之后面积才随 p 均匀涨。 */
+      const W = I.W, H = I.H, e = Math.sqrt(clamp(p, 0, 1));
       const cx = W * (I.x == null ? 0.5 : I.x), cy = H * (I.y == null ? 0.5 : I.y);
-      const k = 1 + e * 1.35;                     // 咬开的口子随 p 长到盖过整幅
+      /* k 从「几乎全闭」长到「盖过整幅」。
+         早先是 1 → 2.35：p=0 时口子已经有 0.30W×0.34H（切点就先漏出来一块），
+         p=1 时 0.70W×0.80H 又盖不满画幅（末端 44% 的 A 留在四周，一丢弃就瞬切）。
+         两端都要落在契约上，所以起点收到 0.06、终点放到 3.4（>1/0.30 才够宽，
+         >1/0.34 才够高）。 */
+      const k = 0.06 + e * 3.4;
       const rw = W * 0.30 * k, rh = H * 0.34 * k;
       const rad = Math.min(rw, rh) * (I.rad == null ? 0.18 : I.rad);
       const x0 = cx - rw / 2, y0 = cy - rh / 2;
@@ -420,7 +470,7 @@
       ctx.drawImage(A, 0, 0, W, H);
       ctx.restore();
       /* 咬开的边缘一道极淡的亮线：没有它，扩张读作「画面里有块黑」 */
-      const a = Math.pow(bell(p), 0.8) * 0.5;
+      const a = deco(p, I, 0.8) * 0.5;
       if (a > 0.01) {
         ctx.save();
         ctx.globalAlpha = a;

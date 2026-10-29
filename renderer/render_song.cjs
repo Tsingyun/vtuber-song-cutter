@@ -430,7 +430,9 @@ async function cleanupArtifacts() {
       }
     }));
     const bad = rs.find(r => !r.ok);
-    result = bad || { ok: true, frames: total, dur: total / 60 };
+    /* 时长必须按**本次渲染的 fps** 算。写死 /60 时 30fps 的 232s 片会报成 116s，
+       而 ffprobe 是 232s —— 看到这个数会以为少渲了一半。 */
+    result = bad || { ok: true, frames: total, dur: total / FPS };
 
     /* 阶段 2：并行编码各段 → concat 拼接（此时浏览器已关，编码独享资源） */
     if (TWO_PHASE && result.ok) {

@@ -151,16 +151,23 @@ window.__frame = async (i, opts) => {
   const t = i / HL.fps;
   const fast = !!(opts && opts.fast);
   HL.vT = t; HL.frame = i;
+  /* koma 量化态：**换装、换镜、渲染三者必须用同一个时间**。
+     渲染用的是量化后的 t（renderAt 内部再算一次），而换装曾经用原始 t ——
+     于是切点那一帧「按下一镜换装」，紧接着渲染的却还是量化回去的上一镜，
+     上一镜的人物帧已被释放 ⇒ 最后 1~2 帧人物凭空消失。退场把人物淡到 0 时
+     看不出来，一旦退场留下 45% 残影，就变成切点上一记可见的闪。 */
+  const K = (CFG && CFG.storyboard && CFG.storyboard.meta && CFG.storyboard.meta.koma) || 0;
+  const qt = K > 0 ? Math.floor(t * K + 1e-6) / K : t;
   /* 人物层是按镜头滑动装载的：**成片逐帧推进也必须走这条路径**。
      早先只有预览接口 __pvShot 调了 ensureWindow，于是抽帧里人物好好的、
      4K 成片一个都没有（13931 帧、232.17s、18.1Mbps、色彩全对）。
      同镜头调用返回 null 是零开销；换镜头才 await。
      快进阶段（fast）不装载：那里只为推排版状态，逐镜解码会白烧几分钟。 */
   if (!fast) {
-    const pend = PV.ensureWindow ? PV.ensureWindow(t) : null;
+    const pend = PV.ensureWindow ? PV.ensureWindow(qt) : null;
     if (pend) {
       await pend; FIG_SHOTS++;
-      if (FIG_SHOTS % 6 === 1) console.log('[pv] 人物装载第 %d 镜 @%.1fs', FIG_SHOTS, t);
+      if (FIG_SHOTS % 6 === 1) console.log('[pv] 人物装载第 %d 镜 @%.1fs', FIG_SHOTS, qt);
     }
   }
   applyScale();
@@ -172,11 +179,7 @@ window.__frame = async (i, opts) => {
   /* koma 换态首渲丢弃（RULES 76）：GPU 光栅化对每种绘制状态的首次执行会漏 ±1 抖动，
      同一张画的 5 个输出帧里第 1 帧会与后 4 帧字节不一致。量化态切换时先渲一遍丢弃，
      再渲正式帧；同 koma 的后续帧天然已是热态，单渲即可。fast 预推不产出画面，跳过。 */
-  if (!fast) {
-    const K = (CFG && CFG.storyboard && CFG.storyboard.meta && CFG.storyboard.meta.koma) || 0;
-    const qt = K > 0 ? Math.floor(t * K + 1e-6) / K : t;
-    if (qt !== _lastQt) { _lastQt = qt; PV.renderAt(ctx, t); }
-  }
+  if (!fast && qt !== _lastQt) { _lastQt = qt; PV.renderAt(ctx, t); }
   PV.renderAt(ctx, t);
   HL.prog = i;
 };
@@ -191,8 +194,12 @@ window.__render = async () => {
 window.__pvShot = async (cfg) => {
   if (!CFG) await setupFrom(cfg);
   /* 人物层是「按镜头滑动装载」的：抽帧也必须走同一条装载路径，
-     否则非首镜的人物永远画不出来（会误判成「人物层没生效」）。 */
-  const pend = PV.ensureWindow ? PV.ensureWindow(cfg.t) : null;
+     否则非首镜的人物永远画不出来（会误判成「人物层没生效」）。
+     时间同样先量化：渲染用的是量化后的 t，换装若用原始 t，静帧也会「按下一镜装载、
+     却渲染上一镜」，人物凭空消失。 */
+  const Kq = (CFG && CFG.storyboard && CFG.storyboard.meta && CFG.storyboard.meta.koma) || 0;
+  const tq = Kq > 0 ? Math.floor(cfg.t * Kq + 1e-6) / Kq : cfg.t;
+  const pend = PV.ensureWindow ? PV.ensureWindow(tq) : null;
   if (pend) { await pend; FIG_SHOTS++; }
   applyScale();
   /* 首渲丢弃（RULES 76）：GPU 首触 ±1 抖动，第二次渲染起才字节稳定。
@@ -206,6 +213,9 @@ window.__pvShot = async (cfg) => {
   PV.renderAt(ctx, cfg.t);
   return cv.toDataURL('image/png');
 };
+/* 取当前画布（tools/pv_range.cjs 用）：顺序渲染后要逐帧落盘对比。
+   只是读，不参与渲染，不影响成片路径的任何字节。 */
+window.__grab = () => cv.toDataURL('image/png');
 window.__pvInfo = () => ({
   scale: OUT_SCALE, total: HL.total, dur: HL.dur, figShots: FIG_SHOTS,
   stats: PV.STAT ? PV.STAT() : null,

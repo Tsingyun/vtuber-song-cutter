@@ -780,11 +780,13 @@
     return Math.max(0, w - tr);
   }
 
-  PV.drawMarks = (ctx, marks, lt, outDur, dur, phase) => {
+  /* cap：退场上界（engine 的 X_KEEP）。out = 1 - cap·q² 而不是 1 - q²，
+     于是「字停在 55%」时线也停在 55%，切点上的画面与转场快照同形。 */
+  PV.drawMarks = (ctx, marks, lt, outDur, dur, phase, cap) => {
     if (!marks || !marks.length) return;
     /* 退场：字在退，版面也必须跟着退，否则会出现「字没了、线还在」 */
     const q = outDur > 0 ? PV.clamp((lt - (dur - outDur)) / outDur) : 0;
-    const out = 1 - q * q;
+    const out = 1 - q * q * (cap == null ? 1 : cap);
     for (const m of marks) {
       const isOver = !!m.over;
       if (phase === 'over' ? !isOver : isOver) continue;
@@ -794,11 +796,11 @@
 
   /* 巨型暗影（cropGiant / titleCard 用）：单独一层，画在 marks 之前、字之后？ 
      它必须**在字下面**，所以 engine 在 drawLyrics 开始处调用。 */
-  PV.drawGiant = (ctx, giant, lt, outDur, dur) => {
+  PV.drawGiant = (ctx, giant, lt, outDur, dur, cap) => {
     if (!giant) return;
     const g = giant;
     const q = outDur > 0 ? PV.clamp((lt - (dur - outDur)) / outDur) : 0;
-    const out = 1 - q * q;
+    const out = 1 - q * q * (cap == null ? 1 : cap);
     const pIn = PV.clamp(lt / 0.7);
     ctx.save();
     ctx.globalAlpha = g.alpha * out * (0.55 + 0.45 * ease.outCubic(pIn));

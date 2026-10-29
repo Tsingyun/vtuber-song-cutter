@@ -46,6 +46,10 @@ def ap(**kw):
     a.add_argument("--date", default="")
     a.add_argument("--mark", default="")
     a.add_argument("--res", type=int, default=1, help="1=1080p 2=4K")
+    a.add_argument("--fps", type=int, default=30,
+                   help="成片帧率。必须显式写进 job：不给的话 render_song 会退到 "
+                        "storyboard.meta.fps（导演层默认 60），于是 koma=12 变成每张画 5 帧，"
+                        "和按 30fps 量的时间轴全部错位")
     a.add_argument("--pages", type=int, default=1, help="ffmpeg 两阶段并行度；1080p 样片用 1")
     a.add_argument("--bitrate", type=int, default=0, help="0 = res>=2 ? 18M : 12M")
     a.add_argument("--reuse-sb", action="store_true", help="不重跑导演层，直接用现有编排稿")
@@ -97,6 +101,7 @@ def main():
         "title": a.title, "artist": a.artist, "vocal": a.vocal,
         "storyboard": sb, "live": live, "pvDur": dur,
         "res": a.res,
+        "fps": a.fps,
         "bitrate": a.bitrate or (18000000 if a.res >= 2 else 12000000),
         "encoder": "ffmpeg",
         "pages": a.pages,
