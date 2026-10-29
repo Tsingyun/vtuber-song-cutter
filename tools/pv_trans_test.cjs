@@ -92,35 +92,39 @@ const ROOT = path.resolve(__dirname, '..');
   const pc = v => (v * 100).toFixed(1).padStart(5) + '%';
   console.log('[trans] ' + rows.length + ' 种转场 · koma=' + KOMA +
     ' · A=纯红 / B=纯蓝；dist = 这一帧离新镜有多远，steps = 每格的变化量\n');
-  console.log('  ' + 'name'.padEnd(11) + 'dur  格数  p=0   末格   最大步  中位步  倍数  判定');
+  console.log('  ' + 'name'.padEnd(11) + 'dur  格数  p=0   末格   最大步  均步   倍数  判定');
   let bad = 0;
-  /* 判据三条，各自对应一种真实的缺陷：
+  /* 判据四条，各自对应一种真实的缺陷：
      ① p=0 必须全盖 —— 否则切点那一帧就等于新镜，转场白做；
      ② p→1 必须让干净 —— 否则覆盖层被丢弃时瞬切；
      ③ **最后一个被画出来的样本**不能还留着一大截 —— 这才是「动画走完还是上一镜」
         的量化形态。koma 下转场只画 4~5 次，若曲线在末端才归零，最后一格必然
-        剩一截再消失。
-     注意**第一拍的幅度不判失败**：0.44s 的转场在 koma=12 下只有 5 张画，
-     第一拍天然要吃掉一大块位移；这是采样率决定的，不是几何缺陷。
-     `flash` 只验 ①②：闪白本来就要有一次亮度冲击，步长不可能均匀。 */
+        剩一截再消失；
+     ④ **逐格变化必须均匀**（最大步 / 均步 ≤ 1.85）。这是「一张画跳完」的量化形态：
+        koma=12 时转场只有 5 张画，用 inOutCubic / inCubic 这类缓动会把 60~100%
+        的变化压进中间一格（实测 wipe 一格吃 44%、iris 63%、zoom 甚至 100% ——
+        那已经不是转场，是硬切）。一维几何量（前沿位置/角/位移/缩放/透明度）走
+        线性 p，二维量（圆/框面积）走 √p 或略大的指数。
+     `flash` 只验 ①②③：闪白本来就要一次亮度冲击，步长不可能均匀。 */
+  const UNI_LIMIT = 1.85;
   for (const r of rows) {
     const missStart = r.p0.red < 0.55;
     const resid = r.p995.dist >= 0.02 || r.p1.dist >= 0.02;
     const endLeft = r.lastDrawn >= 0.12;
-    const rest = r.steps.slice(1);                       // 去掉第一拍
-    const restMax = Math.max.apply(null, rest) || 0;
-    const restMed = rest.slice().sort((a, b) => a - b)[Math.floor(rest.length / 2)] || 0;
-    const spike = (r.k === 'flash' || restMed <= 0.004) ? 1 : restMax / restMed;
-    const ok = !missStart && !resid && (!endLeft || r.k === 'flash') && spike <= 2.6;
+    const sum = r.steps.reduce((a, b) => a + b, 0);
+    const avg = sum / Math.max(1, r.steps.length);
+    const uni = avg > 0.004 ? r.mx / avg : 1;
+    const ok = !missStart && !resid && (!endLeft || r.k === 'flash') &&
+      (r.k === 'flash' || uni <= UNI_LIMIT);
     if (!ok) bad++;
     const why = [];
     if (missStart) why.push('p=0 没盖住（切点会瞬切）');
     if (resid) why.push('p→1 残留 ' + (r.p995.dist * 100).toFixed(1) + '%');
     if (endLeft && r.k !== 'flash') why.push('末格还剩 ' + (r.lastDrawn * 100).toFixed(1) + '%');
-    if (spike > 2.6) why.push('中段突跳 ' + spike.toFixed(1) + '×');
+    if (r.k !== 'flash' && uni > UNI_LIMIT) why.push('第 ' + r.worst + ' 格吃掉 ' + uni.toFixed(1) + '× 平均');
     console.log('  ' + String(r.k).padEnd(11) + r.dur.toFixed(2) + '  ' + String(r.n).padStart(2) +
-      '  ' + pc(r.p0.red) + ' ' + pc(r.lastDrawn) + ' ' + pc(r.mx) + '  ' + pc(r.med) + ' ' +
-      String(spike.toFixed(1)).padStart(5) + '×  ' + (ok ? 'OK' : '❌ ' + why.join(' / ')));
+      '  ' + pc(r.p0.red) + ' ' + pc(r.lastDrawn) + ' ' + pc(r.mx) + '  ' + pc(avg) + ' ' +
+      String(uni.toFixed(2)).padStart(5) + '×  ' + (ok ? 'OK' : '❌ ' + why.join(' / ')));
   }
   console.log(bad ? ('\n[FAIL] ' + bad + ' 种不满足契约') : '\n[OK] 全部满足契约');
   await browser.close();

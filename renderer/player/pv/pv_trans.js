@@ -57,7 +57,7 @@
   TR.wipe = {
     name: '边缘擦除', dur: 0.42,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);   /* 匀速：面积随 p 线性减，5 张画各让 1/5 */
       const dir = I.dir || 'L';
       const lw = Math.max(3, Math.min(W, H) * 0.006);
       ctx.save();
@@ -87,7 +87,7 @@
   TR.blinds = {
     name: '百叶窗', dur: 0.44,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);   /* 匀速：面积随 p 线性减，5 张画各让 1/5 */
       const n = I.n || 10;
       const vert = I.dir === 'V';
       const L = vert ? W : H;
@@ -123,7 +123,7 @@
   TR.clock = {
     name: '钟表扫', dur: 0.46,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);   /* 匀速：面积随 p 线性减，5 张画各让 1/5 */
       const cx = W * (I.x == null ? 0.5 : I.x), cy = H * (I.y == null ? 0.5 : I.y);
       const R = Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) + 4;
       const a0 = (I.a0 == null ? -90 : I.a0) * Math.PI / 180;
@@ -155,7 +155,11 @@
   TR.iris = {
     name: '光圈开', dur: 0.44,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      /* 半径走 p^0.62：圆面积 ∝ r²，理论上该用 √p，但 R 取的是「到最远角」的距离，
+         圆在 p=0.2 时已经吃掉 37% 画幅（实测一格占全片变化的 46%）。
+         指数调到 0.62，逐格变化从 2.36× 降到 1.70×；剩下的尾巴是几何决定的
+         （圆要盖到四角必然要走到 R），不再追。 */
+      const W = I.W, H = I.H, e = Math.pow(clamp(p, 0, 1), 0.62);
       const cx = W * (I.x == null ? 0.5 : I.x), cy = H * (I.y == null ? 0.5 : I.y);
       const R = Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) + 4;
       const r = R * e;
@@ -252,7 +256,7 @@
   TR.push = {
     name: '推走', dur: 0.42,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);   /* 匀速：面积随 p 线性减，5 张画各让 1/5 */
       const dir = I.dir || 'L';
       const h = dir === 'L' || dir === 'R';
       const L = h ? W : H;
@@ -289,9 +293,11 @@
   TR.zoom = {
     name: '穿越放大', dur: 0.42,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inCubic(p);
+      /* 缩放走线性：inCubic 让前 3 张画几乎不动、第 4 张一口气放大 1.5 倍
+         （实测「一格吃掉 100%」，读起来就是硬切） */
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);
       const s = 1 + e * 1.6;
-      const a = 1 - ease.inQuad(p);
+      const a = clamp(1 - p, 0, 1);
       if (a <= 0.004) return;
       ctx.save();
       ctx.globalAlpha = a;
@@ -315,12 +321,12 @@
   TR.slice = {
     name: '短册错位', dur: 0.44,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);
       const n = I.n || 9;
       const sh = H / n;
       const amp = W * 0.16;
       const seed = (I.seed | 0) || 3;
-      const a0 = 1 - ease.inQuad(p);
+      const a0 = clamp(1 - p, 0, 1);
       if (a0 <= 0.004) return;
       for (let i = 0; i < n; i++) {
         /* 奇偶列反向，中间快两头慢 —— 读作「一叠纸被推开」 */
@@ -342,7 +348,7 @@
   TR.ink = {
     name: '墨晕', dur: 0.42,
     draw(ctx, A, p, I) {
-      const W = I.W, H = I.H, e = ease.outCubic(p);
+      const W = I.W, H = I.H, e = clamp(p, 0, 1);   /* 墨斑半径随 p 线性长 */
       const seed = (I.seed | 0) || 11;
       const r = (j, k) => PV.rng(seed, j, k)();
       const N = 6;
@@ -387,7 +393,7 @@
   TR.dissolve = {
     name: '叠化', dur: 0.60,
     draw(ctx, A, p, I) {
-      const e = ease.inOutCubic(p);
+      const e = clamp(p, 0, 1);   /* 透明度匀速：每张画褪 1/5 */
       const a = 1 - e;
       if (a <= 0.004) return;
       ctx.save();
