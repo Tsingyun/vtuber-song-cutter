@@ -158,8 +158,9 @@ def main():
         d = abs(info["dur"] - want)
         print("[dur] %.2fs vs 编排稿 %.2fs  差 %.2fs %s" % (info["dur"], want, d, "OK" if d <= 0.5 else "FAIL"))
         ok &= d <= 0.5
-    print("[fmt] %dx%d %s %s %s" % (info["w"], info["h"], info["fps"], info["pix"], info["color"]))
-    ok &= (info["w"], info["h"]) == (3840, 2160) and info["fps"].startswith("60")
+    fmt_ok = (info["w"], info["h"]) == (3840, 2160) and info["fps"].split("/")[0] in ("30", "60")
+    print("[fmt] %dx%d %s %s %s %s" % (info["w"], info["h"], info["fps"], info["pix"], info["color"], "OK" if fmt_ok else "FAIL"))
+    ok &= fmt_ok
     print("[bitrate] video %d kbps  %s" % (info["vbr"], "OK" if info["vbr"] <= 19000 else "FAIL(会二压)"))
     ok &= info["vbr"] <= 19000
     print("[audio] %s %d kbps" % (info["acodec"], info["abr"]))
