@@ -102,7 +102,7 @@
   function spanOf(sh, name) {
     const s = ST.seq[name];
     if (!s) return null;
-    return [Math.max(0, Math.floor((sh.t0 - 0.9) * s.fps)),
+    return [Math.max(0, Math.floor((sh.t0 - 1.6) * s.fps)),
       Math.min(s.n - 1, Math.ceil((sh.t1 + 0.9) * s.fps))];
   }
 
@@ -168,9 +168,49 @@
   const SAFE = { m: 76 };
   const TAU = 6.283185307;
 
+  /* 画框几何（2026-10-29 三版）：不再只有「圆窗 / 竖幅」两种。
+     侧位面板族（arch 拱窗 / pill 胶囊 / soft 羽化面 / diag 斜切带）由 w·h 推位置，
+     split 纵向分屏全高出画、strip 横向满幅条上下出血 —— 版面层据此让位。
+     一切仍以 1920×1080 设计坐标描述，4K 渲染由外层 setTransform 统一放大。 */
   function placeFigure(fig, bbox) {
     const sc = fig.scale || 1;
     const mode = fig.mode || 'disc';
+
+    /* 满幅淡底：整帧铺满，不占版面（长句专用，字照常全宽） */
+    if (mode === 'wash') {
+      return { kind: 'wash', shape: 'rect', mode, x: 0, y: 0, w: PV.W, h: PV.H };
+    }
+    /* 横向满幅条：贴顶或贴底出血。**已停用**（RULES 80）：
+       16:9 的现场画面竖裁只剩 ~190 源行，切在哪儿取决于那一秒的姿势，
+       十次里有三次读作「图被切坏了」。要横贯全宽请用 wash + veilK。 */
+    if (mode === 'strip') {
+      const h = (fig.h || 380) * sc;
+      const top = fig.at === 'top';
+      const bl = fig.bleed == null ? 0.22 : fig.bleed;      // 出血比例（条高的一部分露出画外）
+      const y = top ? -h * bl : PV.H - h + h * bl;
+      return { kind: 'panel', shape: 'rect', mode, x: -8, y, w: PV.W + 16, h };
+    }
+    /* 纵向分屏：全高出血，占一侧，字在另一侧 */
+    if (mode === 'split') {
+      const w = PV.W * (fig.wf || 0.46);
+      const h = PV.H * (fig.hf || 1.12);
+      const x = fig.side === 'l' ? -10 : PV.W - w + 10;
+      return { kind: 'panel', shape: 'rect', mode, x, y: (PV.H - h) / 2, w, h };
+    }
+    /* 侧位面板族：按 w/h 定尺寸、贴安全边（y 是**中心**） */
+    if (mode === 'arch' || mode === 'pill' || mode === 'soft' || mode === 'diag' || mode === 'round') {
+      let w, h;
+      if (mode === 'pill' || mode === 'round') { w = (fig.w || 760) * sc; h = (fig.h || 320) * sc; }
+      else if (mode === 'diag') { w = PV.W * (fig.wf || 0.44); h = PV.H * (fig.hf || 0.88); }
+      else if (mode === 'soft') { w = PV.W * (fig.wf || 0.48); h = PV.H * (fig.hf || 0.68); }
+      else { h = (fig.h || 640) * sc; w = h * (fig.wRatio || 0.62); }
+      const yc = (fig.y != null ? fig.y : 0.5) * PV.H;
+      const x = fig.side === 'l' ? SAFE.m : PV.W - SAFE.m - w;
+      const shape = mode === 'arch' ? 'arch'
+        : (mode === 'pill' ? 'pill' : (mode === 'diag' ? 'poly' : 'round'));
+      return { kind: 'panel', shape, mode, x, y: yc - h / 2, w, h,
+               rad: fig.rad, skew: fig.skew == null ? -w * 0.14 : fig.skew };
+    }
 
     /* 竖幅族（band / slab / ghost / crop）共用一个矩形框，差别只在尺寸与贴边方式：
        band  = 3:4 竖幅，完整露出人；
@@ -186,7 +226,7 @@
       else if (mode === 'ghost') x = fig.side === 'r' ? PV.W - w - 26 : 26;
       else if (fig.fixed) x = fig.side === 'r' ? PV.W - w - 24 : 24;
       else x = fig.side === 'r' ? PV.W - SAFE.m - w : SAFE.m;
-      return { x, y, w, h, kind: 'band', mode };
+      return { x, y, w, h, kind: 'band', shape: 'rect', mode };
     }
 
     const r = (fig.r || 168) * sc;
@@ -196,40 +236,42 @@
       const y = (fig.y != null ? fig.y : 0.44) * PV.H;
       return { x, y, r, kind: 'disc', mode };
     }
-    // 候选锚点：四角 + 左右中
-    const cxL = SAFE.m + r + 16, cxR = PV.W - SAFE.m - r - 16;
-    const cyTop = SAFE.m + r + 16, cyMid = PV.H * 0.44, cyBot = PV.H - SAFE.m - r - 16;
-    const cands = [
-      { x: cxR, y: cyMid }, { x: cxL, y: cyMid },
-      { x: cxR, y: cyBot }, { x: cxL, y: cyBot },
-      { x: cxR, y: cyTop }, { x: cxL, y: cyTop },
-    ];
-    if (fig.side === 'r') cands.sort((a, b) => (b.x - a.x) || (a.y - cyMid) - (b.y - cyMid) * 0);
-    let best = cands[0], bestScore = -1e9;
-    const bcx = (bbox[0] + bbox[2]) / 2, bcy = (bbox[1] + bbox[3]) / 2;
-    for (const c of cands) {
-      // 与 bbox 的「矩形距离」：负数说明相交，越负越糟
-      const dx = Math.max(bbox[0] - (c.x + r), (c.x - r) - bbox[2], 0);
-      const dy = Math.max(bbox[1] - (c.y + r), (c.y - r) - bbox[3], 0);
+    /* 定点在**要求的这一侧**、y 只做小幅纵向避让。
+       早先的六锚点「挑离字最远的那个」会无视 side：版面层把字推到右边、给左边
+       留了空，圆窗却因为右侧加 26 分跑到右边去 —— 结果字在中间、人被挤到角上，
+       留白全在反侧（实测 line 7 / line 20）。既然版面层已经按 side 让过位，
+       这里就该老老实实待在那一侧，只在真的相交时沿边上下滑。 */
+    const wantY = (fig.y != null ? fig.y : 0.44) * PV.H;
+    const x = fig.side === 'l' ? SAFE.m + r + 16 : PV.W - SAFE.m - r - 16;
+    const yMin = SAFE.m + r + 8, yMax = PV.H - SAFE.m - r - 8;
+    const ys = [clamp(wantY, yMin, yMax), yMax, yMin, (yMin + yMax) / 2];
+    let best = clamp(wantY, yMin, yMax), bestScore = -1e9;
+    for (const y of ys) {
+      const dx = Math.max(bbox[0] - (x + r), (x - r) - bbox[2], 0);
+      const dy = Math.max(bbox[1] - (y + r), (y - r) - bbox[3], 0);
       let d = Math.hypot(dx, dy);
-      if (dx === 0 && dy === 0) d = -Math.hypot(bcx - c.x, bcy - c.y) * 0.5;   // 相交
-      // 偏好右侧（与阅读方向一致），但别为了右侧硬撞字
-      const score = d + (c.x > PV.W / 2 ? 26 : 0) + (c.y > PV.H * 0.5 ? 8 : 0);
-      if (score > bestScore) { bestScore = score; best = c; }
+      if (dx === 0 && dy === 0) d = -Math.hypot((bbox[0] + bbox[2]) / 2 - x, (bbox[1] + bbox[3]) / 2 - y) * 0.5;
+      const score = d - Math.abs(y - wantY) * 0.04;
+      if (score > bestScore) { bestScore = score; best = y; }
     }
-    return { x: best.x, y: best.y, r, kind: 'disc', mode };
+    return { x, y: best, r, kind: 'disc', mode };
   }
 
-  /* 等比覆盖裁切：源图比例和框不一致时，宁可裁掉边缘也不要拉变形（拉变形一眼假）。 */
-  function drawCover(ctx, im, dx, dy, dw, dh, zoom) {
+  /* 等比覆盖裁切：源图比例和框不一致时，宁可裁掉边缘也不要拉变形（拉变形一眼假）。
+     fy 是裁切窗口在源图里的纵向定位（0=顶 1=底，默认 0.5 居中）——
+     横向满幅条要靠它把头切在眼睛那一带，否则居中裁出来只剩鼻梁。 */
+  function drawCoverF(ctx, im, dx, dy, dw, dh, zoom, fy) {
     const iw = im.naturalWidth || im.width || 1;
     const ih = im.naturalHeight || im.height || 1;
     const z = zoom || 1;
     const dr = dw / dh;
     let sw, sh;
     if (iw / ih > dr) { sh = ih / z; sw = sh * dr; } else { sw = iw / z; sh = sw / dr; }
-    const sx = (iw - sw) / 2, sy = (ih - sh) / 2;
+    const sx = (iw - sw) / 2, sy = (ih - sh) * (fy == null ? 0.5 : clamp(fy, 0, 1));
     ctx.drawImage(im, sx, sy, sw, sh, dx, dy, dw, dh);
+  }
+  function drawCover(ctx, im, dx, dy, dw, dh, zoom) {
+    drawCoverF(ctx, im, dx, dy, dw, dh, zoom, 0.5);
   }
 
   PV.drawCover = drawCover;   // 几何蒙版器件（photoCircle 等）需要等比覆盖裁切
@@ -283,12 +325,37 @@
     return (_feather[key] = c);
   }
 
+  /* 纵向渐隐遮罩：画面上半透成纸、下半留住她。
+     这是「原片当底景」最省事也最好看的一招 —— 不需要裁切，不会把脸切出一条缝，
+     字永远落在上半那片干净的纸里。k = alpha 到达 1 的高度比例。 */
+  const _veil = {};
+  /* 曲线不是线性的：线性渐变在 1/3 处就有 33% 不透明度，字压上去立刻发灰
+     （实测 veilk=0.6 时歌词区域仍有近四成底片）。改成「前 30% 全透明、
+     30%~78% 用 1.6 次幂抬起来」—— 上半是干净的纸，下半她才是实的。 */
+  function veilSprite(k) {
+    const f = Math.max(0.35, Math.min(0.95, k));
+    const key = 'v' + f.toFixed(3);
+    if (_veil[key]) return _veil[key];
+    const N = 256;
+    const c = document.createElement('canvas'); c.width = 1; c.height = N;
+    const g = c.getContext('2d');
+    const gr = g.createLinearGradient(0, 0, 0, N);
+    const s0 = 0.42;   // 起坡点：40% 以下是纯纸，歌词版心（cy 0.30）才真的干净
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      const q = Math.max(0, Math.min(1, (t - s0) / (f - s0)));
+      gr.addColorStop(t, 'rgba(0,0,0,' + Math.pow(q, 1.6).toFixed(4) + ')');
+    }
+    g.fillStyle = gr; g.fillRect(0, 0, 1, N);
+    return (_veil[key] = c);
+  }
+
   /* 带调色的人物位图：只有需要双色调时才走离屏，其余情况直接贴图（省一次拷贝） */
   function figBitmap(im, dw, dh, S, fig, zoom) {
     const k = Math.min(1, 760 / Math.max(dw, dh));
     const ow = Math.max(4, Math.round(dw * k)), oh = Math.max(4, Math.round(dh * k));
     const o = PV.offscreen('figTone', ow, oh, 1);
-    drawCover(o.ctx, im, 0, 0, ow, oh, zoom);
+    drawCoverF(o.ctx, im, 0, 0, ow, oh, zoom, fig.fy);
     applyTone(o.ctx, ow, oh, S, fig);
     if (fig.feather) {
       // destination-in：只保留遮罩里的部分（遮罩中心实、边缘透）
@@ -299,7 +366,54 @@
     return o.c;
   }
 
-  function drawFigure(ctx, fig, box, t, en, S) {
+  /* 画框形状：面板族共用一套路径构造器 —— drawFigure 用它 clip，边框/角标再 stroke 一次。
+     inset 把描边收进框内 1~2px（描边居中画在路径上，不收会有一半落在裁剪外）。 */
+  function roundRect(ctx, x, y, w, h, r) {
+    const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.arcTo(x + w, y, x + w, y + rr, rr);
+    ctx.lineTo(x + w, y + h - rr);
+    ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+    ctx.lineTo(x + rr, y + h);
+    ctx.arcTo(x, y + h, x, y + h - rr, rr);
+    ctx.lineTo(x, y + rr);
+    ctx.arcTo(x, y, x + rr, y, rr);
+    ctx.closePath();
+  }
+
+  function panelPath(ctx, b, inset) {
+    const k = inset || 0;
+    const x = b.x + k, y = b.y + k;
+    const w = Math.max(2, b.w - k * 2), h = Math.max(2, b.h - k * 2);
+    ctx.beginPath();
+    if (b.shape === 'arch') {
+      /* 拱窗：上半圆 + 直边。比圆窗更「建筑」、比方框更软，正好落在晨光绘本的语法里。 */
+      const r = w / 2;
+      ctx.moveTo(x, y + h);
+      ctx.lineTo(x, y + r);
+      ctx.arc(x + r, y + r, r, Math.PI, 0, false);
+      ctx.lineTo(x + w, y + h);
+      ctx.closePath();
+      return;
+    }
+    if (b.shape === 'pill') { roundRect(ctx, x, y, w, h, Math.min(w, h) / 2); return; }
+    if (b.shape === 'round') { roundRect(ctx, x, y, w, h, b.rad == null ? Math.min(w, h) * 0.06 : b.rad); return; }
+    if (b.shape === 'poly') {
+      /* 斜切带：上下边各平移一个 skew，读作「被裁纸刀斜着切下来的一条」。 */
+      const s = b.skew || 0;
+      const o = Math.abs(s);
+      ctx.moveTo(x + Math.max(0, s), y);
+      ctx.lineTo(x + Math.max(0, s) + (w - o), y);
+      ctx.lineTo(x + Math.max(0, -s) + (w - o), y + h);
+      ctx.lineTo(x + Math.max(0, -s), y + h);
+      ctx.closePath();
+      return;
+    }
+    ctx.rect(x, y, w, h);
+  }
+
+  function drawFigure(ctx, fig, box, t, en, S, shot) {
     S = S || ST.S;
     const name = fig.seq || 'head';
     if (!ST.seq[name]) return;
@@ -315,18 +429,82 @@
     const ox = Math.sin(t * 0.23 + ph) * 7 * mo;
     const oy = Math.cos(t * 0.19 + ph * 1.7) * 5 * mo;
 
-    const a = (fig.a == null ? 1 : fig.a) * (1 + en * 0.06);
+    /* 本镜头内的进度：推镜 / 遮罩揭示 / 叠化全是 t 的纯函数 ⇒ 双渲一致。 */
+    const st0 = shot ? shot.t0 : 0, st1 = shot ? shot.t1 : 1e9;
+    const p = shot ? clamp((t - st0) / Math.max(0.05, st1 - st0), 0, 1) : 0.5;
+    const sm = q => q * q * (3 - 2 * q);
+
+    /* 框内推镜：素材自己在动，框才不会读作「贴上去的一张图」 */
+    const z0 = fig.zoom0 == null ? 1.05 : fig.zoom0;
+    const zoom = z0 + (fig.zoom1 || 0) * sm(p);
+
+    /* 入场：reveal（fade 叠化 / wipe 硬边擦开 / grow 遮罩长开），fadeIn 是纯柔叠 */
+    let ra = 1, rev = null;
+    if (fig.reveal) {
+      const rd = fig.reveal.dur == null ? 0.55 : fig.reveal.dur;
+      const rq = clamp((t - st0) / rd, 0, 1);
+      if (rq < 1) {
+        if (fig.reveal.k === 'grow') {
+          rev = { k: 'grow', q: sm(rq) };
+          ra = clamp(rq * 1.5, 0, 1);
+        } else if (fig.reveal.k === 'wipe') {
+          rev = { k: 'wipe', q: sm(rq), dir: fig.reveal.dir || 'L' };
+        } else {
+          ra = sm(rq);                          // fade = 叠化
+        }
+      }
+    }
+    if (fig.fadeIn) ra *= sm(clamp((t - st0) / fig.fadeIn, 0, 1));
+    /* 退场叠化：切点上硬切一块照片最扎眼，末段淡出才接得住转场 */
+    if (fig.out) ra *= sm(clamp((st1 - t) / fig.out, 0, 1));
+
+    const a = (fig.a == null ? 1 : fig.a) * (1 + en * 0.06) * ra;
+    if (a <= 0.004) return;
     ctx.save();
     ctx.globalAlpha = clamp(a, 0, 1);
     ctx.imageSmoothingQuality = 'high';
 
+    /* 满幅淡底：整帧压成一层很淡的水彩，字照常全宽（长句专用）。
+       lift 把纸色按比例盖回去 —— 不然照片的暗部会把歌词吃掉。 */
+    if (box.kind === 'wash') {
+      if (fig.veilK) {
+        /* 纵向渐隐：整帧照贴，再用一条竖向渐变把上半挖空。
+           源本来就是 960×540 的「失焦现场」，离屏这一道不会额外损失清晰度。 */
+        const o = PV.offscreen('figVeil', PV.W, PV.H, 1);
+        drawCoverF(o.ctx, im, 0, 0, PV.W, PV.H, zoom, fig.fy);
+        o.ctx.globalCompositeOperation = 'destination-in';
+        o.ctx.drawImage(veilSprite(fig.veilK), 0, 0, PV.W, PV.H);
+        o.ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(o.c, 0, 0, PV.W, PV.H);
+      } else if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, PV.W, PV.H, S, fig, zoom), 0, 0, PV.W, PV.H);
+      else drawCover(ctx, im, 0, 0, PV.W, PV.H, zoom);
+      const lift = fig.lift == null ? 0 : fig.lift;
+      if (lift > 0) {
+        ctx.globalAlpha = clamp(lift * ra, 0, 1);
+        ctx.fillStyle = rgba(S.paperRGB, 1);
+        ctx.fillRect(0, 0, PV.W, PV.H);
+      }
+      ctx.restore();
+      return;
+    }
+
     if (box.kind === 'disc') {
       const x = box.x + ox, y = box.y + oy, r = box.r * br;
       ctx.save();
+      if (rev) {
+        /* 圆窗的揭示遮罩：grow 用同心圆长大，wipe 用矩形边擦（两条 clip 相交） */
+        ctx.beginPath();
+        if (rev.k === 'grow') ctx.arc(x, y, r * (0.55 + 0.45 * rev.q), 0, TAU);
+        else if (rev.dir === 'R') ctx.rect(x - r, y - r, r * 2 * rev.q, r * 2);
+        else if (rev.dir === 'U') ctx.rect(x - r, y + r - r * 2 * rev.q, r * 2, r * 2 * rev.q);
+        else if (rev.dir === 'D') ctx.rect(x - r, y - r, r * 2, r * 2 * rev.q);
+        else ctx.rect(x + r - r * 2 * rev.q, y - r, r * 2 * rev.q, r * 2);
+        ctx.clip();
+      }
       ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip();
       const D = r * 2 * 1.10;                    // 源图显示边长 = 直径×1.10（脸占 69%，边缘交给头发）
-      if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, D, D, S, fig, 1.10), x - D / 2, y - D / 2, D, D);
-      else drawCover(ctx, im, x - D / 2, y - D / 2, D, D, 1.10);
+      if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, D, D, S, fig, zoom), x - D / 2, y - D / 2, D, D);
+      else drawCover(ctx, im, x - D / 2, y - D / 2, D, D, zoom);
       /* 内缘暗角：贴图而不是现算径向渐变（逐帧极坐标渐变会引入 ±1 的抖动差） */
       ctx.drawImage(PV.fadeSprite('discVig', S.voidRGB, [[0, 0], [0.52, 0], [0.94, 0.16], [1, 0.58]], false),
         x - r, y - r, r * 2, r * 2);
@@ -361,23 +539,89 @@
     } else {
       const w = box.w * br, h = box.h * br;
       const x = box.x + ox - (w - box.w) / 2, y = box.y + oy - (h - box.h) / 2;
+      const geo = { shape: box.shape || 'rect', x, y, w, h, rad: box.rad, skew: box.skew };
       ctx.save();
-      ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-      if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, w, h, S, fig, 1), x, y, w, h);
-      else drawCover(ctx, im, x, y, w, h, 1);
+      /* 揭示遮罩分两道：先按 reveal 收一条擦除边，再按画框形状裁 —— 两道 clip 相交，
+         读作「从框里长出来」，而不是「整块照片淡入」。 */
+      if (rev) {
+        if (rev.k === 'grow') {
+          const k = 0.86 + 0.14 * rev.q;
+          ctx.translate(x + w / 2, y + h / 2); ctx.scale(k, k);
+          ctx.translate(-(x + w / 2), -(y + h / 2));
+        } else {
+          const e = rev.q;
+          ctx.beginPath();
+          if (rev.dir === 'R') ctx.rect(x - 2, y - 2, (w + 4) * e, h + 4);
+          else if (rev.dir === 'U') ctx.rect(x - 2, y + h + 2 - (h + 4) * e, w + 4, (h + 4) * e);
+          else if (rev.dir === 'D') ctx.rect(x - 2, y - 2, w + 4, (h + 4) * e);
+          else ctx.rect(x + w + 2 - (w + 4) * e, y - 2, (w + 4) * e, h + 4);
+          ctx.clip();
+        }
+      }
+      panelPath(ctx, geo, 0);
+      ctx.clip();
+      if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, w, h, S, fig, zoom), x, y, w, h);
+      else drawCoverF(ctx, im, x, y, w, h, zoom, fig.fy);
+      /* 分屏内部再切两格：**默认不用**（RULES 80）。接缝落在眼睛高度时，
+         上半闭眼、下半张嘴，读作「图被撕开」而不是两格。
+         真要「两格」请用 duo（两个完整画框）。留着是因为将来若改成
+         「上格全身 / 下格特写」这种异质构图的真两格，这条路是现成的。 */
+      if (fig.split2 && box.mode === 'split') {
+        const im2 = getFrame(name, t0 - (fig.dt == null ? 0.9 : fig.dt));
+        if (im2) {
+          const gap = Math.max(4, h * 0.007);
+          ctx.save();
+          ctx.beginPath(); ctx.rect(x, y, w, h / 2 - gap / 2); ctx.clip();
+          ctx.globalAlpha = clamp(a * 0.96, 0, 1);
+          drawCoverF(ctx, im2, x, y, w, h, zoom, fig.fy);
+          ctx.restore();
+          /* 缝：一道 ink 细线，读作「两格」，而不是「两层图没对齐」 */
+          ctx.globalAlpha = clamp(a * 0.52, 0, 1);
+          ctx.fillStyle = S.ink;
+          ctx.fillRect(x, y + h / 2 - 1, w, 2);
+          ctx.globalAlpha = clamp(a, 0, 1);
+        }
+      }
       /* 底部压暗：只在 55%~100% 这一段渐变，用 1×256 的竖直贴图拉伸。
-         平涂底上不要这层 —— 它会把下缘糊成一片脏灰，和「硬边印刷图」的语法相反。 */
-      if (!S.flat) {
+         平涂底上不要这层 —— 它会把下缘糊成一片脏灰，和「硬边印刷图」的语法相反。
+         拱窗/胶囊/圆角不压暗：它们的下缘是形状的一部分，压暗会读成污渍。 */
+      if (!S.flat && box.mode !== 'strip' && h > 240) {
         ctx.drawImage(PV.fadeSprite('bandVig', S.voidRGB, [[0, 0], [1, 0.55]], true),
           x, y + h * 0.55, w, h * 0.45);
       }
       ctx.restore();
-      /* 平涂底：图框四周一道 2px 实线，读作「切好的版面元素」 */
-      if (S.flat) {
-        ctx.globalAlpha = 0.55;
-        ctx.strokeStyle = S.ink; ctx.lineWidth = 2;
-        ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-        ctx.globalAlpha = clamp(a, 0, 1);
+      /* 边框：平涂底 2px 实线（切好的版面元素），绘本底一道 1.4px 细线 */
+      if (fig.edge !== 'none') {
+        ctx.save();
+        ctx.globalAlpha = clamp(a * (S.flat ? 0.62 : 0.30), 0, 1);
+        ctx.strokeStyle = S.ink;
+        ctx.lineWidth = S.flat ? 2 : 1.4;
+        panelPath(ctx, geo, 1);
+        ctx.stroke();
+        ctx.restore();
+      }
+      /* 分屏的内缘：一道 accent 竖线。分屏如果只是一条硬切边，读作「图没对齐」；
+         有了这条线，它才是一个**版面结构**（左半/右半）。 */
+      if (box.mode === 'split') {
+        const ix = box.x < PV.W / 2 ? x + w - 3 : x;
+        ctx.save();
+        ctx.globalAlpha = clamp(a * 0.9, 0, 1);
+        ctx.fillStyle = S.accent;
+        ctx.fillRect(ix, y, 4, h);
+        ctx.restore();
+      }
+      /* 角标：两道 L 形短线。有没有它，决定这块图读作「照片」还是「版面元素」。 */
+      /* 角标只给**直角面板**：拱窗/胶囊/圆角的下缘是形状的一部分，
+         角标会落在圆角外面，读作「多画了两笔」。 */
+      if (fig.tick && (box.shape || 'rect') === 'rect') {
+        const L = Math.min(w, h) * 0.11, tw = Math.max(2, Math.min(w, h) * 0.010);
+        const bx0 = x + L * 0.55, bx1 = x + w - L * 1.55, by = y + h - L * 1.55;
+        ctx.save();
+        ctx.globalAlpha = clamp(a * 0.85, 0, 1);
+        ctx.fillStyle = S.accent;
+        ctx.fillRect(bx0, by, L, tw); ctx.fillRect(bx0, by, tw, L * 0.72);
+        ctx.fillRect(bx1, by, L, tw); ctx.fillRect(bx1 + L - tw, by, tw, L * 0.72);
+        ctx.restore();
       }
     }
     ctx.restore();
@@ -835,14 +1079,14 @@
     if (shot.fig) {
       figBox = placeFigure(shot.fig, shot._lay ? shot._lay.bbox : [0, 0, 0, 0]);
       shot._figBox = figBox;
-      if (shot.fig.layer !== 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S);
+      if (shot.fig.layer !== 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S, shot);
     }
 
     // 文字
     drawLyrics(ctx, shot, t);
 
     // 人物（前）：「文字从她身前过」只在 layer=front 的镜头成立
-    if (shot.fig && shot.fig.layer === 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S);
+    if (shot.fig && shot.fig.layer === 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S, shot);
 
     // 前景装饰
     drawDecor(ctx, shot.decor, t, shot.t0, shot._S);

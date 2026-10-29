@@ -558,8 +558,10 @@ D_DECOR = {
     "teardrop":     {"a": 0.24, "n": 5},
     "softCorners":  {"a": 0.15, "m": 48},
 }
-D_TRANS_POOL = [("wipe", 4), ("ink", 3), ("flash", 2), ("iris", 2), ("push", 2), ("zoom", 1)]
-D_TRANS_DUR = {"wipe": 0.42, "ink": 0.48, "flash": 0.34, "iris": 0.44, "push": 0.40, "zoom": 0.40}
+D_TRANS_POOL = [("wipe", 3), ("dissolve", 3), ("grad", 3), ("ink", 2), ("flash", 2),
+                ("iris", 2), ("push", 2), ("mask", 2), ("zoom", 1)]
+D_TRANS_DUR = {"wipe": 0.42, "ink": 0.48, "flash": 0.34, "iris": 0.44, "push": 0.40,
+               "zoom": 0.40, "dissolve": 0.58, "grad": 0.50, "mask": 0.46}
 
 
 def _dawn_face(spec):
@@ -573,18 +575,58 @@ def _dawn_face(spec):
     return "nunitoSemi"
 
 
+def _fig_foot(fig):
+    """画框在设计坐标里的占位（宽, 高）+ 是否横贯全宽。
+    横贯全宽（wash/strip）⇒ 文字只能上下让位；其余按侧位让出整条版心。
+    这里必须和 pv_engine.placeFigure 的几何一致，否则「让位」是假的、字照样压脸。"""
+    m = fig.get("mode")
+    sc = float(fig.get("scale") or 1)
+    if m == "wash":
+        return 1920, 1080, True
+    if m == "strip":
+        return 1920, int(fig.get("h", 380) * sc), True
+    if m == "split":
+        return int(1920 * fig.get("wf", 0.46)) + 10, 1080, False
+    if m in ("pill", "round"):
+        return int(fig.get("w", 760) * sc) + 24, int(fig.get("h", 300) * sc), False
+    if m == "arch":
+        h = int(fig.get("h", 640) * sc)
+        return int(h * fig.get("wRatio", 0.62)) + 24, h, False
+    if m == "soft":
+        return int(1920 * fig.get("wf", 0.48)) + 24, int(1080 * fig.get("hf", 0.68)), False
+    if m == "diag":
+        wf = fig.get("wf", 0.44)
+        sk = abs(fig.get("skew") if fig.get("skew") is not None else int(1920 * wf * 0.14))
+        return int(1920 * wf) + sk + 24, int(1080 * fig.get("hf", 0.88)), False
+    if m in ("disc", "duo"):
+        r = int(fig.get("r", 215) * sc)
+        return 2 * r + 40, 2 * r + 40, False
+    return (int(fig.get("h", 620) * sc * fig.get("wRatio", 0.752)) + 24,
+            int(fig.get("h", 620) * sc), False)
+
+
 def _dawn_layout(spec, fig=None):
     sp = spec.get("special") or ""
     face = _dawn_face(spec)
     layk = spec.get("layout") or "block"
     if fig:
-        # 现场画面入框时，**文字必须让位**：center/scaleSteps 不支持版心参数，
+        # 现场画面入画面时，**文字必须让位**：center/scaleSteps 不支持版心参数，
         # 一律换 block 并把版心挤到「没图的那一侧」。只靠 placeFigure 的 bbox
         # 避让是不够的 —— 文字块本身占满中段时，六锚点里没有一个能躲开
         # （实测 t=24.5 圆窗压住 "I wouldn't change"、t=30.5 方框压住 "feeling"）。
-        band = fig.get("mode") != "disc"
-        fw = ((2 * int(fig["r"]) + 40) if not band
-              else (int(int(fig["h"]) * fig.get("wRatio", 0.752)) + 24))
+        fw, fh, full = _fig_foot(fig)
+        if full:
+            if fig.get("mode") == "wash":
+                # 满幅淡底不吃版面：字照常全宽。纵向渐隐（veilK）时下半是她，
+                # 版心必须上移到 0.32，否则最重的那一行正好落在她脸上。
+                if fig.get("veilK"):
+                    return {"k": "block", "face": face, "x": 0.075, "availW": 0.86,
+                            "cy": 0.30, "hK": 0.120, "lead": 1.16, "maxRows": 3}
+                return {"k": "block", "face": face, "x": 0.075, "availW": 0.86,
+                        "cy": 0.50, "hK": 0.130, "lead": 1.18, "maxRows": 3}
+            top = fig.get("at") == "top"
+            return {"k": "block", "face": face, "x": 0.075, "availW": 0.86,
+                    "cy": 0.64 if top else 0.34, "hK": 0.115, "lead": 1.14, "maxRows": 3}
         frac = fw / 1920.0
         if fig.get("side") == "l":
             x = round(0.075 + frac + 0.02, 3)
@@ -592,8 +634,10 @@ def _dawn_layout(spec, fig=None):
         else:
             x = 0.075
             aw = round(max(0.30, 0.94 - frac - 0.075), 3)
+        # 版心越窄，字越小：长句在 0.40 的栏里还撑 135px 会挤成五行的「字幕块」
+        hk = 0.125 if aw >= 0.55 else (0.112 if aw >= 0.45 else 0.102)
         return {"k": "block", "face": face, "x": x, "availW": aw,
-                "cy": 0.47, "hK": 0.125, "lead": 1.18, "maxRows": 3}
+                "cy": 0.47, "hK": hk, "lead": 1.16, "maxRows": 3}
     nw = len((spec.get("text") or "").split())
     # scaleSteps 是 bleed=true（不过安全网），词多时堆叠总高会顶出画外：
     # 8 词 × 0.17H 起步 ≈ 1.03H，首词直接被裁（实测桥段 t=127）。
@@ -610,27 +654,134 @@ def _dawn_layout(spec, fig=None):
     return {"k": layk, "face": face}
 
 
-# 1027 演唱原视频的「入框」节点（2026-10-29 二版）。
-# ★ 一律 layer="avoid"：图先画、字后画 ⇒ 字永远在图之上；disc 还会按文字 bbox
-#   避让选位（placeFigure），所以既不会压字，文字也不会被框切。
-# band（3:4 竖幅）贴边不避让 ⇒ 只挂给短句（≤26 字符），文字本身不占满才有空。
-# 参数是 1920×1080 设计坐标（4K 渲染整体 scale×2）。
+# 1027 演唱原视频的「入画面」节点（2026-10-29 三版：扩容 + 换画法）。
+# ★ 一律 layer="avoid"：图先画、字后画 ⇒ 字永远在图之上；侧位面板还会按文字
+#   bbox 避让选位（placeFigure），版面层再把版心挤到没图的那一侧（_dawn_layout）。
+# ★ 画法不再只有圆窗/竖幅。九种语汇，全部用同一份 1027 原片序列：
+#   disc  圆窗        脸，最轻，给短句
+#   duo   双圆        两格「前一刻」，给需要呼吸的短句
+#   band  3:4 竖幅    半身，主力
+#   arch  拱窗        圆顶竖窗，比方框软、比圆窗「建筑」
+#   pill  横胶囊      横向切一条脸，读作版面上的「印章」
+#   split 纵向分屏    全高出血，占一侧；split2 再在内部切两格（此刻/刚才）
+#   strip 横向满幅条  贴顶/贴底出血，字被推到另一半（长句专用，全宽覆盖）
+#   soft  羽化大面    无边框，人像化进纸里
+#   wash  满幅淡底    整帧压成一层水彩，字照常全宽（最长句专用）
+# 入场/退场也不再是硬切：reveal（fade 叠化 / wipe 擦开 / grow 遮罩长开）+ out 叠出，
+# 框内还有 zoom0→zoom1 的推镜 —— 素材自己在动，框才不会读作「贴上去的一张图」。
+# 参数是 1920×1080 设计坐标（4K 渲染整体 scale×2）；y 在 disc/arch/pill/soft 里是中心，
+# 在 band/strip 里是顶边（沿用旧语义）。
 # ★ 静态 PNG 立绘（photoCircle/Square/Sticker/Strip）已整套移除：
-#   固定坐标必然压字，且抠图贴纸的质感与晨光绘本语法不合。原视频入框才是正解。
+#   固定坐标必然压字，抠图贴纸的质感也与晨光绘本语法不合。原视频入框才是正解。
 DAWN_LIVE = {
-    4:  dict(mode="disc", seq="head", layer="avoid", side="r", r=215, y=0.42, a=0.90, motion=1.0, ph=0.12),
-    5:  dict(mode="band", seq="body", layer="avoid", side="r", h=540, y=0.17, a=0.88, motion=0.9, ph=0.37),
-    8:  dict(mode="disc", seq="head", layer="avoid", side="l", r=205, y=0.43, a=0.90, motion=1.0, ph=0.58),
-    10: dict(mode="band", seq="body", layer="avoid", side="l", h=520, y=0.19, a=0.88, motion=0.9, ph=0.83),
-    13: dict(mode="disc", seq="head", layer="avoid", side="l", r=220, y=0.41, a=0.90, motion=1.0, ph=0.21),
-    18: dict(mode="band", seq="body", layer="avoid", side="r", h=536, y=0.18, a=0.88, motion=0.9, ph=0.46),
-    21: dict(mode="disc", seq="head", layer="avoid", side="l", r=208, y=0.43, a=0.90, motion=1.0, ph=0.69),
-    23: dict(mode="band", seq="body", layer="avoid", side="r", h=516, y=0.20, a=0.88, motion=0.9, ph=0.05),
-    26: dict(mode="disc", seq="head", layer="avoid", side="r", r=200, y=0.42, a=0.84, motion=1.1, ph=0.77),
-    34: dict(mode="band", seq="body", layer="avoid", side="r", h=504, y=0.20, a=0.86, motion=0.9, ph=0.31),
-    38: dict(mode="disc", seq="head", layer="avoid", side="r", r=210, y=0.42, a=0.90, motion=1.0, ph=0.91),
-    42: dict(mode="band", seq="body", layer="avoid", side="l", h=524, y=0.19, a=0.88, motion=0.9, ph=0.64),
-    45: dict(mode="disc", seq="head", layer="avoid", side="r", r=202, y=0.43, a=0.88, motion=1.1, ph=0.18),
+    # ==================== V1 晨醒 ====================
+    # 0：37 字符长句 → 纵向渐隐底景（上半是纸，下半是她）。比横条稳：
+    #    横条把脸切成一条缝，内容取决于那一秒她的姿势，十次有三次读作「切坏了」。
+    0:  dict(mode="wash", seq="wide", layer="avoid", veilK=0.74, a=0.86, fy=0.46,
+             fadeIn=0.9, out=0.7, zoom0=1.03, zoom1=0.10, motion=1.0, ph=0.05),
+    # 2：45 字符 → 满幅淡底，整帧化进纸里，字照常全宽
+    2:  dict(mode="wash", seq="wide", layer="avoid", a=0.40, lift=0.22, fy=0.50,
+             fadeIn=1.2, out=1.1, zoom0=1.02, zoom1=0.06, motion=0.8, ph=0.31),
+    4:  dict(mode="disc", seq="head", layer="avoid", side="r", r=215, y=0.42, a=0.92,
+             edge="hard", motion=1.0, ph=0.12,
+             reveal={"k": "grow", "dur": 0.55}, zoom0=1.08, zoom1=0.10),
+    # 5：7.2s 长镜 → 纵向分屏 + 内部两格，推镜走得最慢
+    5:  dict(mode="split", seq="body", layer="avoid", side="r", wf=0.44, hf=1.10,
+             dt=0.9, fy=0.34, a=0.93, edge="hard",
+             reveal={"k": "wipe", "dir": "R", "dur": 0.7}, out=0.8,
+             zoom0=1.03, zoom1=0.09, motion=0.9, ph=0.37),
+    6:  dict(mode="arch", seq="head", layer="avoid", side="r", h=650, wRatio=0.62,
+             y=0.48, a=0.92, edge="hard",
+             reveal={"k": "grow", "dur": 0.5}, out=0.5, zoom0=1.06, zoom1=0.08,
+             motion=1.0, ph=0.61),
+    7:  dict(mode="disc", seq="head", layer="avoid", side="l", r=186, y=0.40, a=0.90,
+             edge="hard", motion=1.0, ph=0.74,
+             reveal={"k": "grow", "dur": 0.45}, zoom0=1.06, zoom1=0.06),
+    # ==================== C1 副歌一 ====================
+    8:  dict(mode="pill", seq="head", layer="avoid", side="r", w=780, h=344, y=0.47,
+             a=0.92, edge="hard", tick=True, fy=0.56,
+             reveal={"k": "wipe", "dir": "R", "dur": 0.45}, out=0.45,
+             zoom0=1.05, zoom1=0.08, motion=1.0, ph=0.90),
+    10: dict(mode="band", seq="body", layer="avoid", side="l", h=520, y=0.19, a=0.90,
+             edge="hard", motion=0.9, ph=0.83,
+             reveal={"k": "wipe", "dir": "L", "dur": 0.5}, out=0.5,
+             zoom0=1.05, zoom1=0.07),
+    # 12：10.7s 全片最长的镜头 → 分屏 + 两格，推镜极慢（近景里她在动）
+    12: dict(mode="split", seq="body", layer="avoid", side="l", wf=0.46, hf=1.10,
+             dt=0.9, fy=0.30, a=0.93, edge="hard",
+             reveal={"k": "fade", "dur": 1.0}, out=0.9,
+             zoom0=1.02, zoom1=0.10, motion=0.9, ph=0.22),
+    # ==================== V2 上下画框 ====================
+    13: dict(mode="wash", seq="wide", layer="avoid", veilK=0.80, a=0.88, fy=0.44,
+             fadeIn=0.85, out=0.65, zoom0=1.03, zoom1=0.09, motion=1.0, ph=0.44),
+    14: dict(mode="wash", seq="wide", layer="avoid", veilK=0.70, a=0.82, fy=0.50,
+             fadeIn=0.85, out=0.65, zoom0=1.04, zoom1=0.09, motion=1.0, ph=0.55),
+    17: dict(mode="arch", seq="head", layer="avoid", side="l", h=620, wRatio=0.62,
+             y=0.50, a=0.92, edge="hard",
+             reveal={"k": "grow", "dur": 0.5}, out=0.5, zoom0=1.05, zoom1=0.08,
+             motion=1.0, ph=0.68),
+    # ==================== C2 副歌二 ====================
+    18: dict(mode="split", seq="body", layer="avoid", side="r", wf=0.44, hf=1.10,
+             dt=0.9, fy=0.32, a=0.93, edge="hard", tick=True,
+             reveal={"k": "wipe", "dir": "R", "dur": 0.6}, out=0.7,
+             zoom0=1.03, zoom1=0.09, motion=0.9, ph=0.15),
+    20: dict(mode="disc", seq="head", layer="avoid", side="l", r=196, y=0.40, a=0.90,
+             edge="hard", motion=1.0, ph=0.28,
+             reveal={"k": "grow", "dur": 0.45}, zoom0=1.07, zoom1=0.07),
+    # 21：双圆（主窗 + 下方小窗 = 同一口气的前后两格）
+    21: dict(mode="duo", seq="head", layer="avoid", side="l", r=196, y=0.36, a=0.92,
+             edge="hard", motion=1.0, ph=0.52,
+             reveal={"k": "grow", "dur": 0.5}, out=0.5, zoom0=1.06, zoom1=0.07),
+    23: dict(mode="band", seq="body", layer="avoid", side="r", h=508, y=0.20, a=0.90,
+             edge="hard", motion=0.9, ph=0.05,
+             reveal={"k": "wipe", "dir": "R", "dur": 0.5}, out=0.5,
+             zoom0=1.05, zoom1=0.07),
+    25: dict(mode="arch", seq="head", layer="avoid", side="r", h=600, wRatio=0.62,
+             y=0.50, a=0.92, edge="hard",
+             reveal={"k": "grow", "dur": 0.5}, out=0.5, zoom0=1.05, zoom1=0.08,
+             motion=1.0, ph=0.79),
+    # ==================== Br 桥段 ====================
+    28: dict(mode="wash", seq="wide", layer="avoid", veilK=0.76, a=0.86, fy=0.46,
+             fadeIn=0.95, out=0.7, zoom0=1.03, zoom1=0.10, motion=1.0, ph=0.13),
+    29: dict(mode="wash", seq="wide", layer="avoid", a=0.38, lift=0.24, fy=0.50,
+             fadeIn=1.2, out=1.1, zoom0=1.02, zoom1=0.06, motion=0.8, ph=0.66),
+    31: dict(mode="wash", seq="wide", layer="avoid", veilK=0.72, a=0.84, fy=0.48,
+             fadeIn=0.95, out=0.7, zoom0=1.03, zoom1=0.10, motion=1.0, ph=0.88),
+    # ==================== FC 末段副歌 ====================
+    33: dict(mode="arch", seq="head", layer="avoid", side="l", h=632, wRatio=0.62,
+             y=0.49, a=0.92, edge="hard",
+             reveal={"k": "grow", "dur": 0.5}, out=0.5, zoom0=1.05, zoom1=0.08,
+             motion=1.0, ph=0.34),
+    34: dict(mode="disc", seq="head", layer="avoid", side="l", r=200, y=0.41, a=0.92,
+             edge="hard", motion=1.0, ph=0.19,
+             reveal={"k": "wipe", "dir": "L", "dur": 0.4}, zoom0=1.08, zoom1=0.08),
+    37: dict(mode="split", seq="body", layer="avoid", side="l", wf=0.42, hf=1.10,
+             dt=0.9, fy=0.30, a=0.93, edge="hard",
+             reveal={"k": "fade", "dur": 0.9}, out=0.8,
+             zoom0=1.03, zoom1=0.09, motion=0.9, ph=0.47),
+    38: dict(mode="disc", seq="head", layer="avoid", side="r", r=210, y=0.42, a=0.92,
+             edge="hard", motion=1.0, ph=0.91,
+             reveal={"k": "grow", "dur": 0.45}, zoom0=1.07, zoom1=0.08),
+    39: dict(mode="pill", seq="head", layer="avoid", side="r", w=744, h=336, y=0.47,
+             a=0.92, edge="hard", tick=True, fy=0.56,
+             reveal={"k": "wipe", "dir": "R", "dur": 0.45}, out=0.45,
+             zoom0=1.05, zoom1=0.09, motion=1.0, ph=0.60),
+    42: dict(mode="arch", seq="head", layer="avoid", side="r", h=610, wRatio=0.62,
+             y=0.49, a=0.92, edge="hard",
+             reveal={"k": "grow", "dur": 0.5}, out=0.5, zoom0=1.05, zoom1=0.08,
+             motion=1.0, ph=0.07),
+    44: dict(mode="band", seq="body", layer="avoid", side="l", h=500, y=0.20, a=0.90,
+             edge="hard", motion=0.9, ph=0.73,
+             reveal={"k": "wipe", "dir": "L", "dur": 0.5}, out=0.5,
+             zoom0=1.05, zoom1=0.07),
+    45: dict(mode="disc", seq="head", layer="avoid", side="r", r=202, y=0.43, a=0.90,
+             edge="hard", motion=1.1, ph=0.18,
+             reveal={"k": "grow", "dur": 0.45}, zoom0=1.07, zoom1=0.07),
+    # 46：7.3s 收尾长镜 → 分屏；两格 = 此刻与片刻前，最后一句留一个动作的延续
+    46: dict(mode="split", seq="body", layer="avoid", side="r", wf=0.46, hf=1.10,
+             dt=0.9, fy=0.30, a=0.93, edge="hard",
+             reveal={"k": "fade", "dur": 1.0}, out=1.0,
+             zoom0=1.02, zoom1=0.10, motion=0.9, ph=0.84),
 }
 
 

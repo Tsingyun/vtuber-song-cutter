@@ -197,6 +197,11 @@ window.__pvShot = async (cfg) => {
   applyScale();
   /* 首渲丢弃（RULES 76）：GPU 首触 ±1 抖动，第二次渲染起才字节稳定。
      确定性验收（同 t 双渲一致）比的是两个热态；冷触是一次性光栅化噪声。 */
+  /* 首渲丢弃（RULES 76）：GPU 首触 ±1 抖动，第二次渲染起才字节稳定。
+     确定性验收（同 t 双渲一致）比的是两个热态；冷触是一次性光栅化噪声。
+     新画法（纵向渐隐底景走离屏 + destination-in）会引入**一种新绘制状态**，
+     它的冷触要多渲一遍才稳 —— 三渲只影响抽帧工具，成片路径仍是两渲。 */
+  PV.renderAt(ctx, cfg.t);
   PV.renderAt(ctx, cfg.t);
   PV.renderAt(ctx, cfg.t);
   return cv.toDataURL('image/png');

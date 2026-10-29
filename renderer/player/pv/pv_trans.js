@@ -43,7 +43,7 @@
       else if (dir === 'D') { const y = H * e; ctx.rect(0, 0, W, y); bar = [0, y - lw / 2, W, lw, -1]; }
       else { const x = W * (1 - e); ctx.rect(x, 0, W - x, H); bar = [x - lw / 2, 0, lw, H, 1]; }
       ctx.clip();
-      ctx.drawImage(A, 0, 0);
+      ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
       /* 前沿亮条 + 一根拖尾细线：没有它们，擦除读作「方块滑过」 */
       const a = Math.pow(bell(p), 0.6);
@@ -76,7 +76,7 @@
         else ctx.rect(0, c - half, W, half * 2);
       }
       ctx.clip();
-      ctx.drawImage(A, 0, 0);
+      ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
       /* 条与条之间的亮缝 */
       const a = Math.pow(bell(p), 0.7) * 0.55;
@@ -111,7 +111,7 @@
       ctx.arc(cx, cy, R, a0, a1, dir < 0);
       ctx.closePath();
       ctx.clip();
-      ctx.drawImage(A, 0, 0);
+      ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
       const a = Math.pow(bell(p), 0.5), lw = Math.max(3, Math.min(W, H) * 0.005);
       ctx.save();
@@ -140,10 +140,10 @@
         ctx.rect(0, 0, W, H);
         ctx.arc(cx, cy, r, 0, TAU, true);   // even-odd：圆外保留
         ctx.clip('evenodd');
-        ctx.drawImage(A, 0, 0);
+        ctx.drawImage(A, 0, 0, I.W, I.H);
         ctx.restore();
       } else {
-        ctx.drawImage(A, 0, 0);
+        ctx.drawImage(A, 0, 0, I.W, I.H);
       }
       const a = Math.pow(bell(p), 0.6), lw = Math.max(3, Math.min(W, H) * 0.008);
       ctx.save();
@@ -186,7 +186,7 @@
         ctx.rect(mx - hw, my - hh, hw * 2, hh * 2);
         ctx.clip();
         ctx.globalAlpha = Math.min(1, k * 1.6);
-        ctx.drawImage(A, 0, 0);
+        ctx.drawImage(A, 0, 0, I.W, I.H);
         ctx.restore();
       }
       ctx.restore();
@@ -203,7 +203,7 @@
       if (a > 0.004) {
         ctx.save();
         ctx.globalAlpha = a;
-        ctx.drawImage(A, 0, 0);
+        ctx.drawImage(A, 0, 0, I.W, I.H);
         /* A 自身也过曝一下，读作「光把上一镜吃掉」 */
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = a * 0.55 * bell(p / 0.55);
@@ -234,8 +234,8 @@
       const sg = (dir === 'L' || dir === 'U') ? -1 : 1;
       const off = Math.round(e * L) * sg;
       ctx.save();
-      if (h) ctx.drawImage(A, off, 0);
-      else ctx.drawImage(A, 0, off);
+      if (h) ctx.drawImage(A, off, 0, I.W, I.H);
+      else ctx.drawImage(A, 0, off, I.W, I.H);
       /* 推走时上一镜压暗一点，避免两屏内容同时抢注意力 */
       ctx.fillStyle = '#000000';
       ctx.globalAlpha = 0.28 * e;
@@ -266,7 +266,7 @@
       ctx.translate(W / 2, H / 2);
       ctx.scale(s, s);
       ctx.translate(-W / 2, -H / 2);
-      ctx.drawImage(A, 0, 0);
+      ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
       /* 边缘极淡的径向亮晕：强化「往里穿」的方向感 */
       const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.12,
@@ -300,7 +300,7 @@
         ctx.rect(0, i * sh, W, sh + 1);
         ctx.clip();
         ctx.globalAlpha = a0 * (1 - q * 0.35);
-        ctx.drawImage(A, dx, 0);
+        ctx.drawImage(A, dx, 0, I.W, I.H);
         ctx.restore();
       }
     },
@@ -336,8 +336,110 @@
         ctx.closePath();
       }
       ctx.clip('evenodd');
-      ctx.drawImage(A, 0, 0);
+      ctx.drawImage(A, 0, 0, I.W, I.H);
       ctx.restore();
+    },
+  };
+
+  /* ---------- 11. dissolve：叠化（A 单纯褪掉，B 一直在下面） ---------- */
+  /* 手书最常用的一种「过渡」其实不是过渡，是**两张画同时存在**——
+     所以这里不加任何前沿光、不加位移：加一点东西就变成特效了。 */
+  TR.dissolve = {
+    name: '叠化', dur: 0.60,
+    draw(ctx, A, p, I) {
+      const e = ease.inOutCubic(p);
+      const a = 1 - e;
+      if (a <= 0.004) return;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.drawImage(A, 0, 0, I.W, I.H);
+      ctx.restore();
+    },
+  };
+
+  /* ---------- 12. grad：渐变擦除（软边前沿，化开而不是推走） ----------
+     wipe 的前沿是一条硬边 + 一道亮线；grad 的前沿是一条 34% 画幅的软坡。
+     两者画面差别很大：硬边读作「换镜」，软坡读作「化开」——手书里后者才是常态。 */
+  TR.grad = {
+    name: '渐变擦除', dur: 0.52,
+    draw(ctx, A, p, I) {
+      const W = I.W, H = I.H, e = ease.inOutCubic(p);
+      const aw = A.width || W, ah = A.height || H;
+      const o = PV.offscreen('transGrad', aw, ah, 1);
+      o.ctx.drawImage(A, 0, 0);
+      const band = 0.34;
+      const f = e * (1 + band) - band;            // 前沿位置（0..1，负值 = 还在画外）
+      /* 方向语义与 wipe 一致：L/R 沿横轴、U/D 沿纵轴；反向时渐变起点对调 */
+      const horiz = I.dir !== 'U' && I.dir !== 'D';
+      const revDir = I.dir === 'R' || I.dir === 'U';
+      const gx0 = horiz ? (revDir ? aw : 0) : 0;
+      const gx1 = horiz ? (revDir ? 0 : aw) : 0;
+      const gy0 = horiz ? 0 : (revDir ? ah : 0);
+      const gy1 = horiz ? 0 : (revDir ? 0 : ah);
+      const g = o.ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+      /* destination-in：源 alpha 为 0 的地方被挖掉 ⇒ 落后于前沿的一侧先空出来 */
+      const s0 = clamp(f, 0, 0.998);
+      const s1 = Math.max(s0 + 0.002, clamp(f + band, 0.002, 1));
+      g.addColorStop(s0, 'rgba(0,0,0,0)');
+      g.addColorStop(s1, 'rgba(0,0,0,1)');
+      o.ctx.globalCompositeOperation = 'destination-in';
+      o.ctx.fillStyle = g;
+      o.ctx.fillRect(0, 0, aw, ah);
+      o.ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(o.c, 0, 0, W, H);
+    },
+  };
+
+  /* ---------- 13. mask：圆角矩遮罩扩张（A 中间被一块圆角咬开） ---------- */
+  /* iris 是圆形从中心张开；mask 是**画框形状**从中心张开 ——
+     和片子里的拱窗/分屏同形，转场于是属于同一个视觉语汇，而不是外来特效。 */
+  TR.mask = {
+    name: '遮罩扩张', dur: 0.46,
+    draw(ctx, A, p, I) {
+      const W = I.W, H = I.H, e = ease.outCubic(p);
+      const cx = W * (I.x == null ? 0.5 : I.x), cy = H * (I.y == null ? 0.5 : I.y);
+      const k = 1 + e * 1.35;                     // 咬开的口子随 p 长到盖过整幅
+      const rw = W * 0.30 * k, rh = H * 0.34 * k;
+      const rad = Math.min(rw, rh) * (I.rad == null ? 0.18 : I.rad);
+      const x0 = cx - rw / 2, y0 = cy - rh / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, W, H);
+      const rr = Math.max(1, Math.min(rad, Math.min(rw, rh) / 2));
+      ctx.moveTo(x0 + rr, y0);
+      ctx.lineTo(x0 + rw - rr, y0);
+      ctx.arcTo(x0 + rw, y0, x0 + rw, y0 + rr, rr);
+      ctx.lineTo(x0 + rw, y0 + rh - rr);
+      ctx.arcTo(x0 + rw, y0 + rh, x0 + rw - rr, y0 + rh, rr);
+      ctx.lineTo(x0 + rr, y0 + rh);
+      ctx.arcTo(x0, y0 + rh, x0, y0 + rh - rr, rr);
+      ctx.lineTo(x0, y0 + rr);
+      ctx.arcTo(x0, y0, x0 + rr, y0, rr);
+      ctx.closePath();
+      ctx.clip('evenodd');
+      ctx.drawImage(A, 0, 0, W, H);
+      ctx.restore();
+      /* 咬开的边缘一道极淡的亮线：没有它，扩张读作「画面里有块黑」 */
+      const a = Math.pow(bell(p), 0.8) * 0.5;
+      if (a > 0.01) {
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = acc(I);
+        ctx.lineWidth = Math.max(2, Math.min(W, H) * 0.0032);
+        ctx.beginPath();
+        ctx.moveTo(x0 + rr, y0);
+        ctx.lineTo(x0 + rw - rr, y0);
+        ctx.arcTo(x0 + rw, y0, x0 + rw, y0 + rr, rr);
+        ctx.lineTo(x0 + rw, y0 + rh - rr);
+        ctx.arcTo(x0 + rw, y0 + rh, x0 + rw - rr, y0 + rh, rr);
+        ctx.lineTo(x0 + rr, y0 + rh);
+        ctx.arcTo(x0, y0 + rh, x0, y0 + rh - rr, rr);
+        ctx.lineTo(x0, y0 + rr);
+        ctx.arcTo(x0, y0, x0 + rr, y0, rr);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
     },
   };
 
@@ -352,6 +454,12 @@
     if (k === 'wipe' || k === 'push') {
       const dirs = ['L', 'L', 'R', 'R', 'U', 'D'];   // 横向为主：竖切会把整行字拦腰截断
       d.dir = dirs[Math.floor(r(1, 1) * dirs.length) % dirs.length];
+    } else if (k === 'grad') {
+      const dirs = ['L', 'L', 'R', 'D', 'U'];
+      d.dir = dirs[Math.floor(r(7, 1) * dirs.length) % dirs.length];
+    } else if (k === 'mask') {
+      d.x = 0.5 + (r(8, 1) - 0.5) * 0.20;
+      d.y = 0.5 + (r(8, 2) - 0.5) * 0.16;
     } else if (k === 'blinds') {
       d.dir = r(2, 1) < 0.72 ? 'H' : 'V';
       d.n = 8 + Math.floor(r(2, 2) * 6);
@@ -371,5 +479,6 @@
   };
 
   /* 全部转场名（导演层从这里取池子） */
-  TR.ORDER = ['wipe', 'blinds', 'clock', 'iris', 'blocks', 'flash', 'push', 'zoom', 'slice', 'ink'];
+  TR.ORDER = ['wipe', 'blinds', 'clock', 'iris', 'blocks', 'flash', 'push', 'zoom', 'slice', 'ink',
+    'dissolve', 'grad', 'mask'];
 })();
