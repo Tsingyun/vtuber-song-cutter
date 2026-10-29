@@ -1027,7 +1027,7 @@ koma=12 / 60fps 下每 5 帧才有 1 张新画 ⇒ 相邻帧有 **80% 完全相�
 | 项 | 内容 |
 |---|---|
 | **坑** | 本轮清理把 `_tmp/`（2.6 GB）整目录删掉，而成片 `【岁己SUI】…【20261027歌切】.mp4` 就一直躺在 `_tmp/pv/` 里 —— 差点连成片一起删。同目录还有 `live_seq`（638 MB，源录播在 `D:/录播/…` 所以可再生）、三个旧版 video、80+ 静帧/探针/接触表 |
-| **正确顺序** | ① 先把成片与要留的验收图 `shutil.move` 到 `archive/<date>/`，**校验 mtime 与 ffprobe 时长/分辨率**，再动 `_tmp`；② 删目录用显式清单 + `assert startswith(ROOT)`，不用 `rm -rf _tmp` 这类通配；③ 清完跑一次 `git status --short`（应为空）与关键数据点数（`segments` 24 个、`bak_1027` 2 个、`.lrc` 35 个） |
+| **正确顺序** | ① 先把成片与要留的验收图 `shutil.move` 到 `archive/<date>/`，**校验 mtime 与 ffprobe 时长/分辨率**，再动 `_tmp`；② 删目录用显式清单 + `assert startswith(ROOT)`，不用 `rm -rf _tmp` 这类通配；③ 清完跑一次 `git status --short`（应为空）与关键数据点数（`segments` 22 个、`bak_1027` 2 个、`.lrc` 35 个） |
 | **不可再生清单** | `segments/*.json`（定案切点，git 未跟踪、无第二份）、`archive/20261029/bak_1027/`（1027 的 manifest，`cuts/` 已空）、`archive/20261029/notes/*.lrc`（35 首歌词源，含 official/axis/cut 三态）与 `tmp__innoc_audio.mp3`（成片音源）、`_private_assets/`（水印/贴纸）、`_ref/`（上游 clone，**不是本项目产物**，删了要重 clone） |
 | **可再生（可删）** | `_tmp/`、`_render_tmp/`、`_chk/`、`_cache/`、`_tmp_ctcseg/`、`_tmpwav/`、`__pycache__/`、`_media_cache/`。⚠ `_media_cache` 被 `song_cutter.py` / `auto_cut.py` / `songcut/*.py` 当封面缓存用，删掉不会坏，但**下次曲库扫描（1246 首）会重新联网**抓一遍；本轮同时删掉的 `sui_figs/`（32 张抠图）已因「撤掉静态立绘」（§78）而废弃 |
 | **白名单别写太粗** | 首版脚本把 `archive/20261029/notes` 整目录写进 PROTECT，结果删单个 `pv__job_*.json` 时被自己的断言挡下、脚本中途退出（前 2.7 GB 已删完，收尾没执行）。要保护的是**目录**就把规则写成「只许删该目录下的 `pv__*.json`」这种正向白名单，别用「目录前缀一概拒」 |
