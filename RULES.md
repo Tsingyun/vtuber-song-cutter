@@ -1073,3 +1073,19 @@ koma=12 / 60fps 下每 5 帧才有 1 张新画 ⇒ 相邻帧有 **80% 完全相�
 | **附带修掉** | `TR.ink` 墨斑半径不够（`R0` 0.52→0.80）且整体淡出提前到 `0.56~1.0`，否则 p→1 残留 58%；`TR.mask` 的 `k` 由 `1+e*1.35` 改 `0.06+3.4·√p`（√ 是因为遮罩面积 ∝ k²，k 线性会让中段猛吃一口）；`TR.grad` 的前沿由 `inOutCubic` 改**线性**（软坡加缓动 = 停一下、猛化开、停一下）。**「末端残留」「起点漏出」「中段突跳」是同一个病的三种形态**：`每一格吃掉的量` 不齐 |
 | **代价与复核点** | `X_KEEP=0.55` 意味着所有镜头的退场都少淡 45%，必须回看静帧确认「退场仍读得出是在退」（现在由转场接手收尾）。若某镜的 exit 本身承担叙事（如 pExplode 炸开必须炸到 0），就单独把该镜的 `_xcap` 设回 1，别全局调大。转场时长抬到 0.44 后每刀多占约 0.1s，节奏略缓——这是为「5 张画」付的价 |
 | **适用场景** | 所有「逐帧顺序渲染 + 上一镜快照」的转场实现（PV 引擎、播放器的镜头预览、任何 canvas 时间轴合成）。★ 出片前检查清单再加两条：`pv_trans_test.cjs` 与 `pv_flash.py` 必须通过，与 `pv_fontcheck.py`、`pv_overlap.cjs`、`pv_check.py` 并列。★ 排查顺序固定：**先看 `PV.__xdbg.dq` 与转场时长够不够 5 格，再看曲线，最后才怀疑几何**——反过来会把采样率问题误判成几何问题，修一夜也修不好 |
+
+---
+
+## 85. 中文开源字体库：16 个中文字面，全部 SIL OFL，可商用（2026-10-30）
+
+| 项 | 内容 |
+|---|---|
+| **为什么要有这一节** | 之前 `PV.FACES` 里没有一个简体字族：`sans` 是 `Zen Kaku Gothic New`（日文），中文靠 `Noto Sans SC` 兜底。日文字体抢走「己/直/骨/今」，剩下的滑到系统宋体 —— §83 那个「一字宋、一字黑」的根源。中文歌一旦进来，缺字与字形错位会成片出现 |
+| **授权口径** | 全部 **SIL Open Font License 1.1**：可商用、可嵌入视频、可修改与再分发；唯一限制是**不得单独售卖字体文件本身**、改名后不得再用原保留名（Reserved Font Name）。成片（mp4）里嵌字形属于「文档嵌入」，不受限。许可证文本随字体放在 `renderer/player/pv_fonts/<slug>/OFL_*.txt`，**删字体前先删许可证等于违规分发** |
+| **清单（Google Fonts 来源，`tools/pv_fetch_fonts.py` 抓）** | `notoserifsc` 思源宋体 400/700/900（明体正文）｜`mashanzheng` 马善政毛笔楷（题字）｜`zhimangxing` 志莽行书（副标题）｜`longcang` 龙藏体（铅笔手写）｜`liujianmaocao` 柳建毛草（单句落款）｜`zcoolkuaile` 站酷快乐体（圆润活泼）｜`zcoolxiaowei` 站酷小薇（细宋）｜`zcoolqingkehuangyou` 站酷庆科黄油体（超粗圆头） |
+| **清单（GitHub 来源，`tools/pv_fetch_cjk.py` 抓）** | `lxgwwenkai` 霞鹜文楷 300/400（楷体，手书 PV 的主力）｜`smileysans` 得意黑（倾斜超粗展示黑） |
+| **字面键名** | `cnSans/cnSansB/cnSansLt`（思源黑 700/900/400）｜`cnSerif/cnSerifB/cnSerifLt`（思源宋 700/900/400）｜`cnKai/cnKaiLt`（文楷 400/300）｜`cnBrush`（马善政）｜`cnXing`（志莽行书）｜`cnHand`（龙藏）｜`cnMao`（柳建毛草）｜`cnBold`（庆科黄油）｜`cnPlay`（站酷快乐）｜`cnElegant`（站酷小薇）｜`cnTitle`（得意黑） |
+| **三条硬约束** | ① **`src` 必须带 `slug/` 前缀**：`pv_fonts/*/fonts.css` 会被并进 `pv_fonts/fonts.css` 由页面直接引用，相对路径按**汇总文件所在目录**解析，少一级前缀就 404 且浏览器静默 fallback；<br>② **中文族标 `cjk: true`**：`warmFonts` 里整包字体（10~20MB）只在文本含 CJK 时才解码，纯拉丁片（Innocence 这类）不解码、省 700ms/页；<br>③ **`font-style` 一律写 `normal`**：得意黑的斜是字形自带，标成 `oblique` 会让 `ctx.font = '400 120px "Smiley Sans"'` 匹配不上而静默 fallback |
+| **门禁（出片前跑）** | `python tools/pv_fonts_audit.py` —— 从文件本身判三件事：CSS 里有没有这个族 / 常用 175 字缺不缺**汉字**（缺 `·` 这类西文标点不算，落回 Noto 是对的）/ 许可证在不在。任一不过 `exit 1`。<br>`node tools/pv_font_specimen.cjs --out x.png` —— 排一张 16 行样张并打印每个字面的量宽，**宽度完全相同 = 有一个静默 fallback**（同族不同字重同宽是正常的，如 cnKai/cnKaiLt）。<br>`python tools/pv_fontcheck.py` 仍要跑，它管的是「一行里混了几种字族」 |
+| **加新字体的顺序** | ① Google 族 → 往 `pv_fetch_fonts.py` 的 `FAMILIES` 加一条 `(查询串, slug, 许可证文件名, 许可证 URL)`，`--only <slug>` 只抓这一族；② GitHub 族（整包 TTF/OTF）→ 往 `pv_fetch_cjk.py` 的 `GH` 加一条，脚本会用 fontTools 转 woff2；③ 都在 `pv_type.js` 的 `PV.FACES` 里注册（中文族记得 `cjk: true`）；④ **收尾必须跑 `--css-only`** 重建汇总，否则新族进不了页面 |
+| **`--css-only` 的坑** | `done` 集合原先「没传 `--only` 就预装满全部族」，导致 `--css-only` 把 743 条 `@font-face` 削成 3 条、页面零报错全静默 fallback。已修：`--css-only` 时 `done` 从空集开始。改这一行代码时要看清 `done` 是「已写进本次汇总的族」，不是「已知的族」 |

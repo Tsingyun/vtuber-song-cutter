@@ -60,8 +60,34 @@ FAMILIES = [
     # 只要 italic —— 正体由 Nunito 承担，斜体衬线是签名笔触。
     ("Fraunces:ital,wght@1,400;1,600;1,700", "fraunces", "OFL_fraunces.txt",
      "https://raw.githubusercontent.com/google/fonts/main/ofl/fraunces/OFL.txt"),
+    # ---- 中文（简体）：日后中文歌的手书 PV 全靠这一组，缺一个字就会静默 fallback ----
+    # 明体：中文最正文的衬线。Noto Serif SC 是思源宋体的 Google 版本，OFL，
+    # 汉字字形是简体骨架（Zen Old Mincho 是日文明朝，直/骨/今 全是日式写法）。
+    ("Noto+Serif+SC:wght@400;700;900", "notoserifsc", "OFL_notoserifsc.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifsc/OFL.txt"),
+    # 毛笔楷：马善政。手书 PV 的「题字」层，笔锋起收都在，大字不虚。
+    ("Ma+Shan+Zheng", "mashanzheng", "OFL_mashanzheng.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/mashanzheng/OFL.txt"),
+    # 行书：志莽行书。连笔但可读，做副标题/情绪句比毛笔楷轻。
+    ("Zhi+Mang+Xing", "zhimangxing", "OFL_zhimangxing.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/zhimangxing/OFL.txt"),
+    # 手写/草：龙藏体。铅笔速写感，适合「便签 / 日记」版式。
+    ("Long+Cang", "longcang", "OFL_longcang.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/longcang/OFL.txt"),
+    # 毛草：柳建毛草。比龙藏更狂，只做单句/落款，不能整段。
+    ("Liu+Jian+Mao+Cao", "liujianmaocao", "OFL_liujianmaocao.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/liujianmaocao/OFL.txt"),
+    # 站酷快乐体：圆润活泼，副歌跳起来时用它，和「极太ゴシック」是两种情绪。
+    ("ZCOOL+KuaiLe", "zcoolkuaile", "OFL_zcoolkuaile.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolkuaile/OFL.txt"),
+    # 站酷小薇：细笔画宋，女声抒情段的正文，比 Noto Serif 轻一档。
+    ("ZCOOL+XiaoWei", "zcoolxiaowei", "OFL_zcoolxiaowei.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolxiaowei/OFL.txt"),
+    # 站酷庆科黄油体：超粗圆头黑，做「大字报」式主歌。
+    ("ZCOOL+QingKe+HuangYou", "zcoolqingkehuangyou", "OFL_zcoolqingkehuangyou.txt",
+     "https://raw.githubusercontent.com/google/fonts/main/ofl/zcoolqingkehuangyou/OFL.txt"),
     # 注意：本机代理下 fonts.gstatic.com 偶发 rc=35（SSL connect），全量重抓会失败。
-    # 只抓需要的族：`--only zenkakugothicnew`。
+    # 只抓需要的族：`--only zenkakugothicnew`。中文族同理，可以 `--only notoserifsc,mashanzheng`。
 ]
 
 CSS_URL = "https://fonts.googleapis.com/css2?family=%s&display=block"
@@ -91,6 +117,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join("renderer", "player", "pv_fonts"))
     ap.add_argument("--only", default="", help="逗号分隔的目录名，只处理这些")
+    ap.add_argument("--css-only", action="store_true",
+                    help="不下载任何分片，只按磁盘上已有的子目录重建汇总 fonts.css"
+                         "（加完新字体、或改了 --only 之后用它收尾）")
     a = ap.parse_args()
     only = set(x for x in a.only.split(",") if x)
 
@@ -99,6 +128,8 @@ def main():
     total = 0
     for query, slug, lic_name, lic_url in FAMILIES:
         if only and slug not in only:
+            continue
+        if a.css_only:
             continue
         css = get(CSS_URL % query)
         if "@font-face" not in css:
@@ -140,7 +171,11 @@ def main():
     # `--only` 只重抓某几族时，其它族必须沿用磁盘上已有的 fonts.css ——
     # 否则汇总文件会被写成「只有这一族」，页面其余字体全部静默 fallback，
     # 而启动日志只会少几族、不报任何错（实测踩过一次）。
-    done = set(only) if only else set(s for _, s, _, _ in FAMILIES)
+    # `done` 语义是「已写进这次汇总的族」。只跑 --css-only 时没有任何族被重新抓过，
+    # 必须从空集开始，让下面两段「沿用磁盘上已有的 fonts.css」把每一族都并进来
+    # ——否则 done 预先装满全部族，汇总会被写成空文件（实测踩过：743 条 @font-face
+    # 被削成 3 条，页面不报错，全部静默 fallback）。
+    done = (set(only) if only else set()) if a.css_only else (set(only) if only else set(s for _, s, _, _ in FAMILIES))
     for _, slug, _, _ in FAMILIES:
         if slug in done:
             continue
@@ -149,6 +184,15 @@ def main():
             chunks.append(open(fp, encoding="utf-8").read())
             done.add(slug)
             print("[keep] %-16s 沿用已有 fonts.css" % slug)
+    # 非 Google Fonts 来源的族（tools/pv_fetch_cjk.py 抓的霞鹜文楷 / 得意黑）：
+    # 它们不在 FAMILIES 里，但同样要出现在汇总 css 中。
+    for d in sorted(os.listdir(a.out)):
+        fp = os.path.join(a.out, d, "fonts.css")
+        if d in done or not os.path.isfile(fp):
+            continue
+        chunks.append(open(fp, encoding="utf-8").read())
+        done.add(d)
+        print("[keep] %-16s 并入（非 Google 来源）" % d)
     missing = [s for _, s, _, _ in FAMILIES if s not in done]
     if missing:
         print("[warn] 这些族没有 fonts.css，会 fallback 到 Noto：%s" % ", ".join(missing))

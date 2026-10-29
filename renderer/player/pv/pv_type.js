@@ -39,8 +39,41 @@
     nunitoB:    { family: '"Nunito"', weight: 800, kind: 'sans' },
     frauncesIt:  { family: '"Fraunces"', weight: 400, kind: 'serif', italic: true },
     frauncesItB: { family: '"Fraunces"', weight: 700, kind: 'serif', italic: true },
+
+    /* ---------------- 中文（简体） ----------------
+       上面那批拉丁族的汉字部分要么没有、要么落到日文字形（Zen 系列的直/骨/今/争
+       全是日式骨架，中文歌里一眼就能看出来）。所以中文单独一组，cjk:true 让预热
+       在纯拉丁片里跳过它们 —— 中文族是整包 10~20MB，没用到时白解码会拖慢首帧。
+       全部 SIL OFL，商用无限制，许可证见 pv_fonts/<slug>/。 */
+    /* 黑体：思源黑体（播放器 fonts/ 里已有的 Noto Sans SC，这里只是给中文一个显式入口） */
+    cnSans:    { family: '"Noto Sans SC"', weight: 700, kind: 'gothic', cjk: true },
+    cnSansB:   { family: '"Noto Sans SC"', weight: 900, kind: 'gothic', cjk: true },
+    cnSansLt:  { family: '"Noto Sans SC"', weight: 400, kind: 'gothic', cjk: true },
+    /* 宋体：思源宋体。中文最正文的衬线，主歌叙述用 */
+    cnSerif:   { family: '"Noto Serif SC"', weight: 700, kind: 'serif', cjk: true },
+    cnSerifB:  { family: '"Noto Serif SC"', weight: 900, kind: 'serif', cjk: true },
+    cnSerifLt: { family: '"Noto Serif SC"', weight: 400, kind: 'serif', cjk: true },
+    /* 楷体：霞鹜文楷。手书 PV 的「写下来」层，整段可用 */
+    cnKai:     { family: '"LXGW WenKai"', weight: 400, kind: 'kai', cjk: true },
+    cnKaiLt:   { family: '"LXGW WenKai"', weight: 300, kind: 'kai', cjk: true },
+    /* 毛笔楷：马善政。题字 / 落款，只上大字 */
+    cnBrush:   { family: '"Ma Shan Zheng"', weight: 400, kind: 'brush', cjk: true },
+    /* 行书：志莽行书。连笔可读，副标题 / 情绪句 */
+    cnXing:    { family: '"Zhi Mang Xing"', weight: 400, kind: 'brush', cjk: true },
+    /* 手写：龙藏体。铅笔速写感，便签 / 日记版式 */
+    cnHand:    { family: '"Long Cang"', weight: 400, kind: 'brush', cjk: true },
+    /* 毛草：柳建毛草。比龙藏更狂，只做单句 */
+    cnMao:     { family: '"Liu Jian Mao Cao"', weight: 400, kind: 'brush', cjk: true },
+    /* 展示黑：夸张的粗黑 / 圆头 / 细宋，标题与副歌的三档表情 */
+    cnBold:    { family: '"ZCOOL QingKe HuangYou"', weight: 400, kind: 'gothic', cjk: true },
+    cnPlay:    { family: '"ZCOOL KuaiLe"', weight: 400, kind: 'gothic', cjk: true },
+    cnElegant: { family: '"ZCOOL XiaoWei"', weight: 400, kind: 'serif', cjk: true },
+    /* 得意黑：倾斜超粗展示黑，中文标题的「海报感」 */
+    cnTitle:   { family: '"Smiley Sans"', weight: 400, kind: 'gothic', cjk: true },
   };
-  const FALLBACK = '"Noto Sans SC", "HarmonyOS Sans SC", sans-serif';
+  /* 兜底链：中文族缺字时落到思源黑，再落系统。别把某个中文族写进兜底 ——
+     兜底一旦命中某个展示体会让「缺字」变成「字形突变」，比豆腐块更难查。 */
+  const FALLBACK = '"Noto Sans SC", "Noto Serif SC", "HarmonyOS Sans SC", sans-serif';
   PV.cssFace = (key, size) => {
     const f = PV.FACES[key] || PV.FACES.sans;
     return (f.italic ? 'italic ' : '') + f.weight + ' ' + size + 'px ' + f.family + ', ' + FALLBACK;
@@ -689,10 +722,17 @@
 
   /* ---------------- 字体预热 ----------------
      必须逐字重 load 一次，否则首帧用 fallback、后面变字形 ⇒ 同一帧两次渲染不同。 */
+  const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff00-\uffef]/;
   PV.warmFonts = async (texts, sizes) => {
     const list = [];
+    const t = texts || 'A字あ';
+    /* 纯拉丁歌词（Innocence 这类）没必要把十几族中文整包都解码一遍：
+       中文族是整包 10~20MB，全解码要几百毫秒、几十 MB 常驻，而一帧都用不到。 */
+    const hasCJK = CJK_RE.test(t);
     for (const k of Object.keys(PV.FACES)) {
-      for (const s of sizes || [40, 120, 240]) list.push(document.fonts.load(PV.cssFace(k, s), texts || 'A字あ'));
+      const f = PV.FACES[k];
+      if (f.cjk && !hasCJK) continue;
+      for (const s of sizes || [40, 120, 240]) list.push(document.fonts.load(PV.cssFace(k, s), t));
     }
     try { await Promise.all(list); } catch (e) { /* 缺字不阻断，交给 fallback */ }
     return Array.from(document.fonts).filter(f => f.status === 'loaded').length;

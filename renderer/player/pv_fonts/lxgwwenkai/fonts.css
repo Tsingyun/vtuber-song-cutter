@@ -1,0 +1,17 @@
+/* LXGW WenKai —— 由 tools/pv_fetch_cjk.py 生成，勿手改。 */
+/* 细：大字号的抒情句 */
+@font-face {
+  font-family: 'LXGW WenKai';
+  font-style: normal;
+  font-weight: 300;
+  font-display: block;
+  src: url(lxgwwenkai/LXGWWenKai-Light.woff2) format('woff2');
+}
+/* 常规：整段正文 */
+@font-face {
+  font-family: 'LXGW WenKai';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(lxgwwenkai/LXGWWenKai-Regular.woff2) format('woff2');
+}
