@@ -102,12 +102,15 @@ def main():
         # ② 转场结尾不能比自己内部的步长更大：p→1 时 A 只剩一条缝，那一步很小；
         #    若几何写反，p→1 时 A 盖满全屏、随即被丢弃 ⇒ 末端一根孤峰。
         seg = d[ic:iend + 1]
-        act = seg[seg > 0.03]
+        # 「换画帧」的下限必须高于编码噪声：1080p 12Mbps 时同画的重复帧是**逐字节相同**
+        # （d=0.00），4K 18Mbps 下同一张画的重编会有 0.03~0.07 的抖动。拿 0.03 当门槛
+        # 会把 4K 成片里所有「静止帧」都算进中位，中位被拉到 0.07，于是每个切点都误报。
+        act = seg[seg > 0.30]
         med = float(np.median(act)) if len(act) >= 2 else max(float(seg.max()), 0.05)
         # 转场之后的「本底节奏」：新镜自己也在动（逐词出现、相机推），拿它当中位基线的
         # 一部分，否则「转场结束正好撞上一个词跳出来」会被误判成末端瞬切。
         after = d[min(n - 1, iend + 2):min(n, iend + 9)]
-        med_after = float(np.median(after[after > 0.03])) if (after > 0.03).sum() >= 2 else 0.0
+        med_after = float(np.median(after[after > 0.30])) if (after > 0.30).sum() >= 2 else 0.0
         dend = float(np.max(d[iend:min(n, iend + 3)]))
         thr_end = max(2.0, 1.6 * max(med, med_after, 0.05))
         # ③ 闪白是**设计上的一次亮度冲击**：判据落在亮度而不是结构。
