@@ -47,8 +47,10 @@
 <script src="pv/pv_scheme.js"></script>
 <script src="pv/pv_typo.js"></script>
 <script src="pv/pv_parts.js"></script>
+<script src="pv/pv_parts_ext.js"></script>
 <script src="pv/pv_piece.js"></script>
 <script src="pv/pv_cam.js"></script>
+<script src="pv/pv_trans.js"></script>
 <script src="pv/pv_engine.js"></script>
 <script>
 const cv = document.getElementById('cv');          // render_song.cjs 按名字取这个全局
@@ -103,6 +105,7 @@ async function setupFrom(cfg) {
   const res = await PV.setupPV({
     storyboard: cfg.storyboard, live: cfg.live || {},
     ctx, fps: HL.fps, dur, dpr: OUT_SCALE,
+    keyBg: cfg.keyBg || (cfg.storyboard.meta && cfg.storyboard.meta.keyBg) || null,
   });
   HL.phase = 'ready';
   return res;

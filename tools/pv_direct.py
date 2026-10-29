@@ -129,6 +129,220 @@ CAM_BY_TIER = {
 }
 CAM_QUOTA = {"snapPan": 2}
 
+# ----------------------------------------------------------------- 性格标签（P0-2）
+# JIZURA 的抽卡是三重加权：基础权重 × 风格偏置(style.bias) × 新颖度惩罚(novelty)。
+# 风格偏置给每个 pack 一个「稳定人格」：noir 偏爱竖轴与碎字，crimson 偏爱巨字与故障，
+# paper 偏爱留白与柔和。没有它，所有风格看起来都一样（只是换了颜色）——
+# 这正是「我们的13 个版式不如官方 862 个零件」的另一半原因：不是数量，是人格。
+PERS = {
+    "noir": {
+        "layout": {"vRuler": 1.8, "keySplit": 1.6, "indexTable": 1.4, "block": 1.0,
+                   "cropGiant": 1.2, "marginNote": 1.1},
+        "enter":  {"assemble": 2.2, "pAssemble": 1.8, "sliceDown": 1.8, "softIn": 1.1},
+        "exit":   {"pExplode": 1.8, "pFall": 1.2, "blurOut": 1.4, "fadeUp": 1.0},
+        "hold":   {"drift": 1.6, "sway": 1.4, "breathe": 1.2},
+        "trans":  {"wipe": 1.6, "clock": 1.5, "iris": 1.3, "ink": 1.4, "blinds": 1.1},
+        "decor":  {"barcode": 1.6, "ruler": 1.4, "cornerTicks": 1.3, "chapter": 1.2},
+    },
+    "crimson": {
+        "layout": {"cropGiant": 2.0, "fullTrack": 1.7, "bandHide": 1.5, "cross": 1.3,
+                   "scaleSteps": 1.2, "keySplit": 1.1},
+        "enter":  {"slam": 1.8, "typeOn": 1.6, "dropBounce": 1.4, "pAssemble": 1.3},
+        "exit":   {"pExplode": 2.0, "pFall": 1.5, "fadeUp": 1.1},
+        "hold":   {"jitter": 1.6, "pulse": 1.5, "shimmer": 1.3},
+        "trans":  {"flash": 1.8, "zoom": 1.6, "blocks": 1.5, "slice": 1.4, "push": 1.2},
+        "decor":  {"speedLines": 1.8, "warnStripe": 1.5, "sparkle": 1.3, "crosshair": 1.2},
+    },
+    "paper": {
+        "layout": {"block": 2.0, "marginNote": 1.8, "lowerThird": 1.4, "indexTable": 1.3,
+                   "vRuler": 1.1},
+        "enter":  {"softIn": 1.8, "assemble": 1.4, "typeOn": 1.2},
+        "exit":   {"fadeUp": 1.7, "fade": 1.5, "blurOut": 1.1},
+        "hold":   {"breathe": 1.7, "breatheRow": 1.4, "settle": 1.3, "tiltDrift": 1.2},
+        "trans":  {"wipe": 1.5, "ink": 1.6, "iris": 1.3, "blinds": 1.2},
+        "decor":  {"tape": 1.7, "chip": 1.4, "ticket": 1.3, "stamp": 1.2, "brackets": 1.2},
+    },
+    "hud": {
+        "layout": {"indexTable": 1.8, "vRuler": 1.5, "cross": 1.4, "lowerThird": 1.2},
+        "enter":  {"typeOn": 1.7, "sliceDown": 1.4, "assemble": 1.2},
+        "exit":   {"blurOut": 1.6, "fade": 1.3, "pExplode": 1.2},
+        "hold":   {"jitter": 1.4, "shimmer": 1.4, "trackIn": 1.2},
+        "trans":  {"blinds": 1.6, "clock": 1.5, "slice": 1.4, "wipe": 1.2},
+        "decor":  {"crosshair": 1.8, "timeline": 1.5, "barcode": 1.4, "ruler": 1.3},
+    },
+}
+# 未列名的 pack 用中性偏置（等价于无偏置）
+PERS_DEFAULT = {g: {} for g in ("layout", "enter", "exit", "hold", "trans", "decor")}
+
+
+def wkey(obj, k, d=1.0):
+    """偏置查表：没有给的键就用基础权重（与 JIZURA 的 wkey 同构）。"""
+    return obj.get(k, d) if obj else d
+
+
+def novelty(hist, val, short=0.22, long=0.62, depth=6):
+    """新颖度惩罚：最近 2 次内用过 → 权重 ×0.22；最近 6 次内用过 → ×0.62。
+
+    与 JIZURA 的 novelty 同构。为什么不用「直接排除」：排除会让池子在长句段
+    快速枯竭（peak 池只有 7 个版面，排除 2 个再过滤 FIT 就只剩 1~2 个可抽），
+    折扣既能压制重复又不会饿死。
+    """
+    w = 1.0
+    for d, v in enumerate(reversed(hist[-depth:])):
+        if v == val:
+            w *= short if d < 2 else long
+    return w
+
+
+def gacha(r, pool, pers, group, hist):
+    """三重加权抽卡：基础权重 × 风格偏置 × 新颖度。pool = [(k, base_w), ...]"""
+    out = []
+    for k, w in pool:
+        ww = w * wkey(pers.get(group), k, 1.0) * novelty(hist, k)
+        out.append((k, max(0.02, ww)))
+    return weighted(r, out)
+
+
+# ----------------------------------------------------------------- 转场池（P0-1）
+# 转场是「上一镜怎么让位给这一镜」。语气越强，转场越有冲击力。
+TRANS_BY_MOOD = {
+    "quiet": [("wipe", 3), ("iris", 2), ("ink", 2), ("clock", 2), ("blinds", 1)],
+    "drive": [("wipe", 3), ("push", 3), ("blinds", 2), ("slice", 2), ("ink", 1),
+              ("flash", 1), ("zoom", 1)],
+    "peak":  [("flash", 3), ("zoom", 3), ("push", 2), ("blocks", 2), ("slice", 2),
+              ("wipe", 2), ("blinds", 1)],
+}
+
+# 保持类（P0-3）：字停留期间的呼吸感。none 不能没有 —— 有些镜头就该一动不动。
+HOLD_POOL = [("breathe", 3), ("drift", 2.2), ("sway", 2), ("pulse", 1.8),
+             ("tiltDrift", 1.5), ("settle", 1.4), ("breatheRow", 1.5),
+             ("counterDrift", 1.3), ("shimmer", 1.0), ("wave", 1.2),
+             ("trackIn", 1.0), ("none", 1.2)]
+
+# 装饰池（P1-4）：宁可没有也不要多 —— 一个镜头最多一件。
+DECOR_POOL = [("cropMarks", 3), ("barcode", 2.2), ("dots", 1.2), ("cornerTicks", 2),
+              ("crosshair", 1.6), ("tape", 1.8), ("chip", 1.5), ("ruler", 1.5),
+              ("arrows", 1.3), ("brackets", 1.4), ("sparkle", 1.1), ("warnStripe", 1.2),
+              ("stamp", 1.1), ("ticket", 1.2), ("timeline", 1.3), ("chapter", 1.4),
+              ("speedLines", 1.0), ("progress", 1.0)]
+
+# 背景图形池（P1-4）：平涂底上只给一层极淡图形。
+BG_POOL = [("rings", 2), ("halftone", 1.8), ("wash", 1.6), ("grid", 1.3),
+           ("hatch", 1.2), ("diagonal", 1.4), ("waveBand", 1.3), ("noiseField", 1.2),
+           ("spotlight", 1.2), ("contour", 1.1), ("sunburst", 1.0), ("mesh", 1.2),
+           ("gradWash", 1.3), ("topo", 1.0), ("dust", 1.0)]
+
+# 节拍吸附（P1-6）：镜头边界与动效时长向节拍网格靠拢。
+def beat_snap(t, beat, tol):
+    """把 t 吸附到最近的节拍；偏差超过 tol 就保持原值（宁可不吸也不能拖拍）。
+
+    为什么要 tol：歌词 PV 的字必须贴着人声出现。把 0.35s 的偏差硬吸到节拍上，
+    字会比唱词早/晚三分之一拍出来 —— 观众读作「字幕对不上」，比不吸更糟。
+    """
+    if beat <= 0:
+        return t
+    q = round(t / beat) * beat
+    return round(q, 3) if abs(q - t) <= tol else t
+
+
+# ----------------------------------------------------------------- 装饰 / 背景参数
+def decor_spec(dk, r, i):
+    """给装饰件填参数。位置只做「构图」，不做「贴纸」——永远贴边或落在空白处。"""
+    if dk == "cropMarks":
+        return {"k": dk, "m": 46, "len": 18, "a": 0.30}
+    if dk == "barcode":
+        return {"k": dk, "x": 1500, "y": 64, "w": 300, "h": 26, "a": 0.42, "seed": 11 + i}
+    if dk == "dots":
+        return {"k": dk, "x0": 0, "y0": 0, "x1": 1920, "y1": 1080, "step": 44,
+                "r": 1.0, "a": 0.07}
+    if dk == "cornerTicks":
+        return {"k": dk, "m": 54, "len": 12, "n": 3, "gap": 9, "a": 0.20}
+    if dk == "crosshair":
+        return {"k": dk, "x": int(1920 * (0.22 + 0.56 * r.random())),
+                "y": int(1080 * (0.24 + 0.52 * r.random())), "r": 24, "a": 0.26}
+    if dk == "tape":
+        return {"k": dk, "x": int(60 + 260 * r.random()), "y": int(50 + 120 * r.random()),
+                "w": 220 + int(120 * r.random()), "h": 30, "rot": -8 + int(16 * r.random()),
+                "a": 0.15, "col": "accent" if r.random() < 0.4 else "ink"}
+    if dk == "chip":
+        return {"k": dk, "x": int(80 + 220 * r.random()), "y": int(70 + 120 * r.random()),
+                "h": 30, "text": pick(r, ["VERSE", "CHORUS", "TAKE 02", "REC", "A/B"]),
+                "size": 13, "a": 0.8, "fill": "accent" if r.random() < 0.35 else "ink"}
+    if dk == "ruler":
+        return {"k": dk, "x0": 110, "x1": 1810, "y": 986, "n": 24, "a": 0.15,
+                "numbers": r.random() < 0.5}
+    if dk == "arrows":
+        return {"k": dk, "x": int(120 + 300 * r.random()), "y": int(200 + 400 * r.random()),
+                "n": 3, "dir": 1 if r.random() < 0.5 else -1, "a": 0.22}
+    if dk == "brackets":
+        return {"k": dk, "x": int(1920 * (0.18 + 0.28 * r.random())),
+                "y": int(1080 * (0.20 + 0.26 * r.random())),
+                "w": int(1920 * (0.30 + 0.22 * r.random())),
+                "h": int(1080 * (0.30 + 0.24 * r.random())), "len": 28, "a": 0.20}
+    if dk == "sparkle":
+        return {"k": dk, "x": int(1920 * (0.12 + 0.76 * r.random())),
+                "y": int(1080 * (0.12 + 0.76 * r.random())), "r": 16, "a": 0.42,
+                "col": "accent"}
+    if dk == "warnStripe":
+        return {"k": dk, "x": 0, "y": 1036 if r.random() < 0.6 else 26,
+                "w": 1920, "h": 16, "a": 0.15, "step": 14}
+    if dk == "stamp":
+        return {"k": dk, "x": int(1920 * (0.72 + 0.18 * r.random())),
+                "y": int(1080 * (0.14 + 0.22 * r.random())), "r": 50,
+                "rot": -14 + int(28 * r.random()), "a": 0.17,
+                "text": pick(r, ["OK", "PASS", "01", "LIVE"])}
+    if dk == "ticket":
+        return {"k": dk, "x": 130, "y": int(1080 * (0.72 + 0.10 * r.random())),
+                "w": 340, "h": 50, "a": 0.13, "text": "ADMIT ONE"}
+    if dk == "timeline":
+        return {"k": dk, "x0": 120, "x1": 1800, "y": 1010, "n": 8,
+                "p": round(0.15 + 0.7 * r.random(), 3), "a": 0.17}
+    if dk == "chapter":
+        return {"k": dk, "x": 96, "y": 120 + int(760 * r.random()),
+                "text": pick(r, ["SEC 01", "SEC 02", "B-SIDE", "LIVE", "CUT"]),
+                "size": 15, "a": 0.55}
+    if dk == "speedLines":
+        return {"k": dk, "cx": 960, "cy": 540, "n": 22, "a": 0.09, "phase": float(r.random())}
+    if dk == "progress":
+        return {"k": dk, "x": 120, "y": 1016, "w": 1680, "p": round(0.1 + 0.8 * r.random(), 3)}
+    return {"k": dk, "a": 0.2}
+
+
+def bg_spec(bk, r):
+    """给背景图形填参数。一律极淡（a ≤ 0.10）——它是「层次」不是「滤镜」。"""
+    if bk == "rings":
+        return {"k": bk, "x": 0.5, "y": 0.5, "n": 4, "a": 0.10, "spd": 0.20, "rMax": 1.10}
+    if bk == "halftone":
+        return {"k": bk, "x": 0.55, "y": 0.10, "w": 0.45, "h": 0.80, "a": 0.07, "step": 22}
+    if bk == "wash":
+        return {"k": bk, "n": 3, "a": 0.10}
+    if bk == "grid":
+        return {"k": bk, "step": 40, "a": 0.05}
+    if bk == "hatch":
+        return {"k": bk, "step": 18, "a": 0.045}
+    if bk == "diagonal":
+        return {"k": bk, "step": 26, "a": 0.055, "w": 1.2}
+    if bk == "waveBand":
+        return {"k": bk, "n": 3, "a": 0.065}
+    if bk == "noiseField":
+        return {"k": bk, "n": 240, "a": 0.05}
+    if bk == "spotlight":
+        return {"k": bk, "x": round(0.3 + 0.4 * r.random(), 3), "r": 0.85, "a": 0.09}
+    if bk == "contour":
+        return {"k": bk, "x": round(0.3 + 0.4 * r.random(), 3),
+                "y": round(0.3 + 0.36 * r.random(), 3), "n": 4, "a": 0.075}
+    if bk == "sunburst":
+        return {"k": bk, "x": 0.5, "y": 0.5, "n": 18, "a": 0.05}
+    if bk == "mesh":
+        return {"k": bk, "step": 34, "a": 0.05}
+    if bk == "gradWash":
+        return {"k": bk, "ang": int(90 + 60 * r.random()), "a": 0.075}
+    if bk == "topo":
+        return {"k": bk, "a": 0.06}
+    if bk == "dust":
+        return {"k": bk, "a": 0.05}
+    return {"k": bk, "a": 0.06}
+
 
 def rng(seed, *keys):
     """由 seed 与若干整数键派生的确定性 RNG。"""
@@ -322,6 +536,10 @@ def main():
     ap.add_argument("--date", default="")
     ap.add_argument("--live", default="")
     ap.add_argument("--lrc", default="")
+    ap.add_argument("--koma", type=int, default=12,
+                    help="二帧量化：每秒画几张（JIZURA 默认 12，0=不量化）")
+    ap.add_argument("--keyBg", default="", choices=["", "green", "black", "white"],
+                    help="绿幕/黑幕导出（JIZURA 的 keyBg），空=正常纸底")
     a = ap.parse_args()
 
     tdoc = json.load(open(a.timing, encoding="utf-8"))
@@ -387,6 +605,13 @@ def main():
     last_cam = [""]
     cam_used = {}
     recent_lay = []          # 最近用过的版面（避免连续重复）
+    recent_ent = []          # 最近用过的入场（P0-2 新颖度）
+    recent_exit = []         # 最近用过的退场
+    recent_hold = []         # 最近用过的保持
+    recent_trans = []        # 最近用过的转场
+    recent_decor = []        # 最近用过的装饰
+    recall = {}              # 统一感（P1-5）：唱词 → (版面, 入场, 转场) 首次出现
+    beat = 60.0 / ana["bpm"] if ana.get("bpm") else 0.0   # 一拍的秒数（P1-6）
 
     for i, l in enumerate(lines):
         sec = sec_at(l["t0"])
@@ -423,21 +648,24 @@ def main():
         if r.random() < m["fig"]:
             fig = fig_script(mood, r, pack)
 
-        # ---- 版面：语气池 → 形态过滤 → 避免连续重复
+        # ---- 版面：语气池 → 形态过滤 → 三重加权抽卡（P0-2）
         pool = [(k, w) for k, w in VOICE[mood] if FIT[k](nw, n, cjk)]
         if fig:
             safe = [(k, w) for k, w in pool if k in FIG_SAFE]
             if safe:
                 pool = safe
+        # 新颖度改由 gacha() 内的 novelty() 做折扣（不直接排除，避免池子枯竭），
+        # 但仍然硬排除最近 1 个 —— 连着两镜同一版面怎么调权重都读作「卡住了」。
         if recent_lay:
-            fresh = [(k, w) for k, w in pool if k not in recent_lay[-2:]]
+            fresh = [(k, w) for k, w in pool if k != recent_lay[-1]]
             if fresh:
                 pool = fresh
         # 兜底：长句在 peak 池里可能一个版面都接不住（keySplit/cross/scaleSteps 都有词数上限），
         # 这时必须退回 block —— 空池会让抽签直接崩，而不是「排得难看」。
         if not pool:
             pool = [("block", 1)]
-        layk = weighted(r, pool)
+        pers = PERS.get(pack, PERS_DEFAULT)
+        layk = gacha(r, pool, pers, "layout", recent_lay)
         recent_lay.append(layk)
         if len(recent_lay) > 6:
             recent_lay.pop(0)
@@ -462,15 +690,19 @@ def main():
         # ---- 类型：只有三级（主字 / 次字 / 注记），字体由 pack 决定
         typ = {"face": fonts["face"], "body": fonts["body"], "squeeze": 1.0}
 
-        # ---- 入场 / 保持 / 退场
+        # ---- 入场 / 保持 / 退场（P0-2 三重加权抽卡）
         # pAssemble 是 piece 级入场：字被拆成零件后各自飞回来拼成整体。
         #   给它的权重不高（2）—— 它的信息量比整字位移大得多，48 镜里出现 6~8 次就够，
         #   用多了「拆字」会从签名变成套路。
-        entk = weighted(r, [("assemble", 3), ("softIn", 3), ("sliceDown", 2),
-                            ("dropBounce", 2), ("typeOn", 1), ("pAssemble", 2)])
-        if mood == "peak" and r.random() < 0.45:
-            entk = weighted(r, [("assemble", 3), ("slam", 2), ("dropBounce", 2),
-                                ("pAssemble", 3)])
+        entpool = [("assemble", 3), ("softIn", 3), ("sliceDown", 2),
+                   ("dropBounce", 2), ("typeOn", 1), ("pAssemble", 2)]
+        if mood == "peak":
+            entpool = [("assemble", 3), ("slam", 2.4), ("dropBounce", 2),
+                       ("pAssemble", 3), ("sliceDown", 1.4)]
+        entk = gacha(r, entpool, pers, "enter", recent_ent)
+        recent_ent.append(entk)
+        if len(recent_ent) > 6:
+            recent_ent.pop(0)
         ent = {"k": entk}
         if entk == "slam":
             ent.update(dur=0.22, stagger=0.0, lead=0.02)
@@ -491,13 +723,26 @@ def main():
 
         # pExplode / pFall 同为 piece 级：前者「炸」，后者「塌」。
         #   pFall 放在长句/情绪落点上，pExplode 放在宰制的cut before 断点。
-        exitk = weighted(r, [("fadeUp", 4), ("blurOut", 2), ("fade", 2),
-                             ("pFall", 1), ("pExplode", 1)])
+        exitk = gacha(r, [("fadeUp", 4), ("blurOut", 2), ("fade", 2),
+                          ("pFall", 1.2), ("pExplode", 1.2)], pers, "exit", recent_exit)
+        recent_exit.append(exitk)
+        if len(recent_exit) > 6:
+            recent_exit.pop(0)
         xit = {"k": exitk, "dur": 0.26 if mood == "peak" else 0.40}
         if exitk in ("pExplode", "pFall"):
             xit["dur"] = 0.34 if mood == "peak" else 0.46
-        hold = {"k": weighted(r, [("breathe", 3), ("drift", 2), ("none", 1)]),
-                "amp": round(0.7 + 0.2 * m["cam"], 2)}
+        holdk = gacha(r, HOLD_POOL, pers, "hold", recent_hold)
+        recent_hold.append(holdk)
+        if len(recent_hold) > 6:
+            recent_hold.pop(0)
+        hold = {"k": holdk, "amp": round(0.7 + 0.2 * m["cam"], 2)}
+
+        # ---- 转场（P0-1）：这一镜「怎么进来」。片头卡不给转场（它是硬切进第一句的）。
+        transk = gacha(r, TRANS_BY_MOOD[mood], pers, "trans", recent_trans)
+        recent_trans.append(transk)
+        if len(recent_trans) > 6:
+            recent_trans.pop(0)
+        trans = {"k": transk}
 
         # ---- 相机
         poolc, alt = [], []
@@ -516,26 +761,53 @@ def main():
         last_cam[0] = camk
         cam = {"k": camk, "amp": round(m["amp"] * (0.86 + 0.28 * r.random()), 3)}
 
-        # ---- 装饰：JIZURA 的 decor 组，宁可没有也不要多
+        # ---- 装饰（P1-4 扩充池）：JIZURA 的 decor 组，宁可不要多 —— 一镜最多一件
         decor, bgl, bg = [], [], []
-        if not fig and r.random() < 0.34:
-            dk = weighted(r, [("cropMarks", 3), ("barcode", 2), ("dots", 1)])
-            if dk == "cropMarks":
-                decor.append({"k": "cropMarks", "m": 46, "len": 18, "a": 0.30})
-            elif dk == "barcode":
-                decor.append({"k": "barcode", "x": 1500, "y": 64, "w": 300, "h": 26,
-                              "a": 0.42, "seed": 11 + i})
-            else:
-                decor.append({"k": "dots", "x0": 0, "y0": 0, "x1": 1920, "y1": 1080,
-                              "step": 44, "r": 1.0, "a": 0.07})
-        # 背景：平涂底上只允许一层极淡的图形，且只给爆发段 —— 这是「层次」不是「滤镜」
-        if mood == "peak" and r.random() < 0.30:
-            if r.random() < 0.5:
-                bgl.append({"k": "rings", "x": 0.5, "y": 0.5, "n": 4, "a": 0.10,
-                            "spd": 0.20, "rMax": 1.10})
-            else:
-                bgl.append({"k": "halftone", "x": 0.55, "y": 0.10, "w": 0.45, "h": 0.80,
-                            "a": 0.07, "step": 22})
+        if not fig and r.random() < 0.38:
+            dk = gacha(r, DECOR_POOL, pers, "decor", recent_decor)
+            recent_decor.append(dk)
+            if len(recent_decor) > 6:
+                recent_decor.pop(0)
+            decor.append(decor_spec(dk, r, i))
+        # 背景：平涂底上只允许一层极淡的图形，且只给驱动/爆发段 —— 这是「层次」不是「滤镜」
+        if mood != "quiet" and r.random() < (0.34 if mood == "peak" else 0.20):
+            bgl.append(bg_spec(gacha(r, BG_POOL, pers, "decor", []), r))
+
+        # ---- 统一感（P1-5）：同一句唱词再次出现时，回到它上次的画面
+        # JIZURA 的 recap 只是「往几张版面上加权」，我们做得更硬：直接复用
+        # 版面 / 入场 / 转场三件套。观众在第二次副歌读到的是「啊，是那个画面」，
+        # 这正是编排「有呼应」而不是「每句都在换招」的分界线。
+        txt = re.sub(r"\s+", " ", l["text"].strip().lower())
+        recap = False
+        if txt in recall:
+            layk2, entk2, transk2 = recall[txt]
+            # 回访也要过形态过滤 + 人物安全过滤：同一句唱词在第二次出现时可能带人物，
+            # 把满幅版面硬塞回去会让字压在脸上（43.3s This moment 的老事故）。
+            if (FIT.get(layk2, lambda *_: True)(nw, n, cjk)
+                    and (not fig or layk2 in FIG_SAFE)):
+                layk, entk, transk = layk2, entk2, transk2
+                # 版面参数必须按回访的 layk 重算 —— 否则引擎读到的还是抽签那个
+                # 版面（lay 是个 dict，里面自带 k），「回访」等于没发生。
+                lay = layout_params(layk, mood, fig, r, nw, key, avoid)
+                ent = {"k": entk}
+                if entk == "slam":
+                    ent.update(dur=0.22, stagger=0.0, lead=0.02)
+                elif entk == "assemble":
+                    ent.update(dur=0.46, stagger=0.026, lead=0.08)
+                elif entk == "softIn":
+                    ent.update(dur=0.60, stagger=0.018, lead=0.10)
+                elif entk == "dropBounce":
+                    ent.update(dur=0.52, stagger=0.030, lead=0.05)
+                elif entk == "typeOn":
+                    ent.update(dur=0.24, stagger=0.030, lead=0.02)
+                elif entk == "pAssemble":
+                    ent.update(dur=0.62, stagger=0.024, lead=0.06)
+                else:
+                    ent.update(dur=0.34, stagger=0.040, lead=0.04)
+                trans = {"k": transk}
+                recap = True
+        else:
+            recall[txt] = (layk, entk, transk)
 
         shots.append({
             "i": len(shots), "t0": round(t0, 3), "t1": round(t1, 3),
@@ -543,12 +815,14 @@ def main():
             "energy": 0.35 if mood == "quiet" else (0.62 if mood == "drive" else 0.9),
             "layout": lay, "type": typ,
             "enter": ent, "hold": hold, "exit": xit,
+            "trans": trans,
             "treat": {"k": "solid"},
             "pal": {"pack": pack, "idx": sch},
             "bgl": bgl, "bg": bg, "decor": decor, "post": [],
             "cam": cam, "fig": fig, "sync": False, "wobble": 0,
-            "unified": False,
-            "note": "%s / %s / %s / %s" % (sec["name"], pack, layk, entk),
+            "unified": recap,
+            "note": "%s / %s / %s / %s%s" % (sec["name"], pack, layk, entk,
+                                             " / recap" if recap else ""),
         })
 
     # ---- 片头标题卡：占满整个前奏（绝不移动歌词时间轴）
@@ -566,6 +840,7 @@ def main():
             "enter": {"k": "fadeSlow", "dur": 1.0, "stagger": 0.05, "lead": 0.20},
             "hold": {"k": "breathe", "amp": 0.8},
             "exit": {"k": "fade", "dur": 0.62},
+            "trans": {"k": "wipe"},
             "treat": {"k": "solid"},
             "pal": {"pack": "noir", "idx": 0},
             "bgl": [], "bg": [], "decor": [], "post": [],
@@ -584,6 +859,28 @@ def main():
         shots[i + 1]["i"] = i + 1
     if shots:
         shots[-1]["t1"] = round(dur, 3)
+
+    # ---- 节拍吸附（P1-6）：镜头边界 + 动效时长向节拍网格靠拢
+    # 边界是「换镜的时机」，时长是「动作的快慢」。这两样贴上节拍，观感才会有
+    # 「跟音乐长在一起」的感觉；文字自身的时间轴**不动**（那是人声，不是节拍）。
+    if beat > 0:
+        half = beat * 0.5
+        for s in shots:
+            for kk in ("enter", "exit"):
+                d = s.get(kk) or {}
+                if d.get("dur"):
+                    nd = round(max(half, round(d["dur"] / half) * half), 3)
+                    if nd != d["dur"]:
+                        d["dur"] = nd
+            hd = s.get("hold") or {}
+            # 保持类的 amp 不吸（它是幅度不是时间）
+        for i in range(len(shots) - 1):
+            b = shots[i]["t1"]
+            nb = beat_snap(b, beat, 0.18)
+            if nb != b and nb > shots[i]["t0"] + 0.30 and nb < shots[i + 1]["t1"] - 0.30:
+                shots[i]["t1"] = nb
+                shots[i + 1]["t0"] = nb
+                shots[i]["sync"] = shots[i + 1]["sync"] = True
 
     # ---- 直播序列
     live = None
@@ -604,6 +901,7 @@ def main():
             "title": a.title, "artist": a.artist, "vocal": a.vocal,
             "source": a.source, "date": a.date,
             "seed": a.seed, "dur": dur, "fps": 60, "start": w0,
+            "koma": a.koma, "keyBg": a.keyBg or None,
             "mark": "",
         },
         "palette": {"pack": "noir", "idx": 0},
@@ -642,6 +940,18 @@ def main():
     print("[paper runs] %s" % segs)
     nf = sum(1 for s in shots if s["fig"])
     print("[figure] 人物镜头 %d 个（%.0f%%）" % (nf, 100.0 * nf / max(1, nl)))
+    # ---- P0/P1 稽核：转场覆盖、保持分布、统一感回访、节拍吸附
+    ntr = sum(1 for s in shots if s.get("trans"))
+    print("[trans] 带转场 %d/%d 镜  %s"
+          % (ntr, len(shots),
+             dict(Counter(s["trans"]["k"] for s in shots if s.get("trans")).most_common())))
+    print("[hold] %s"
+          % dict(Counter(s["hold"]["k"] for s in shots if s.get("hold")).most_common()))
+    nuni = sum(1 for s in shots if s.get("unified"))
+    print("[unity] 统一感回访 %d 镜（同唱词复用版面/入场/转场）" % nuni)
+    nsync = sum(1 for s in shots if s.get("sync"))
+    print("[beat] 节拍吸附 %d 处边界  bpm=%.1f  一拍=%.3fs"
+          % (nsync, ana.get("bpm") or 0, beat))
     bad = fig_band_fix(shots)
     if bad:
         print("[warn] 有人物却用了满幅版面：%s" % bad)

@@ -450,6 +450,17 @@
     /* 纸色必须跟着「本镜头的调色板」走。只读全局 ST.sb.palette 的话，
        反转镜头的字变了色、纸还是深色 —— 反转事件等于没发生。 */
     const pal = (shot && shot._pal) || ST.sb.palette || {};
+    /* ---- 绿幕/黑幕导出（JIZURA 的 keyBg）----
+       目的是把「文字层」单独出成色键素材，回 AE 合成到实拍/插画上。
+       所以整幅只能有一个纯色：不能有纸纹、渐变、暗角、颗粒 ——
+       任何一点灰阶变化都会在抠像时留下脏边。 */
+    const kb = (shot && shot.keyBg) || ST.keyBg;
+    if (kb) {
+      const col = kb === 'black' ? '#000000' : (kb === 'white' ? '#FFFFFF' : '#00B140');
+      ctx.fillStyle = col;
+      ctx.fillRect(0, 0, PV.W, PV.H);
+      return;
+    }
     if (S.flat) { ctx.drawImage(flatCanvas(S, pal), 0, 0, PV.W, PV.H); return; }
     ctx.drawImage(paperCanvas(S, pal), 0, 0, PV.W, PV.H);
     /* 环境光：两团方向相反、周期互质的柔光缓慢漂移。
@@ -597,7 +608,7 @@
       /* 签名是 (g,t,ph,spec,amp)：第 4 个参数必须是 hold 规格本身。
          早先传成 (…, breath, hold, 1) —— spec 收到数字 1、amp 收到对象，
          jitter/trackIn 里出现 NaN，整行甚至整面墙一个字都不画（且毫无报错）。 */
-      if (e >= 0.999) rh(g, t, rnd1[i], hold, 1);
+      if (e >= 0.999) rh(g, t, rnd1[i], hold, 1, idx);
 
       const xe = clamp((t - x0) / (exit.dur == null ? 0.42 : exit.dur), 0, 1);
       if (xe > 0) rx(g, xe, rnd1[i], rnd2[i], exit, PV.W / 2, PV.H * 0.5);
@@ -835,25 +846,22 @@
     /* 存 A：退场开始前那一刻的完整画面（每镜只存一次，窗口 0.12s ≈ 7 帧） */
     const xd = shot.exit && shot.exit.dur != null ? shot.exit.dur : 0.42;
     if (t >= shot.t1 - xd - 0.02 && t <= shot.t1 - xd + 0.10) saveCross(ctx, shot);
-    /* 切间过渡：把**上一镜的最后一帧**按一个方向擦掉，露出这一镜。
-       参考 JIZURA 的 TRANS 分组（wipe / pushSlide / zoomThrough…）。没有这一步，
-       48 个镜头就是 48 次硬切 —— 实测帧间差异曲线在 8.1s 只有一个 16.8 的尖峰，
-       其余全在 2~3.8，那根尖峰就是「生硬」剩下的全部来源。
-       实现上用「延迟擦除」而不是 A/B 双层合成：逐帧顺序渲染时画布上已经有上一镜的
-       画面，把它存成一张 cross 缓存即可，不必把上一镜重新渲一遍（4K 重渲要 40ms/帧）。 */
+    /* 切间过渡（TRANS 分组）：把上一镜快照按转场几何让掉，露出这一镜。 */
     crossFade(ctx, shot, t);
     /* 平涂底（JIZURA 风格）不加暗角：暗角是「电影感」的语法，
        而 JIZURA 的语法是「印刷品」—— 四角必须和中心一样平，版面才立得住。 */
     /* 注意这里必须用**本镜头**的 S：renderAt 顶上的 S 是全局 ST.S，
        它的 flat 永远是 undefined —— 拿它判会得到「平涂底照样压暗角」，
        实测四角 155 vs 中心 236，一整片奶油底被压成脏灰。 */
-    if (!((shot._S || S).flat) && !(shot.post || []).some(f => f.k === 'vignette')) {
+    /* 绿幕/黑幕导出时连暗角和颗粒都不要：抠像要的是纯色，一点灰阶都是脏边。 */
+    const kb = shot.keyBg || ST.keyBg;
+    if (!kb && !((shot._S || S).flat) && !(shot.post || []).some(f => f.k === 'vignette')) {
       /* 默认暗角：让画面四周沉下去，是「电影感」最便宜也最有效的一步 */
       /* 暗角 0.40 / r0 0.46：原来是 0.60，四角直接压成纯黑 ——
          背景纹理全部被吃掉，等于白做。 */
       PV.FX.vignette(ctx, { a: 0.40, r0: PV.H * 0.46, r1: PV.H * 1.10 }, { S });
     }
-    PV.drawGrain(ctx, 0, 0, PV.W, PV.H, (shot._S || S).flat ? 0.30 : 0.55, ST.dpr);
+    if (!kb) PV.drawGrain(ctx, 0, 0, PV.W, PV.H, (shot._S || S).flat ? 0.30 : 0.55, ST.dpr);
 
     /* 角落极淡标记：歌名/来源改成片头标题卡承载后，全片只留这一行。
        压在画面右下角、alpha 0.16 —— 存在但不抢戏，观众要看得到、平时看不见。 */
@@ -864,16 +872,18 @@
     ctx.globalAlpha = 1;
   };
 
-  /* ---------------- 切间过渡（crossFade） ----------------
+  /* ---------------- 切间过渡（TRANS 分组，pv_trans.js） ----------------
      JIZURA 的 TRANS 分组是把「上一 cut 的静止帧」和当前帧合成。我们逐帧顺序渲染，
-     画布上本来就有上一镜的画面，所以只要在退场开始前存一张快照，切镜时按方向擦掉它。
-     比重新渲染上一镜便宜一个数量级（4K 重渲 40ms/帧 × 20 帧 × 48 镜 = 38s）。
+     画布上本来就有新镜头的画面，所以只要在退场开始前存一张上一镜快照，
+     切镜时按转场几何把它让掉 —— 比重新渲染上一镜便宜一个数量级。
 
      为什么要存「退场开始前」而不是「最后一帧」：exit 在 t1 时已经把字淡完了，
-     拿那一帧当 A 等于拿一张空画面去擦，读作「黑场过场」而不是「换镜」。 */
-  /* 0.22s：文字 PV 的换镜要「干脆地擦过去」。0.32s 时观众有两三帧看见两套字并排，
-     读作「画面没刷新」而不是「过场」。 */
-  const XFADE = { dur: 0.22 };
+     拿那一帧当 A 等于拿一张空画面去擦，读作「黑场过场」而不是「换镜」。
+
+     转场种类在 pv_trans.js（wipe/blinds/clock/iris/blocks/flash/push/zoom/slice/ink
+     十种，对齐 JIZURA 的 TRANS 分组）。编排稿写 `shot.trans = {k, ...params}`；
+     不写时按镜头号确定性推一个 —— 同一 t 两次渲染永远同一种转场。 */
+  const XFADE = { dur: 0.30 };
   let XC = null, XCFrom = -1, XCValid = false;
 
   function saveCross(src, shot) {
@@ -891,31 +901,33 @@
     /* 片头卡不参与：它是标题+档案行，被拦腰切开只会读作「排版炸了」，
        而且它和大字歌词交错出现，怎么看都像 bug。片头直接硬切进第一句。 */
     if (shot.i <= 1) return;
-    const q = PV.clamp((t - shot.t0) / XFADE.dur);
+    const td = shot.trans && PV.TRANS && PV.TRANS[shot.trans.k] ? shot.trans : null;
+    const dur = (td && td.dur != null) ? td.dur
+      : (PV.TRANS && td && PV.TRANS[td.k].dur) ? PV.TRANS[td.k].dur : XFADE.dur;
+    const q = PV.clamp((t - shot.t0) / Math.max(0.08, dur));
     if (q >= 1) return;
-    /* 快起慢收：inOutCubic 前 6% 几乎不动，等于切镜后先「卡」一下再擦。 */
-    const e = 1 - Math.pow(1 - q, 2.2), W = PV.W, H = PV.H;
-    /* 只用左右两个方向：横切会把一行字拦腰截断（竖排/大标题尤其明显），
-       而且横切时保留下来的上半屏经常正好是上一句的标题行。 */
-    const dir = (shot.i % 2) ? 0 : 2;
-    const lw = Math.max(2.5, W * 0.0032);
-    ctx.save();
-    ctx.beginPath();
-    if (dir === 0) ctx.rect(0, 0, W * (1 - e), H);
-    else ctx.rect(W * e, 0, W * (1 - e), H);
-    ctx.clip();
-    ctx.drawImage(XC, 0, 0, W, H);
-    ctx.restore();
-
-    /* 前沿的一道光：没有它，擦除读作「方块滑过」；有了它，读作「一道光扫过去」 */
-    if (q > 0.02 && q < 0.98) {
-      ctx.save();
-      ctx.globalAlpha = 0.55 * Math.sin(Math.PI * q);
-      ctx.fillStyle = PV.rgba((shot._S || ST.S).accentRGB, 1);
-      if (dir === 0) ctx.fillRect(W * (1 - e) - lw / 2, 0, lw, H);
-      else ctx.fillRect(W * e - lw / 2, 0, lw, H);
-      ctx.restore();
+    /* 参数：derive 按镜头号推一套确定性默认值做基底，编排稿显式参数再覆盖它。
+       早先只有「完全没写 trans」才走 derive —— 于是编排稿写 {k:'wipe'} 时
+       dir/n/seed 全是 undefined，落回硬编码默认值（每次擦除都同一方向）。 */
+    let par;
+    if (td) {
+      par = (PV.TRANS && PV.TRANS.derive) ? PV.TRANS.derive(td.k, shot) : { k: td.k };
+      for (const kk in td) if (td[kk] != null) par[kk] = td[kk];
+    } else {
+      const pool = PV.TRANS ? PV.TRANS.ORDER : ['wipe'];
+      const kk = pool[(shot.i * 3 + 1) % pool.length];
+      par = (PV.TRANS && PV.TRANS.derive) ? PV.TRANS.derive(kk, shot) : { k: kk };
     }
+    const fn = PV.TRANS && PV.TRANS[par.k];
+    if (!fn || !fn.draw) return;
+    const S = shot._S || ST.S;
+    fn.draw(ctx, XC, q, {
+      W: PV.W, H: PV.H, S,
+      accent: rgba(S.accentRGB, 1),
+      seed: par.seed != null ? par.seed : ((shot.i | 0) * 2654435761) >>> 0,
+      dir: par.dir, n: par.n, nx: par.nx, ny: par.ny,
+      x: par.x, y: par.y, a0: par.a0, spin: par.spin, flashCol: par.flashCol,
+    });
   }
   PV.crossFade = crossFade;
 
@@ -964,6 +976,9 @@
     ST.koma = opt.koma != null ? opt.koma : (meta && meta.koma != null ? meta.koma : 12);
     ST.dur = opt.dur;
     ST.S = buildStyle(opt.storyboard.palette || {}, ST.dpr);
+    /* 绿幕导出（JIZURA 的 keyBg）：job.meta.keyBg = 'green'|'black'|'white'。
+       单镜头也能用 shot.keyBg 覆写（演示片里混一段色键素材就是这么做的）。 */
+    ST.keyBg = opt.keyBg || (opt.storyboard.meta && opt.storyboard.meta.keyBg) || null;
 
     const live = opt.live || {};
     if (live.head) loadSeq('head', live.head);
