@@ -601,6 +601,13 @@ def _fig_foot(fig):
     if m in ("disc", "duo"):
         r = int(fig.get("r", 215) * sc)
         return 2 * r + 40, 2 * r + 40, False
+    if m == "crop":
+        # 半边出画：占版面的只有**露出来的那一半**，不是整块。
+        # 按整块宽让位会白留一大片 —— 实测 line 46 的框只露到 333px，
+        # 版心却从 821 起排，中间空 488px（缩略图上读作「这块版面没排完」）。
+        # 0.54 = 1 - 0.46（placeFigure 里 crop 的出画比例）。
+        return int(int(fig.get("h", 620) * sc * fig.get("wRatio", 0.752)) * 0.54) + 24, \
+            int(fig.get("h", 620) * sc), False
     return (int(fig.get("h", 620) * sc * fig.get("wRatio", 0.752)) + 24,
             int(fig.get("h", 620) * sc), False)
 
@@ -634,10 +641,17 @@ def _dawn_layout(spec, fig=None):
         else:
             x = 0.075
             aw = round(max(0.30, 0.94 - frac - 0.075), 3)
-        # 版心越窄，字越小：长句在 0.40 的栏里还撑 135px 会挤成五行的「字幕块」
-        hk = 0.125 if aw >= 0.55 else (0.112 if aw >= 0.45 else 0.102)
+        # 字号：先按句长给「无人物时该有的字号」，再被栏宽压住。
+        # 早先这里写死 0.125 / 0.112 / 0.102 —— 于是六段人物镜里最长的句子
+        # （"It's so beautiful,it makes you wanna cry"，40 字符）只有 0.102H，
+        # 与相邻无人物镜的 0.168H 并排看，像从另一首歌里剪进来的。
+        nch = len(spec.get("text") or "")
+        base = 0.200 if nch <= 16 else (0.168 if nch <= 24 else
+                                        (0.140 if nch <= 32 else 0.118))
+        # 栏宽每多 0.10 才允许长一档，最多到 base
+        hk = min(base, 0.118 + max(0.0, aw - 0.40) * 0.34)
         return {"k": "block", "face": face, "x": x, "availW": aw,
-                "cy": 0.47, "hK": hk, "lead": 1.16, "maxRows": 3}
+                "cy": 0.47, "hK": round(hk, 3), "lead": 1.16, "maxRows": 3}
     nw = len((spec.get("text") or "").split())
     # scaleSteps 是 bleed=true（不过安全网），词多时堆叠总高会顶出画外：
     # 8 词 × 0.17H 起步 ≈ 1.03H，首词直接被裁（实测桥段 t=127）。
@@ -654,6 +668,11 @@ def _dawn_layout(spec, fig=None):
     return {"k": layk, "face": face}
 
 
+# ★ LEGACY（2026-10-30）：这张表已**不再被任何代码引用**，保留只作形态参数参考。
+#   现行方案是下面的 LIVE_SPANS（六段 / 16.3%）。为什么废弃：29 处占了 63% 的句镜，
+#   观感上她从「被看见」降级成「贴纸底纹」，而且每挂一处就把版心挤窄一次。
+#   要恢复密排（例如做纯人物向的短切片），把 LIVE_SPANS 换回这张表即可 —— 参数都还在。
+#
 # 1027 演唱原视频的「入画面」节点（2026-10-29 三版：扩容 + 换画法）。
 # ★ 一律 layer="avoid"：图先画、字后画 ⇒ 字永远在图之上；侧位面板还会按文字
 #   bbox 避让选位（placeFigure），版面层再把版心挤到没图的那一侧（_dawn_layout）。
@@ -673,7 +692,7 @@ def _dawn_layout(spec, fig=None):
 # 在 band/strip 里是顶边（沿用旧语义）。
 # ★ 静态 PNG 立绘（photoCircle/Square/Sticker/Strip）已整套移除：
 #   固定坐标必然压字，抠图贴纸的质感也与晨光绘本语法不合。原视频入框才是正解。
-DAWN_LIVE = {
+DAWN_LIVE_DENSE_LEGACY = {
     # ==================== V1 晨醒 ====================
     # 0：37 字符长句 → 纵向渐隐底景（上半是纸，下半是她）。比横条稳：
     #    横条把脸切成一条缝，内容取决于那一秒她的姿势，十次有三次读作「切坏了」。
@@ -782,6 +801,54 @@ DAWN_LIVE = {
              dt=0.9, fy=0.30, a=0.93, edge="hard",
              reveal={"k": "fade", "dur": 1.0}, out=1.0,
              zoom0=1.02, zoom1=0.10, motion=0.9, ph=0.84),
+}
+
+
+# ==================== 直播画面入画「叙事表」（2026-10-30 v2）====================
+# 上一版 DAWN_LIVE 挂了 29 处：46 个句镜里 63% 都有人。密到「每镜一个大头贴」之后，
+# 她从「被看见」降级成「贴纸底纹」，而且每个镜头的版心都被挤窄、长句被迫缩成小字。
+# 这一版收成**六段**（37.9s / 全片 16.3%），一次单向的接近 —— 距离越来越近，
+# 框越来越不可忽略，每次出现都比上一次更「在场」：
+#
+#   ① 23.4s V1 末   disc 圆窗（最小）        第一次看见她，像纸上戳开一个孔
+#   ② 50.4s C1 末   arch 拱窗（拉开）        窗有了建筑感，她走进画面
+#   ③ 91.9s C2 起   split 竖幅分屏           占住右手一侧，纸变成两栏
+#   ④ 146.6s Br     band 竖幅 + 角标         桥段最高点，最近的一次对视
+#   ⑤ 171.0s FC     duo 双圆（此刻/片刻前）  同一口气的前后两格
+#   ⑥ 208.0s 末句   crop 半边出画（左侧）    「don't you let it pass you by」——
+#                                            她被画框切掉一半，正是挽留的形状
+#
+# 左右六次交替（r l r l r l）：连起来读是「视线在她与纸之间来回」；
+# 全放同一侧的话，六次出现会读成同一个模板换六句话。
+#
+# win=(成片起点秒, 时长秒)：抽片窗口，前后各留 ~2s —— reveal/out 要走完，
+# getFrame 还有 ±0.25s 的缺帧回落半径。**时间窗只在这里定义一次**：
+# tools/pv_live.py 照它抽素材，导演层照它挂 fig 并推 tOff，两边不会各自漂。
+LIVE_SPANS = {
+    4: dict(mode="disc", seq="s1", layer="avoid", side="r", r=200, y=0.42,
+            a=0.94, paper=1.0, ph=0.12,
+            reveal={"k": "grow", "dur": 0.55}, out=0.55,
+            zoom0=1.06, zoom1=0.10, motion=1.0, win=(21.41, 9.89)),
+    10: dict(mode="arch", seq="s2", layer="avoid", side="l", h=620, wRatio=0.66,
+             y=0.46, a=0.93, edge="hard", paper=0.95, ph=0.37,
+             reveal={"k": "wipe", "dir": "L", "dur": 0.55}, out=0.55,
+             zoom0=1.05, zoom1=0.09, motion=1.0, win=(48.39, 9.50)),
+    18: dict(mode="split", seq="s3", layer="avoid", side="r", wf=0.30, hf=1.06,
+             fy=0.30, a=0.94, edge="hard", paper=0.82, ph=0.61,
+             reveal={"k": "wipe", "dir": "R", "dur": 0.60}, out=0.70,
+             zoom0=1.03, zoom1=0.09, motion=0.9, win=(89.88, 10.75)),
+    31: dict(mode="band", seq="s4", layer="avoid", side="l", h=760, y=0.13,
+             a=0.94, edge="hard", tick=True, fy=0.26, paper=0.90, ph=0.83,
+             reveal={"k": "grow", "dur": 0.50}, out=0.60,
+             zoom0=1.05, zoom1=0.08, motion=0.9, win=(144.62, 10.79)),
+    37: dict(mode="duo", seq="s5", layer="avoid", side="r", r=196, y=0.38,
+             a=0.93, paper=1.0, ph=0.28,
+             reveal={"k": "grow", "dur": 0.50}, out=0.55,
+             zoom0=1.06, zoom1=0.08, motion=1.0, win=(168.98, 9.63)),
+    46: dict(mode="crop", seq="s6", layer="avoid", side="l", h=820, y=0.09,
+             a=0.94, edge="hard", tick=True, fy=0.28, paper=0.92, ph=0.44,
+             reveal={"k": "wipe", "dir": "D", "dur": 0.70}, out=0.80,
+             zoom0=1.03, zoom1=0.10, motion=0.9, win=(206.00, 11.30)),
 }
 
 
@@ -1028,7 +1095,7 @@ def _pick_layout(text, base_k, rnd, prev_k, special):
     return base_k
 
 
-def dress_shots(shots, seed, has_live, lines=None):
+def dress_shots(shots, seed, lines=None):
     """按段落给每镜补置景，并对无人物镜头做版式轮转。原地修改并返回。"""
     import random as _random
     prev_k = None
@@ -1083,7 +1150,12 @@ def dress_shots(shots, seed, has_live, lines=None):
                 d["a"] = 0.18
             sh["decor"] = [d]
 
-        if not has_live and not sh.get("fig"):
+        if not sh.get("fig"):
+            # 判据只看**这一镜自己有没有图**，不看全局「这一版有没有开 live」。
+            # 早先写 `not has_live and not sh.get("fig")`：一旦启用直播画面，
+            # 46 个镜头全部跳过版式轮转与主字分级，退回映射表的 0.102H「小字幕」——
+            # 于是六段人物镜之外的那 40 镜，画面整体退回上一版之前的样子，
+            # 而且因为没人报错，会误以为是「加了人之后变丑了」。
             lay = dict(sh.get("layout") or {})
             base_k = lay.get("k") or "block"
             # 逐句文本不在 shot 里（shot 只存 line 下标），必须回 lines 取 ——
@@ -1124,6 +1196,21 @@ def dress_shots(shots, seed, has_live, lines=None):
                 sh["layout"] = cur
             prev_k = (sh.get("layout") or {}).get("k")
     return shots
+
+
+def _live_fig(i, a):
+    """第 i 句要不要放直播画面。空串 --live-json 时一律不放（抽卡测试用）。
+
+    tOff 是从 win 推出来的：分段抽的序列帧 0 对应成片 win.start 秒，
+    引擎按 (t + tOff) 索引，所以 tOff = -win.start。两边共用一个 win，
+    不会出现「抽了 9s、引擎却按 12s 取」这种静默错位。
+    """
+    if not getattr(a, "live_json", "") or i not in LIVE_SPANS:
+        return None
+    f = dict(LIVE_SPANS[i])
+    start, _dur = f.pop("win")
+    f["tOff"] = round(-start, 3)
+    return f
 
 
 def build_dawn_shots(a, lines, m, dur):
@@ -1294,14 +1381,14 @@ def build_dawn_shots(a, lines, m, dur):
         elif "hold" in img:
             energy = 0.62
 
+        fg = _live_fig(i, a)
         sh = {
             "i": len(shots), "t0": t0, "t1": t1,
             "line": i, "kind": "line",
             "tier": 1 if energy < 0.6 else (2 if energy < 0.8 else 3),
             "section": sec.get("name", ""),
             "energy": energy,
-            "layout": _dawn_layout(spec, (DAWN_LIVE.get(i)
-                                          if getattr(a, "live_json", "") else None)),
+            "layout": _dawn_layout(spec, fg),
             "type": {},
             "enter": ent, "hold": hold, "exit": xit,
             "treat": {"k": "solid"},
@@ -1309,10 +1396,10 @@ def build_dawn_shots(a, lines, m, dur):
             "bgl": bgl, "bg": [],
             "decor": decor_items(spec, i),
             "post": post, "cam": cam,
-            # 没有 live 序列时**不能**保留画框：DAWN_LIVE 会把版心挤到 0.42 宽、
-            # 右边留一块空白给一个不存在的人（实测 t=29.3 整块字挤在左上、右侧空一半）。
-            "fig": (dict(DAWN_LIVE[i]) if (i in DAWN_LIVE and getattr(a, "live_json", ""))
-                    else None),
+            # 没有 live 序列时**不能**保留画框：画框会把版心挤到 0.42 宽、右边
+            # 留一块空白给一个不存在的人（实测 t=29.3 整块字挤在左上、右侧空一半）。
+            # 反过来，挂了 fig 的镜头由 _dawn_layout 把字排到没图的一侧，两者必须同进同退。
+            "fig": fg,
             "sync": False, "wobble": wob,
             "unified": False,
             "special": sp,
@@ -1332,7 +1419,7 @@ def build_dawn_shots(a, lines, m, dur):
 
     # ---- 尾奏卡（字退去后只剩花瓣与署名）
     # 置景：每镜的最低配额 + 无人物时的版式轮转（见 dress_shots 头注）
-    dress_shots(shots, a.seed, bool(getattr(a, "live_json", "")), lines)
+    dress_shots(shots, a.seed, lines)
 
     shots.append({
         "i": len(shots), "t0": round(outro_t0, 3), "t1": round(dur, 3),
@@ -1392,8 +1479,13 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
                 d = next((c for c in cands if os.path.isdir(c)), cands[0])
             return dict(e, dir=d)
         live_desc = {"face": lj.get("face") or {"cx": 0.5, "cy": 0.5}}
-        for _k in ("head", "body", "wide"):
-            s = _seq(lj.get(_k))
+        # 序列名不再固定 head/body/wide：LIVE_SPANS 是六段各一条序列（s1..s6）。
+        # 写死三个名字的话，新表的六个 seq 一条都载不进去 —— 而且不报错，
+        # 画面只是「这一段没有人」，会被误判成素材没抽上。
+        for _k, _v in lj.items():
+            if _k in ("face", "cut_start") or not isinstance(_v, dict):
+                continue
+            s = _seq(_v)
             if s:
                 live_desc[_k] = s
 
@@ -1831,7 +1923,10 @@ def main():
     if a.live and os.path.exists(a.live):
         lj = json.load(open(a.live, encoding="utf-8"))
         live = {}
-        for k in ("head", "body", "wide"):
+        for k, _v in lj.items():
+            # 序列名由 live.json 决定（s1..s6），写死三档会一条都装不进去
+            if k in ("face", "cut_start") or not isinstance(_v, dict) or not _v.get("dir"):
+                continue
             if lj.get(k):
                 q = dict(lj[k])
                 q["dir"] = os.path.abspath(q["dir"]).replace("\\", "/")

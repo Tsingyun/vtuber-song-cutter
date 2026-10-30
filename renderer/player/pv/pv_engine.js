@@ -99,18 +99,22 @@
      （render_song.cjs 会等它，见那边的 await）。 */
   let _winKey = null, _winChain = Promise.resolve();
 
-  function spanOf(sh, name) {
+  /* 预载窗口。**必须带 tOff**：分段抽出来的序列，帧 0 对应的是某个中间时刻
+     （比如 21.41s），不是片子开头。窗口要按 (t + tOff) 换算 —— 漏了 tOff 时
+     不报错，只是窗口整体落在序列之外，表现为「这一段里她一直没出现」，
+     getFrame 静默返回 null，排查起来会一直怀疑素材没抽上。 */
+  function spanOf(sh, name, tOff) {
     const s = ST.seq[name];
     if (!s) return null;
-    return [Math.max(0, Math.floor((sh.t0 - 1.6) * s.fps)),
-      Math.min(s.n - 1, Math.ceil((sh.t1 + 0.9) * s.fps))];
+    const o = tOff || 0;
+    return [Math.max(0, Math.floor((sh.t0 + o - 1.6) * s.fps)),
+      Math.min(s.n - 1, Math.ceil((sh.t1 + o + 0.9) * s.fps))];
   }
 
   async function holdShot(sh) {
     const want = {};
     if (sh && sh.fig && sh.fig.seq && ST.seq[sh.fig.seq]) {
-      want[sh.fig.seq] = spanOf(sh, sh.fig.seq);
-      if (sh.fig.mode === 'duo' && ST.seq.head) want.head = spanOf(sh, 'head');
+      want[sh.fig.seq] = spanOf(sh, sh.fig.seq, sh.fig.tOff);
     }
     let n = 0, bytes = 0;
     for (const name of Object.keys(ST.seq)) {
@@ -413,6 +417,29 @@
     ctx.rect(x, y, w, h);
   }
 
+  /* 「印在纸上」而不是「贴上去」：直播画面是冷蓝粉、满饱和，纸是暖褐 ——
+     硬边并置时第一眼读到的是「贴纸」，脸再清楚也不进画面。
+     这里原地 multiply 一层纸色、再 screen 一层暖光，把色温拉回纸面。
+     为什么不用 figBitmap 的 tone（离屏 saturation）：它内部会把离屏尺寸压到
+     760px 再放大（figBitmap 第 355 行），band/crop 这种 1200px 的窗会重新采样
+     一遍，等于拿「色温统一」换「画面发糊」。原地叠色两个 fillRect 就够，
+     而且逐帧成本与窗面积无关（GPU 填充，不读源图）。
+     k=1 时约 -30% 饱和 + 暖高光；再高脸就发灰，再低看得出色温打架。 */
+  function tintPlate(ctx, fig, x, y, w, h, a, S) {
+    const k = fig.paper;
+    if (!k) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = clamp(a * 0.30 * k, 0, 1);
+    ctx.fillStyle = rgba(S.paperRGB, 1);
+    ctx.fillRect(x, y, w, h);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = clamp(a * 0.13 * k, 0, 1);
+    ctx.fillStyle = rgba(S.accentRGB, 1);
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+
   function drawFigure(ctx, fig, box, t, en, S, shot) {
     S = S || ST.S;
     const name = fig.seq || 'head';
@@ -512,6 +539,7 @@
       const D = r * 2 * 1.10;                    // 源图显示边长 = 直径×1.10（脸占 69%，边缘交给头发）
       if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, D, D, S, fig, zoom), x - D / 2, y - D / 2, D, D);
       else drawCover(ctx, im, x - D / 2, y - D / 2, D, D, zoom);
+      tintPlate(ctx, fig, x - r, y - r, r * 2, r * 2, a, S);
       /* 内缘暗角：贴图而不是现算径向渐变（逐帧极坐标渐变会引入 ±1 的抖动差） */
       ctx.drawImage(PV.fadeSprite('discVig', S.voidRGB, [[0, 0], [0.52, 0], [0.94, 0.16], [1, 0.58]], false),
         x - r, y - r, r * 2, r * 2);
@@ -569,6 +597,7 @@
       ctx.clip();
       if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, w, h, S, fig, zoom), x, y, w, h);
       else drawCoverF(ctx, im, x, y, w, h, zoom, fig.fy);
+      tintPlate(ctx, fig, x, y, w, h, a, S);
       /* 分屏内部再切两格：**默认不用**（RULES 80）。接缝落在眼睛高度时，
          上半闭眼、下半张嘴，读作「图被撕开」而不是两格。
          真要「两格」请用 duo（两个完整画框）。留着是因为将来若改成
@@ -1331,10 +1360,17 @@
     const live = (opt.live && Object.keys(opt.live).length)
       ? opt.live
       : ((opt.storyboard && opt.storyboard.meta && opt.storyboard.meta.live) || {});
-    if (live.head) loadSeq('head', live.head);
-    if (live.body) loadSeq('body', live.body);
-    if (live.wide) loadSeq('wide', live.wide);
+    /* 序列名由 live.json 决定（LIVE_SPANS 的 s1..s6），不再写死 head/body/wide。
+       写死时新格式一条都载不进去，而 getFrame 只是返回 null —— 六处该有人的地方
+       全空，渲染日志里一个字都看不出来，只能靠抽帧才发现。 */
+    let _nseq = 0;
+    for (const k of Object.keys(live)) {
+      if (k === 'face' || k === 'cut_start') continue;
+      const v = live[k];
+      if (v && typeof v === 'object' && v.dir) { loadSeq(k, v); _nseq++; }
+    }
     if (live.face) ST.face = live.face;
+    if (_nseq) ST.seqCount = _nseq;
 
 
     const ctx = opt.ctx;

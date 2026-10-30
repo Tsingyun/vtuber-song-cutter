@@ -34,8 +34,11 @@ const argOf = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0
   if (livePath && fs.existsSync(path.resolve(ROOT, livePath))) {
     const lj = JSON.parse(fs.readFileSync(path.resolve(ROOT, livePath), 'utf8'));
     live = {};
-    for (const k of ['head', 'body', 'wide']) {
-      if (lj[k]) live[k] = Object.assign({}, lj[k], { dir: path.resolve(ROOT, lj[k].dir).replace(/\\/g, '/') });
+    /* 序列名由 live.json 决定（LIVE_SPANS 的 s1..s6），不再写死 head/body/wide。
+       写死时新格式一条都装不进去，画面上「六处该有人的地方全空」而不报错。 */
+    for (const k of Object.keys(lj)) {
+      if (k === 'face' || k === 'cut_start' || !lj[k] || typeof lj[k] !== 'object') continue;
+      live[k] = Object.assign({}, lj[k], { dir: path.resolve(ROOT, lj[k].dir).replace(/\\/g, '/') });
     }
     if (lj.face) live.face = lj.face;
   }

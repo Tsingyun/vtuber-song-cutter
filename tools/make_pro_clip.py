@@ -110,7 +110,10 @@ def build_live(mode, d):
     with open(jp, encoding="utf-8") as f:
         info = json.load(f)
     cfg = {"mode": mode, "t0": 0.0, "face": info.get("face") or {"cx": .5, "cy": .5}}
-    for k in ("head", "body", "wide"):
+    for k, _v in info.items():
+        # 序列名由 live.json 决定（s1..s6），不再写死 head/body/wide
+        if k in ("face", "cut_start") or not isinstance(_v, dict) or not _v.get("dir"):
+            continue
         s = info.get(k)
         if not s:
             continue

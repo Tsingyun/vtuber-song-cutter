@@ -223,10 +223,17 @@ def main():
         with open(a.live_json, encoding="utf-8") as f:
             lj = json.load(f)
         live = {}
-        for k in ("head", "body", "wide"):
-            if lj.get(k):
-                d = lj[k].get("dir") or ""
-                live[k] = dict(lj[k], dir=d.replace("\\", "/"))
+        # 序列名由 live.json 决定（LIVE_SPANS 的 s1..s6），不再写死三档 ——
+        # 写死时新格式一条都传不进去，六处该有人的镜头全空，且不报错。
+        # dir 统一转绝对路径：引擎拼的是 'file:///' + dir，相对路径在
+        # file:// 协议下解析到盘符根，不会解析到仓库目录（静默取不到图）。
+        for k, v in lj.items():
+            if k in ("face", "cut_start") or not isinstance(v, dict) or not v.get("dir"):
+                continue
+            d = v["dir"].replace("\\", "/")
+            if not os.path.isabs(d):
+                d = os.path.join(ROOT, d).replace("\\", "/")
+            live[k] = dict(v, dir=d)
         if lj.get("face"):
             live["face"] = lj["face"]
         job["live"] = live or None

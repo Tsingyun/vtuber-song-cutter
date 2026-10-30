@@ -87,7 +87,10 @@ def main():
     if a.live:
         lj = json.load(open(os.path.join(ROOT, a.live), encoding="utf-8"))
         live = {}
-        for k in ("head", "body", "wide"):
+        for k, _v in lj.items():
+            # 序列名由 live.json 决定（s1..s6），写死三档会一条都装不进去
+            if k in ("face", "cut_start") or not isinstance(_v, dict) or not _v.get("dir"):
+                continue
             if lj.get(k):
                 d = lj[k]["dir"].replace("\\", "/")
                 if not os.path.isabs(d):

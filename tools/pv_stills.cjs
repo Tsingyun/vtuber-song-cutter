@@ -23,8 +23,12 @@ const argOf = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0
   if (livePath && fs.existsSync(path.resolve(ROOT, livePath))) {
     const lj = JSON.parse(fs.readFileSync(path.resolve(ROOT, livePath), 'utf8'));
     live = {};
-    for (const k of ['head', 'body', 'wide']) {
-      if (lj[k]) live[k] = Object.assign({}, lj[k], { dir: path.resolve(ROOT, lj[k].dir).replace(/\\/g, '/') });
+    /* 序列名不再是固定的 head/body/wide：LIVE_SPANS 是六段各一条序列（s1..s6）。
+       写死三个名字时，传入新格式的 live.json 会得到「一个序列都没装」，
+       而且不报错 —— 表现为「六处该有人的地方全是空版面」。 */
+    for (const k of Object.keys(lj)) {
+      if (k === 'face' || k === 'cut_start' || !lj[k] || typeof lj[k] !== 'object') continue;
+      live[k] = Object.assign({}, lj[k], { dir: path.resolve(ROOT, lj[k].dir).replace(/\\/g, '/') });
     }
     if (lj.face) live.face = lj.face;
   }
