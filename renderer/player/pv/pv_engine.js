@@ -313,11 +313,15 @@
     g.fillStyle = '#fff'; g.fillRect(0, 0, N, N);
     g.globalCompositeOperation = 'destination-out';
     const w = Math.max(1, Math.round(N * k));
+    /* 每条边的渐变必须**沿着擦除方向**：左/右是横的，上/下是竖的。
+       早先左/右写成了 (0,0)→(0,N)（竖向），于是左右两侧只擦掉角、没擦边 ——
+       destination-in 之后仍留着一条直边，soft 模式因此永远「有框」。
+       实测：a=0.05 时整张图几乎消失，但仍能看见一个矩形残影，就是这个。 */
     const edges = [
-      [0, 0, w, N, 0, 0, 0, N],       // 左
-      [N - w, 0, w, N, N, 0, N, N],   // 右
-      [0, 0, N, w, 0, 0, N, 0],       // 上
-      [0, N - w, N, w, 0, N, N, N],   // 下
+      [0, 0, w, N, 0, 0, w, 0],             // 左：白→透，横向
+      [N - w, 0, w, N, N, 0, N - w, 0],     // 右：白→透，横向（向内）
+      [0, 0, N, w, 0, 0, 0, w],             // 上：纵向
+      [0, N - w, N, w, 0, N, 0, N - w],     // 下：纵向（向内）
     ];
     for (const [x, y, ww, hh, gx0, gy0, gx1, gy1] of edges) {
       const lg = g.createLinearGradient(gx0, gy0, gx1, gy1);
@@ -361,6 +365,10 @@
     const o = PV.offscreen('figTone', ow, oh, 1);
     drawCoverF(o.ctx, im, 0, 0, ow, oh, zoom, fig.fy);
     applyTone(o.ctx, ow, oh, S, fig);
+    /* 有羽化的图，色温要叠在**羽化之前**：羽化之后再叠一块纸色矩形，
+       那块矩形的直角会变成一条硬边 —— soft 模式因此长出一条「看不见的框」。
+       叠在这里，边缘仍由遮罩决定，色温也跟着一起化开。 */
+    if (fig.feather && fig.paper) tintPlate(o.ctx, fig, 0, 0, ow, oh, 1, S);
     if (fig.feather) {
       // destination-in：只保留遮罩里的部分（遮罩中心实、边缘透）
       o.ctx.globalCompositeOperation = 'destination-in';
@@ -506,6 +514,10 @@
            源本来就是 960×540 的「失焦现场」，离屏这一道不会额外损失清晰度。 */
         const o = PV.offscreen('figVeil', PV.W, PV.H, 1);
         drawCoverF(o.ctx, im, 0, 0, PV.W, PV.H, zoom, fig.fy);
+        /* 色温：满幅淡底同样要压纸色。源在 ffmpeg 侧已降到 s=0.42，但仍是冷蓝，
+           不压的话整块纸会被拉冷，字看起来像浮在视频上而不是纸里。
+           **必须在离屏里叠**：画到主 ctx 上会连没有图的那半边纸一起压暗（veil 之后透明区）。 */
+        tintPlate(o.ctx, fig, 0, 0, PV.W, PV.H, 1, S);
         o.ctx.globalCompositeOperation = 'destination-in';
         o.ctx.drawImage(veilSprite(fig.veilK), 0, 0, PV.W, PV.H);
         o.ctx.globalCompositeOperation = 'source-over';
@@ -593,11 +605,15 @@
           ctx.clip();
         }
       }
-      panelPath(ctx, geo, 0);
-      ctx.clip();
+      /* soft = 「没有框的一个人」：它存在于纸里，不该有一条边。
+         所以不裁形状、不描边、不压底 —— 边缘完全交给羽化遮罩。
+         原来这里对所有 panel 一视同仁地 panelPath+clip，于是 soft 也长出一条
+         圆角硬边（还带一道 1.4px 线），「无框」名存实亡。 */
+      const isSoft = box.mode === 'soft';
+      if (!isSoft) { panelPath(ctx, geo, 0); ctx.clip(); }
       if (fig.tone || fig.feather) ctx.drawImage(figBitmap(im, w, h, S, fig, zoom), x, y, w, h);
       else drawCoverF(ctx, im, x, y, w, h, zoom, fig.fy);
-      tintPlate(ctx, fig, x, y, w, h, a, S);
+      if (!isSoft) tintPlate(ctx, fig, x, y, w, h, a, S);
       /* 分屏内部再切两格：**默认不用**（RULES 80）。接缝落在眼睛高度时，
          上半闭眼、下半张嘴，读作「图被撕开」而不是两格。
          真要「两格」请用 duo（两个完整画框）。留着是因为将来若改成
@@ -621,13 +637,13 @@
       /* 底部压暗：只在 55%~100% 这一段渐变，用 1×256 的竖直贴图拉伸。
          平涂底上不要这层 —— 它会把下缘糊成一片脏灰，和「硬边印刷图」的语法相反。
          拱窗/胶囊/圆角不压暗：它们的下缘是形状的一部分，压暗会读成污渍。 */
-      if (!S.flat && box.mode !== 'strip' && h > 240) {
+      if (!S.flat && box.mode !== 'strip' && !isSoft && h > 240) {
         ctx.drawImage(PV.fadeSprite('bandVig', S.voidRGB, [[0, 0], [1, 0.55]], true),
           x, y + h * 0.55, w, h * 0.45);
       }
       ctx.restore();
       /* 边框：平涂底 2px 实线（切好的版面元素），绘本底一道 1.4px 细线 */
-      if (fig.edge !== 'none') {
+      if (fig.edge !== 'none' && !isSoft) {
         ctx.save();
         ctx.globalAlpha = clamp(a * (S.flat ? 0.62 : 0.30), 0, 1);
         ctx.strokeStyle = S.ink;

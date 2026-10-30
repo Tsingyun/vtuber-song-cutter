@@ -50,9 +50,15 @@ def run(cmd):
 def one(span_idx, fig, src, cut_start, out_root, force):
     name = fig["seq"]                       # s1..s6
     mode = fig["mode"]
-    # 抽哪种序列由画法决定：小窗（圆/拱/双圆）要头的方形近景，
-    # 竖幅族（band/crop/split）要 3:4 半身。抽错的话圆窗里会出现一条腰。
-    seqk = "body" if mode in ("band", "crop", "split", "slab", "soft", "ghost") else "head"
+    # 抽哪种序列由画法决定：
+    #   wash 满幅淡底 → wide（16:9 整幅 960×540，ffmpeg 侧已降到 s=0.42；
+    #        用 720 方图铺 1920 会糊成一块色斑）
+    #   竖幅族（band/crop/split/soft/ghost/slab）→ body（3:4 半身）
+    #   其余（disc/duo/arch/pill）→ head（方形头窗）
+    # 抽错不会报错，只是圆窗里出现一条腰、淡底里是一张拉伸的脸。
+    seqk = ("wide" if mode == "wash" else
+            "body" if mode in ("band", "crop", "split", "slab", "soft", "ghost")
+            else "head")
     start, dur = fig["win"]
     out = os.path.join(out_root, name)
     jp = os.path.join(out, "live.json")
@@ -74,6 +80,7 @@ def one(span_idx, fig, src, cut_start, out_root, force):
            "--head-fps", "30", "--body-fps", "30",
            "--head-x", str(HEAD["x"]), "--head-y", str(HEAD["y"]),
            "--head-s", str(HEAD["s"]), "--head-out", str(HEAD["s"]),
+           "--wide-fps", "24",
            "--body-x", str(BODY["x"]), "--body-y", str(BODY["y"]),
            "--body-w", str(BODY["w"]), "--body-h", str(BODY["h"]),
            "--face-x", str(FACE["x"]), "--face-y", str(FACE["y"])]

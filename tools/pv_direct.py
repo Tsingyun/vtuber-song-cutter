@@ -564,6 +564,34 @@ D_TRANS_DUR = {"wipe": 0.42, "ink": 0.48, "flash": 0.34, "iris": 0.44, "push": 0
                "zoom": 0.40, "dissolve": 0.58, "grad": 0.50, "mask": 0.46}
 
 
+def _check_live_spans(shots):
+    """LIVE_SPANS 的键是**句号**（0 基），不是镜头号 —— 片头占掉 shot 0，
+    所以 shot = line + 1。索引错一位不会报任何错，只会让每一处人物晚一个镜头
+    出现：抽片窗口还落在序列内，画面正常渲染，只是「该有人的那句没有」。
+    2026-10-30 实测整条片子 14 处全部偏移一格，靠肉眼看抽帧才发现。
+
+    判据用**时间**反查而不是用键反查：约定「抽片窗口 = 镜头起点前 2.0s」，
+    这条约定本身写在每个 win 里，所以它是可验证的。"""
+    bad, n = [], 0
+    for sh in shots:
+        f = sh.get("fig")
+        if not f:
+            continue
+        n += 1
+        # fig 里 win 已被 _live_fig pop 掉（只留 tOff = -win.start），
+        # 所以反查用 t0 + tOff = win.start，它应当等于镜头起点前 2.0s。
+        st = sh["t0"] + float(f.get("tOff") or 0)
+        if abs(st - 2.0) > 0.35:
+            bad.append("shot %d t0=%.2f 窗口起点=%.2f（应为 t0-2.0）"
+                       % (sh["i"], sh["t0"], st))
+    if bad:
+        raise SystemExit("[live] 挂点与镜头时间对不上（键错位？）：\n  " + "\n  ".join(bad))
+    if n != len(LIVE_SPANS):
+        raise SystemExit("[live] 只挂上 %d 处，LIVE_SPANS 有 %d 处"
+                         "（某段的 seq 没在 live.json 里？）" % (n, len(LIVE_SPANS)))
+    print("[live] %d 处人物挂点，均与镜头起点对齐（win = t0 - 2.0s）" % n)
+
+
 def _dawn_face(spec):
     """字重/字族：正文 Nunito，情感短句 Fraunces 斜体，weight:max 上 Nunito 最粗。"""
     img = set(spec.get("img") or [])
@@ -650,8 +678,12 @@ def _dawn_layout(spec, fig=None):
                                         (0.140 if nch <= 32 else 0.118))
         # 栏宽每多 0.10 才允许长一档，最多到 base
         hk = min(base, 0.118 + max(0.0, aw - 0.40) * 0.34)
+        # 版心纵向也错开：14 个有人镜头（32.6%）若都用 cy=0.47，连起来看就是
+        # 「同一块版换了 14 句」。与无人物镜的三档（0.345/0.455/0.575）同源，
+        # 另外允许每段单独给 cy（斜向构图：图在一侧偏上，字在另一侧偏下）。
+        cy = float(fig.get("cy") or 0.47)
         return {"k": "block", "face": face, "x": x, "availW": aw,
-                "cy": 0.47, "hK": round(hk, 3), "lead": 1.16, "maxRows": 3}
+                "cy": cy, "hK": round(hk, 3), "lead": 1.16, "maxRows": 3}
     nw = len((spec.get("text") or "").split())
     # scaleSteps 是 bleed=true（不过安全网），词多时堆叠总高会顶出画外：
     # 8 词 × 0.17H 起步 ≈ 1.03H，首词直接被裁（实测桥段 t=127）。
@@ -825,30 +857,90 @@ DAWN_LIVE_DENSE_LEGACY = {
 # getFrame 还有 ±0.25s 的缺帧回落半径。**时间窗只在这里定义一次**：
 # tools/pv_live.py 照它抽素材，导演层照它挂 fig 并推 tOff，两边不会各自漂。
 LIVE_SPANS = {
-    4: dict(mode="disc", seq="s1", layer="avoid", side="r", r=200, y=0.42,
-            a=0.94, paper=1.0, ph=0.12,
-            reveal={"k": "grow", "dur": 0.55}, out=0.55,
-            zoom0=1.06, zoom1=0.10, motion=1.0, win=(21.41, 9.89)),
-    10: dict(mode="arch", seq="s2", layer="avoid", side="l", h=620, wRatio=0.66,
+    # 十四段 / 76.6s / 33.1%。比初版（六段 16.3%）密一倍 —— 这条片子卖的就是
+    # 「直播演唱的切片」，人只出现六次会读成「配图」，不是「现场」。
+    # 但密度不能靠「每句都贴一张」堆：那样她会退回成贴纸底纹（旧 DAWN_LIVE 的教训，
+    # 29 处 / 63%）。所以按**力度**分四档，密度靠力度变化撑开：
+    #   wash 满幅淡底（字直接压在她身上，不占版面）
+    #   soft 无框羽化（化进纸里，只有影子没有人框）
+    #   panel 主窗（disc/arch/pill/band/split/crop，明确的一扇窗）
+    #   flash 短闪（1.5~2.6s 的小圆/横条，只够看清一眼）
+    # 节奏：每 15s 左右一次，力度在 wash → 主窗 → 短闪之间来回，不出现
+    # 「连续两次同一形态同一侧」。
+    #
+    # ---------------- V1「醒」：先只在纸下面，然后露一个圆 ----------------
+    1:  dict(mode="wash", seq="s1", layer="avoid", veilK=0.78, a=0.46, lift=0.20,
+             fy=0.46, paper=0.6, ph=0.05,
+             reveal={"k": "fade", "dur": 1.10}, out=0.90,
+             zoom0=1.03, zoom1=0.07, motion=0.8, win=(9.72, 7.58)),
+    4:  dict(mode="disc", seq="s2", layer="avoid", side="r", r=200, y=0.42,
+             a=0.94, paper=1.0, ph=0.12,
+             reveal={"k": "grow", "dur": 0.55}, out=0.55,
+             zoom0=1.06, zoom1=0.10, motion=1.0, win=(21.41, 9.89)),
+    6:  dict(mode="pill", seq="s3", layer="avoid", side="l", w=640, h=404, y=0.43,
+             a=0.93, edge="hard", paper=0.95, fy=0.46, ph=0.20,
+             reveal={"k": "wipe", "dir": "L", "dur": 0.48}, out=0.50,
+             zoom0=1.05, zoom1=0.08, motion=1.0, win=(34.48, 8.17),
+            cy=0.56),
+    # ---------------- C1：窗有了建筑感 → 整条纸变成两栏 ----------------
+    10: dict(mode="arch", seq="s4", layer="avoid", side="r", h=620, wRatio=0.66,
              y=0.46, a=0.93, edge="hard", paper=0.95, ph=0.37,
-             reveal={"k": "wipe", "dir": "L", "dur": 0.55}, out=0.55,
+             reveal={"k": "grow", "dur": 0.55}, out=0.55,
              zoom0=1.05, zoom1=0.09, motion=1.0, win=(48.39, 9.50)),
-    18: dict(mode="split", seq="s3", layer="avoid", side="r", wf=0.30, hf=1.06,
+    12: dict(mode="split", seq="s5", layer="avoid", side="l", wf=0.30, hf=1.06,
              fy=0.30, a=0.94, edge="hard", paper=0.82, ph=0.61,
-             reveal={"k": "wipe", "dir": "R", "dur": 0.60}, out=0.70,
-             zoom0=1.03, zoom1=0.09, motion=0.9, win=(89.88, 10.75)),
-    31: dict(mode="band", seq="s4", layer="avoid", side="l", h=760, y=0.13,
+             reveal={"k": "wipe", "dir": "L", "dur": 0.60}, out=0.70,
+             zoom0=1.03, zoom1=0.09, motion=0.9, win=(57.96, 12.75),
+            cy=0.43),
+    # ---------------- V2：唯一一次没有框的，她化进纸里 ----------------
+    15: dict(mode="soft", seq="s6", layer="avoid", side="r", wf=0.40, hf=0.62,
+             y=0.46, a=0.56, feather=0.31, paper=1.0, ph=0.72,
+             reveal={"k": "fade", "dur": 0.85}, out=0.70,
+             zoom0=1.04, zoom1=0.08, motion=0.9, win=(75.78, 7.61),
+            cy=0.38),
+    # ---------------- C2：主力竖幅，回到「她在画面里」 ----------------
+    18: dict(mode="band", seq="s7", layer="avoid", side="l", h=700, y=0.15,
+             a=0.94, edge="hard", paper=0.90, fy=0.26, ph=0.30,
+             reveal={"k": "wipe", "dir": "L", "dur": 0.55}, out=0.60,
+             zoom0=1.04, zoom1=0.09, motion=0.9, win=(89.88, 10.75),
+            cy=0.6),
+    23: dict(mode="pill", seq="s8", layer="avoid", side="r", w=620, h=392, y=0.42,
+             a=0.93, edge="hard", paper=0.95, tick=True, fy=0.46, ph=0.44,
+             reveal={"k": "grow", "dur": 0.50}, out=0.55,
+             zoom0=1.06, zoom1=0.08, motion=1.0, win=(110.93, 10.48),
+            cy=0.545),
+    # ---------------- 桥段前：满幅淡底，字压在她身上 ----------------
+    28: dict(mode="wash", seq="s9", layer="avoid", veilK=0.72, a=0.52, lift=0.18,
+             fy=0.50, paper=0.6, ph=0.66,
+             reveal={"k": "fade", "dur": 0.90}, out=0.80,
+             zoom0=1.03, zoom1=0.09, motion=0.9, win=(131.00, 10.39)),
+    # ---------------- 副歌最高点：最近的一次对视 ----------------
+    31: dict(mode="band", seq="s10", layer="avoid", side="l", h=760, y=0.13,
              a=0.94, edge="hard", tick=True, fy=0.26, paper=0.90, ph=0.83,
              reveal={"k": "grow", "dur": 0.50}, out=0.60,
-             zoom0=1.05, zoom1=0.08, motion=0.9, win=(144.62, 10.79)),
-    37: dict(mode="duo", seq="s5", layer="avoid", side="r", r=196, y=0.38,
+             zoom0=1.05, zoom1=0.08, motion=0.9, win=(144.62, 10.79),
+            cy=0.58),
+    # ---------------- 最后一段副歌：一瞥 / 双圆 / 一瞥 / 半边 ----------------
+    34: dict(mode="disc", seq="s11", layer="avoid", side="r", r=178, y=0.40,
+             a=0.92, paper=1.0, ph=0.14,
+             reveal={"k": "grow", "dur": 0.38}, out=0.40,
+             zoom0=1.07, zoom1=0.06, motion=1.1, win=(159.81, 6.17),
+            cy=0.52),
+    37: dict(mode="duo", seq="s12", layer="avoid", side="l", r=196, y=0.38,
              a=0.93, paper=1.0, ph=0.28,
              reveal={"k": "grow", "dur": 0.50}, out=0.55,
-             zoom0=1.06, zoom1=0.08, motion=1.0, win=(168.98, 9.63)),
-    46: dict(mode="crop", seq="s6", layer="avoid", side="l", h=820, y=0.09,
+             zoom0=1.06, zoom1=0.08, motion=1.0, win=(168.98, 9.63),
+            cy=0.42),
+    43: dict(mode="pill", seq="s13", layer="avoid", side="r", w=600, h=380, y=0.45,
+             a=0.93, edge="hard", paper=0.95, fy=0.46, ph=0.58,
+             reveal={"k": "wipe", "dir": "R", "dur": 0.42}, out=0.45,
+             zoom0=1.06, zoom1=0.08, motion=1.1, win=(194.11, 6.61),
+            cy=0.545),
+    46: dict(mode="crop", seq="s14", layer="avoid", side="l", h=820, y=0.09,
              a=0.94, edge="hard", tick=True, fy=0.28, paper=0.92, ph=0.44,
              reveal={"k": "wipe", "dir": "D", "dur": 0.70}, out=0.80,
-             zoom0=1.03, zoom1=0.10, motion=0.9, win=(206.00, 11.30)),
+             zoom0=1.03, zoom1=0.10, motion=0.9, win=(206.00, 11.30),
+            cy=0.52),
 }
 
 
@@ -1520,6 +1612,9 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
     }
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(sb, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+    # ---- 闸门：挂点与镜头时间必须对得上
+    _check_live_spans(shots)
 
     # ---- 报告
     nl = sum(1 for s in shots if s["kind"] == "line")
