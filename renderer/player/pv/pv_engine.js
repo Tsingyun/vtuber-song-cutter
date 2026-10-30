@@ -974,7 +974,13 @@
        「上一瞬它真的在这个位置飞过」，而不是同一个字的轮廓副本
        （同帧复制两份只等于把字加粗，这正是早前 trail 的做法）。
        合成模式跟着底色走：亮底用 multiply，否则残影读作浮在纸上的一层白雾。 */
-    const chroma = (shot.chroma == null ? 0.7 : shot.chroma) * (S.ghost == null ? 1 : S.ghost);
+    /* 0.7 是 JIZURA 在深色平涂底上的值：深底上两趟色散读作「霓虹先到一步」。
+       换到浅色纸底之后，multiply 把两趟 ghost 压成深色，整行字就长出一圈
+       脏边（1:1 裁切下是「深棕字 + 橙外圈 + 浅外沿」的三层贴纸感）。
+       浅底（lum>0.55）走 0.45，深底保留 0.7 —— 色散是日系语汇，不该整个拿掉。 */
+    const _light = PV.lum(S.paperRGB) > 0.55;
+    const chroma = (shot.chroma == null ? (_light ? 0.45 : 0.7) : shot.chroma)
+      * (S.ghost == null ? 1 : S.ghost);
     if (chroma > 0.02 && S.ghostA && S.ghostB) {
       const u = PV.H / 1080;
       const mul = PV.lum(S.paperRGB) > 0.55 ? 'multiply' : 'source-over';

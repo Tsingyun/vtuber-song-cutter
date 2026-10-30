@@ -131,7 +131,15 @@
       /* 兼容旧字段：paper/ink 是上一版的名字，渲染层其余部分仍在用 */
       paper: s.bg, ink: s.fg, void: s.dim, paper2: s.dim,
       fonts: p.fonts, texture: p.texture, decor: p.decor, ghostK: p.ghost,
-      flat: 1, deep: lum(s.bg) < 0.42,
+      /* flat = 「铺纯色底，不画纸纹/渐变/暗角」。
+         写死 1 时 drawPaper 直接走 flatCanvas，于是整个片子只有一层纯色 +
+         alpha 0.045 的点阵 —— 逐帧亮度 p50=230 / p99=244，动态范围 14 级，
+         1:1 裁切下**一根纤维都看不到**。这是「大字贴在奶油纸上」的最后一块拼图。
+         flat 是 JIZURA 的「印刷品」语法（四角必须平），而手书 PV 的语法是
+         「一张有厚度、有落差的纸」，两者不能共存。默认走纸面；真要平涂
+         由编排稿 meta.flat 显式覆盖。 */
+      flat: 0,
+      deep: lum(s.bg) < 0.42,
       schemes: p.schemes.length,
     };
   };

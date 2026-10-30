@@ -828,43 +828,174 @@ def _lyr_sim(a, b):
 #     置景是让留白看起来有纸、有空气，不是把画面填满；
 #   · 有人的镜头（live 生效）只补光与活物，不动版心，避免和 placeFigure 打架。
 SEC_SCENE = {
-    "intro": dict(base=("watercolor", {"a": 0.16, "n": 4}),
-                  light=("sunrise", {"a": 0.20, "y": 0.78}),
-                  struct=("grid", {"a": 0.045, "step": 96}),
-                  life=("dust", {"a": 0.13})),
-    "V1": dict(base=("watercolor", {"a": 0.14, "n": 3}),
-               light=("windowLight", {"a": 0.13, "n": 2, "ang": -26}),
-               struct=("hatch", {"a": 0.040}),
-               life=("dust", {"a": 0.12})),
-    "C1": dict(base=("wash", {"a": 0.16, "n": 3, "col": "accent"}),
-               light=("rays", {"a": 0.12, "n": 3, "rot": -0.22}),
-               struct=("halftone", {"a": 0.050, "step": 14}),
-               life=("petal", {"a": 0.14, "n": 10})),
-    "V2": dict(base=("watercolor", {"a": 0.13, "n": 3}),
-               light=("windowLight", {"a": 0.12, "n": 2, "ang": 22}),
-               struct=("grid", {"a": 0.042, "step": 120}),
-               life=("dust", {"a": 0.11})),
-    "C2": dict(base=("wash", {"a": 0.15, "n": 3, "col": "accent"}),
-               light=("rays", {"a": 0.12, "n": 4, "rot": 0.18}),
-               struct=("halftone", {"a": 0.046, "step": 12}),
-               life=("petal", {"a": 0.15, "n": 12})),
-    "Br": dict(base=("wash", {"a": 0.12, "n": 2, "col": "ghost"}),
-               light=("arch", {"a": 0.16, "h": 760, "w": 520, "x": 0.5, "y": 0.52}),
-               struct=("topo", {"a": 0.050, "rings": 9, "rot": -0.12}),
-               life=("dust", {"a": 0.13})),
-    "FC": dict(base=("wash", {"a": 0.17, "n": 4, "col": "accent"}),
-               light=("sunrise", {"a": 0.18, "y": 0.80}),
-               struct=("halftone", {"a": 0.052, "step": 11}),
-               life=("petal", {"a": 0.15, "n": 14})),
-    "outro": dict(base=("watercolor", {"a": 0.15, "n": 4}),
-                  light=("sunrise", {"a": 0.14, "y": 0.90}),
-                  struct=("grid", {"a": 0.035, "step": 140}),
-                  life=("petal", {"a": 0.16, "n": 16})),
+    "intro": dict(base=("watercolor", {"a": 0.34, "n": 4}),
+                  light=("sunrise", {"a": 0.30, "y": 0.78}),
+                  struct=("grid", {"a": 0.130, "step": 96}),
+                  life=("dust", {"a": 0.20})),
+    "V1": dict(base=("watercolor", {"a": 0.30, "n": 3}),
+               light=("windowLight", {"a": 0.24, "n": 2, "ang": -26}),
+               struct=("hatch", {"a": 0.115}),
+               life=("dust", {"a": 0.19})),
+    "C1": dict(base=("wash", {"a": 0.38, "n": 3, "col": "accent"}),
+               light=("rays", {"a": 0.26, "n": 3, "rot": -0.22}),
+               struct=("halftone", {"a": 0.145, "step": 20}),
+               life=("petal", {"a": 0.22, "n": 10})),
+    "V2": dict(base=("watercolor", {"a": 0.29, "n": 3}),
+               light=("windowLight", {"a": 0.23, "n": 2, "ang": 22}),
+               struct=("grid", {"a": 0.120, "step": 120}),
+               life=("dust", {"a": 0.18})),
+    "C2": dict(base=("wash", {"a": 0.36, "n": 3, "col": "accent"}),
+               light=("rays", {"a": 0.26, "n": 4, "rot": 0.18}),
+               struct=("halftone", {"a": 0.140, "step": 18}),
+               life=("petal", {"a": 0.23, "n": 12})),
+    "Br": dict(base=("wash", {"a": 0.26, "n": 2, "col": "ghost"}),
+               light=("arch", {"a": 0.30, "h": 760, "w": 520, "x": 0.5, "y": 0.52}),
+               struct=("topo", {"a": 0.140, "rings": 9, "rot": -0.12}),
+               life=("dust", {"a": 0.20})),
+    "FC": dict(base=("wash", {"a": 0.40, "n": 4, "col": "accent"}),
+               light=("sunrise", {"a": 0.32, "y": 0.80}),
+               struct=("halftone", {"a": 0.155, "step": 16}),
+               life=("petal", {"a": 0.24, "n": 14})),
+    "outro": dict(base=("watercolor", {"a": 0.32, "n": 4}),
+                  light=("sunrise", {"a": 0.26, "y": 0.90}),
+                  struct=("grid", {"a": 0.110, "step": 140}),
+                  life=("petal", {"a": 0.22, "n": 16})),
 }
 # 「已有同类」判据：按 k 归类，避免同一类叠两层
 _K_BASE = {"watercolor", "wash", "mega", "panel"}
 _K_STRUCT = {"grid", "hatch", "halftone", "topo", "rings", "ink"}
 _K_LIGHT = {"sunrise", "windowLight", "arch", "rays", "halo", "leak"}
+
+# ---------------------------------------------------------------------------
+# 字后图形层（shot.bg）
+# ---------------------------------------------------------------------------
+# 引擎的绘制顺序：paper → bgl（背景）→ bg（字后装饰）→ 人物 → 字 → decor → post。
+# `shot.bg` 是**唯一能压在字下面、当版面骨架**的那一层。它一直是空的，
+# 于是 49 帧里 47 帧只有「一行字 + 一根发丝下划线」，12 帧接触表全部同构 ——
+# 不是字体或版式不行，是画面里没有笔。
+#
+# 这一层只放 stroke / 低 alpha 色块，全部按「版心之外」或「字行正下方」落位，
+# 保证不压歌词（RULES：歌词不得被任何画框遮挡）。
+_SHAPE_RECIPE = {
+    "intro": ["line", "circle", "marker"],
+    "V1":    ["line", "marker", "scrawl"],
+    "C1":    ["band", "circle", "line"],
+    "V2":    ["line", "scrawl", "marker"],
+    "C2":    ["band", "circle", "marker"],
+    "Br":    ["scrawl", "line"],
+    "FC":    ["band", "circle", "line", "marker"],
+    "outro": ["circle", "line", "scrawl"],
+}
+_DW, _DH = 1920.0, 1080.0          # 设计坐标系（PV.W / PV.H）
+
+
+def _mk_shape(kind, sh, rnd):
+    """造一个「字后」图形件。坐标一律 1920×1080 设计坐标。"""
+    lay = sh.get("layout") or {}
+    cy = float(lay.get("cy") or 0.47)
+    lx = float(lay.get("x") or 0.06)
+    aw = float(lay.get("availW") or 0.88)
+    seed = 1000 + int(sh.get("i", 0)) * 37 + rnd.randrange(97)
+    accent = rnd.random() < 0.45
+
+    if kind == "line":
+        # 手绘长线：**走向必须散开**。第一版全是 x0≈100→x1≈1830 的满幅横线，
+        # 12 帧里 8 帧都是「中间一行字 + 上方一根横线」——单看每帧不丑，
+        # 连起来就是同一张版换了字。三种走向按 3:2:5 分：
+        #   竖（贴边，当分割线） / 斜（一角到另一角） / 横（长短位置都随机）
+        r = rnd.random()
+        accent = rnd.random() < 0.45
+        seed2 = seed
+        if r < 0.30:
+            x = (_DW * (0.045 if rnd.random() < 0.5 else 0.955))
+            return {"k": "brush",
+                    "x0": round(x), "y0": round((0.05 + rnd.random() * 0.10) * _DH),
+                    "x1": round(x + (rnd.random() - 0.5) * 26),
+                    "y1": round((0.86 + rnd.random() * 0.09) * _DH),
+                    "bow": round((rnd.random() - 0.5) * 46),
+                    "w": round(13 + rnd.random() * 8), "wob": 2.0,
+                    "a": round(0.34 + rnd.random() * 0.22, 3),
+                    "grow": round(0.70 + rnd.random() * 0.50, 2),
+                    "seed": seed2, "col": ("accent" if accent else None)}
+        if r < 0.50:
+            flip = rnd.random() < 0.5
+            y0 = (0.10 + rnd.random() * 0.16) * _DH
+            y1 = (0.74 + rnd.random() * 0.16) * _DH
+            xa = (0.06 + rnd.random() * 0.14) * _DW
+            xb = (0.80 + rnd.random() * 0.13) * _DW
+            return {"k": "brush",
+                    "x0": round(xb if flip else xa), "y0": round(y0),
+                    "x1": round(xa if flip else xb), "y1": round(y1),
+                    "bow": round((rnd.random() - 0.5) * 90),
+                    "w": round(12 + rnd.random() * 9), "wob": 2.2,
+                    "a": round(0.30 + rnd.random() * 0.20, 3),
+                    "grow": round(0.85 + rnd.random() * 0.60, 2),
+                    "seed": seed2, "col": ("accent" if accent else None)}
+        up = cy <= 0.54
+        y = (0.150 + rnd.random() * 0.080) if up else (0.762 + rnd.random() * 0.080)
+        dy = (rnd.random() - 0.5) * 0.014
+        # 横向：长度 0.35~1.0 幅宽，起点随机 —— 不再每条都顶到两边
+        ln = 0.35 + rnd.random() * 0.65
+        x0 = (0.04 + rnd.random() * (1.0 - ln - 0.06)) * _DW
+        return {"k": "brush",
+                "x0": round(x0), "y0": round(y * _DH),
+                "x1": round(x0 + ln * _DW), "y1": round((y + dy) * _DH),
+                "bow": round((rnd.random() - 0.5) * 58),
+                "w": round(15 + rnd.random() * 9), "wob": 2.4,
+                "a": round(0.40 + rnd.random() * 0.24, 3),
+                "grow": round(0.55 + rnd.random() * 0.45, 2),
+                "seed": seed, "col": ("accent" if accent else None)}
+
+    if kind == "circle":
+        # 手画圈：圈在版心的对侧留白里（右上 / 左下），像「圈住了一个词」
+        right = rnd.random() < 0.5
+        cx = (0.845 if right else 0.155) * _DW + (rnd.random() - 0.5) * 70
+        cyy = (0.215 if cy > 0.5 else 0.795) * _DH + (rnd.random() - 0.5) * 60
+        return {"k": "circleLoose", "x": round(cx), "y": round(cyy),
+                "rx": round(150 + rnd.random() * 105),
+                "ry": round((150 + rnd.random() * 105) * 0.62),
+                "w": round(10 + rnd.random() * 6),
+                "a": round(0.40 + rnd.random() * 0.22, 3),
+                "grow": round(0.60 + rnd.random() * 0.50, 2),
+                "seed": seed, "col": ("accent" if accent else None)}
+
+    if kind == "marker":
+        # 马克笔痕：压在**字行正下方**当加粗下划线（不压字，安全）
+        h = round(38 + rnd.random() * 22)
+        return {"k": "marker",
+                "x": round(lx * _DW), "y": round((cy + 0.082) * _DH),
+                "w": round(aw * _DW * (0.55 + rnd.random() * 0.34)),
+                "h": h, "a": round(0.24 + rnd.random() * 0.14, 3),
+                "grow": round(0.40 + rnd.random() * 0.40, 2),
+                "seed": seed, "col": "accent"}
+
+    if kind == "band":
+        # 竖直色带：贴一侧边缘，给构图一条「硬边」
+        right = rnd.random() < 0.5
+        bw = round((0.055 + rnd.random() * 0.085) * _DW)
+        return {"k": "block",
+                "x": round((_DW - bw - 40) if right else 40),
+                "y": round((0.06 + rnd.random() * 0.10) * _DH),
+                "w": bw, "h": round((0.62 + rnd.random() * 0.28) * _DH),
+                "a": round(0.085 + rnd.random() * 0.075, 3),
+                "col": None}
+
+    if kind == "scrawl":
+        # 长波浪：贯穿画面的一根「画」，给最空的段压出层次。
+        # 必须落在**版心之外**的带子里：细线（w≈3、alpha≈0.2）穿字不会读作
+        # 层次，只会读作「画面脏了」。原来 ±0.15 的抖动半径在 cy=0.47 时
+        # 直接压到字行上（实测 y=536/1080，amp=88 能扫到 448~624）。
+        band = 1 if rnd.random() < 0.5 else -1
+        return {"k": "scrawl",
+                "y": round((cy + band * (0.245 + rnd.random() * 0.135)) * _DH),
+                "amp": round(44 + rnd.random() * 46),
+                "ph": round(rnd.random() * 6.28, 2),
+                "w": round(2.8 + rnd.random() * 2.0),
+                "a": round(0.16 + rnd.random() * 0.14, 3),
+                "grow": round(1.1 + rnd.random() * 0.9, 2),
+                "col": ("accent" if accent else None)}
+    return None
+
 
 
 def _pick_layout(text, base_k, rnd, prev_k, special):
@@ -923,6 +1054,24 @@ def dress_shots(shots, seed, has_live, lines=None):
             bgl.append(dict(d, k=k, a=round(d["a"] * (0.85 + 0.3 * rnd.random()), 3)))
         sh["bgl"] = bgl
 
+        # 字后图形层：引擎里 drawDecor(shot.bg) 排在字**之前**，
+        # 是唯一能压字当版面骨架的位置。这一层空着 = 只有字和渐变。
+        if not (sh.get("bg") or []):
+            pool = _SHAPE_RECIPE.get(sh.get("section", ""), _SHAPE_RECIPE["V1"])
+            picks = list(pool)
+            rnd.shuffle(picks)
+            n = 1 if rnd.random() < 0.42 else 2
+            shapes = []
+            for kd in picks[:n]:
+                one = _mk_shape(kd, sh, rnd)
+                if one:
+                    shapes.append(one)
+            # 出现次序错开：第二个迟一点「补画上去」，读作手在画而不是贴图
+            if len(shapes) == 2:
+                shapes[1]["at"] = round(0.25 + rnd.random() * 0.55, 2)
+                shapes[1]["fade"] = 0.3
+            sh["bg"] = shapes
+
         if not (sh.get("decor") or []):
             picks = ["cropMarks", "photoCorners", "stitchLines", "vrule", "brackets"]
             k = picks[rnd.randrange(len(picks))]
@@ -967,7 +1116,11 @@ def dress_shots(shots, seed, has_live, lines=None):
                 nc2 = len(_txt)
                 hk = 0.200 if nc2 <= 16 else (0.168 if nc2 <= 24 else
                                               (0.140 if nc2 <= 32 else 0.118))
-                cur = dict(cur, hK=hk, cy=0.47, availW=0.88, lead=1.12, maxRows=3)
+                # 版心纵向三档：26 镜全用 cy=0.47 时，连起来看是「同一块版换了字」。
+                # 手书 PV 的版面是**在画面里跳的**（贴上/居中/压低），
+                # 三档都在安全区（0.345~0.575，加半行高后仍在 0.70 以内）。
+                cyv = rnd.choice([0.345, 0.455, 0.575])
+                cur = dict(cur, hK=hk, cy=cyv, availW=0.88, lead=1.12, maxRows=3)
                 sh["layout"] = cur
             prev_k = (sh.get("layout") or {}).get("k")
     return shots

@@ -648,4 +648,201 @@
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
   };
+
+  /* ============================================================
+     手绘语言（P1-5）：把「笔」还给画面
+     ------------------------------------------------------------
+     接触表复盘（2026-10-30）：49 镜里 47 镜只有「一行字 + 一条发丝下划线」，
+     底色是 alpha≤0.20 的水彩 —— 这就是「大字贴在奶油纸上」的全部成因。
+     手书 PV 与排印海报的差别不在字体，在于**画面里有没有笔**：
+     圈住一个词、划一道红线、涂一块荧光、随手勾一根波浪。这些都是 stroke，
+     4K 下一次几十段，成本可忽略（实测 draw 段从 0.5ms → 0.9ms）。
+
+     grow：装饰不是「淡入」，是「一笔画过去」。st.phase 是本镜相对时刻，
+     给了 grow 就只画到第 k 段 —— 这才是手书的手感来源。
+     ============================================================ */
+
+  /* 笔锋剖面：起笔 0.42 → 行笔 1.0（偏后）→ 收笔出锋 0.10。
+     用 sin 的一次幂 + 端点线性收细，读起来像毛笔墨量在走。 */
+  const _tip = (t) => {
+    const body = Math.sin(Math.PI * Math.pow(t, 0.78));
+    const head = t < 0.10 ? 0.42 + 5.8 * t : 1;      // 起笔略顿
+    const tail = t > 0.86 ? (1 - t) / 0.14 : 1;      // 出锋
+    return body * (head < 1 ? head : 1) * tail;
+  };
+
+  /* 颜色解引用：编排稿里 col 只会是 'accent' / 'ink' / 具体色值 / null。
+     直接 `s.col || st.S.ink` 会把字符串 'accent' 原样塞给 strokeStyle，
+     浏览器静默忽略 ⇒ 用的是上一次的 strokeStyle（实测整条笔触消失）。 */
+  const _ink = (s, st, def) => {
+    if (s.col === 'accent') return rgba(st.S.accentRGB || [200, 90, 60], 1);
+    if (s.col === 'ink') return st.S.ink;
+    return s.col || def || st.S.ink;
+  };
+
+  /* 二次贝塞尔取点：控制点由 bow 决定，bow 为正向右弯 */
+  const _bez = (x0, y0, x1, y1, bow, t) => {
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1;
+    const cx = mx - (dy / L) * bow, cy = my + (dx / L) * bow;
+    const u = 1 - t;
+    return [u * u * x0 + 2 * u * t * cx + t * t * x1,
+            u * u * y0 + 2 * u * t * cy + t * t * y1];
+  };
+
+  /* 一条笔触。x0/y0→x1/y1，bow 弯曲量（px），w 最大线宽（px）。
+     wob：手抖幅度（px），按整条线固定相位，不做逐帧随机（确定性要求）。
+     分段画不同 lineWidth 来模拟笔锋 —— 单用 lineWidth 一条线是画不出粗细变化的，
+     而分段之间只要 lineCap=round 且段段重叠，4K 下看不出台阶。 */
+  D.brush = (ctx, s, st) => {
+    const x0 = s.x0, y0 = s.y0, x1 = s.x1, y1 = s.y1;
+    const bow = s.bow || 0, w = s.w == null ? 14 : s.w;
+    const a = s.a == null ? 0.75 : s.a;
+    const wob = s.wob == null ? 1.6 : s.wob;
+    const grow = s.grow == null ? 0 : s.grow;
+    const k = grow > 0 ? clamp((st.phase || 0) / grow, 0, 1) : 1;
+    if (k <= 0) return;
+    const L = Math.hypot(x1 - x0, y1 - y0);
+    const sd = (s.seed | 0) || 7;
+    const ph = (sd % 360) / 57.29578;
+    /* 笔触必须用**填充轮廓**而不是分段 stroke。
+       分段 stroke 靠每段不同的 lineWidth 模拟笔锋，段与段之间的台阶在 4K 上
+       会读成一排短竖线（实测第一版画出来是「拉链」/「毛毛虫」，整条线报废）。
+       正确做法：沿二次贝塞尔采 n 点，按法线方向各偏移半宽，正向走一遍左边界、
+       反向走一遍右边界，闭合成一个多边形一次 fill —— 粗细连续、边缘光滑，
+       而且只有一次 fill，比 n 次 stroke 还便宜。 */
+    const n = clamp(Math.round(L / 12), 12, 96);
+    const end = Math.max(2, Math.round(k * n));
+    // 左边界 / 右边界交替存放，最后逆序另一半
+    const pts = [];
+    for (let i = 0; i <= end; i++) {
+      const t = i / n;
+      const p = _bez(x0, y0, x1, y1, bow, t);
+      const q = _bez(x0, y0, x1, y1, bow, Math.min(1, t + 0.004));
+      const dx = q[0] - p[0], dy = q[1] - p[1];
+      const d = Math.hypot(dx, dy) || 1;
+      const nx = -dy / d, ny = dx / d;
+      const hw = w * _tip(t) * 0.5;
+      const wobY = Math.sin(ph + t * 5.1) * wob;      // 手抖：整条线一起摆
+      pts.push([p[0] + nx * hw, p[1] + ny * hw + wobY]);
+    }
+    const back = [];
+    for (let i = end; i >= 0; i--) {
+      const t = i / n;
+      const p = _bez(x0, y0, x1, y1, bow, t);
+      const q = _bez(x0, y0, x1, y1, bow, Math.min(1, t + 0.004));
+      const dx = q[0] - p[0], dy = q[1] - p[1];
+      const d = Math.hypot(dx, dy) || 1;
+      const nx = -dy / d, ny = dx / d;
+      const hw = w * _tip(t) * 0.5;
+      const wobY = Math.sin(ph + t * 5.1) * wob;
+      back.push([p[0] - nx * hw, p[1] - ny * hw + wobY]);
+    }
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = _ink(s, st);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    for (let i = 0; i < back.length; i++) ctx.lineTo(back[i][0], back[i][1]);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+
+  /* 手画圈：半径带噪声、首尾留缺口、末端出锋。用来「把某个词圈起来」——
+     手书 PV 里出现频率极高，而且比任何色块都更像人画的。 */
+  D.circleLoose = (ctx, s, st) => {
+    const cx = s.x == null ? PV.W * 0.5 : s.x;
+    const cy = s.y == null ? PV.H * 0.5 : s.y;
+    const rx = s.rx == null ? PV.W * 0.22 : s.rx;
+    const ry = s.ry == null ? (s.rx == null ? PV.W * 0.22 : s.rx) * 0.64 : s.ry;
+    const a = s.a == null ? 0.65 : s.a;
+    const w = s.w == null ? 10 : s.w;
+    const grow = s.grow == null ? 0 : s.grow;
+    const k = grow > 0 ? clamp((st.phase || 0) / grow, 0, 1) : 1;
+    if (k <= 0) return;
+    const sd = (s.seed | 0) || 13;
+    const rot = ((sd % 100) / 100 - 0.5) * 0.5;
+    // 起笔位置随机，缺口约 18°；转角 > 1 圈，读作「绕回来还多画了一点」
+    const a0 = rot + ((sd % 57) / 57) * 6.283;
+    const sweep = 6.283 - 0.31 + (sd % 7) * 0.02;
+    const n = 72;
+    const end = Math.max(2, Math.round(k * n));
+    const nz = (q) => 1 + Math.sin(sd + q * 9.3) * 0.035 + Math.sin(sd * 1.7 + q * 21) * 0.012;
+    // 同 brush：填充轮廓，不用分段 stroke（否则整圈是一排小台阶）
+    const outer = [], inner = [];
+    for (let i = 0; i <= end; i++) {
+      const q = i / n;
+      const th = a0 + sweep * q;
+      const ux = Math.cos(th), uy = Math.sin(th);
+      const rad = nz(q), hw = w * _tip(q * 0.94 + 0.03) * 0.5;
+      const px = cx + ux * rx * rad, py = cy + uy * ry * rad;
+      outer.push([px + ux * hw, py + uy * hw]);
+      inner.push([px - ux * hw, py - uy * hw]);
+    }
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = _ink(s, st);
+    ctx.beginPath();
+    ctx.moveTo(outer[0][0], outer[0][1]);
+    for (let i = 1; i < outer.length; i++) ctx.lineTo(outer[i][0], outer[i][1]);
+    for (let i = inner.length - 1; i >= 0; i--) ctx.lineTo(inner[i][0], inner[i][1]);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+
+  /* 荧光涂痕：比色块窄、比线宽，两端毛糙 —— 读作「用马克笔划了一下」。
+     用三段错位矩形拼，不做模糊（4K 上 blur 是最贵的东西）。 */
+  D.marker = (ctx, s, st) => {
+    const x = s.x, y = s.y, w = s.w, h = s.h == null ? 34 : s.h;
+    const a = s.a == null ? 0.30 : s.a;
+    const grow = s.grow == null ? 0 : s.grow;
+    const k = grow > 0 ? clamp((st.phase || 0) / grow, 0, 1) : 1;
+    if (k <= 0) return;
+    const sd = (s.seed | 0) || 5;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = _ink(s, st, rgba(st.S.accentRGB || [200, 90, 60], 1));
+    const ww = w * k;
+    ctx.fillRect(x, y + h * 0.10, ww, h * 0.62);
+    ctx.fillRect(x + ww * 0.02, y, ww * 0.94, h * 0.30);
+    ctx.fillRect(x, y + h * 0.66, ww * 0.97, h * 0.34);
+    // 两端毛边：几根短竖条，长度按 seed 变
+    for (let i = 0; i < 5; i++) {
+      const dy = ((Math.sin(sd + i * 2.3) * 0.5 + 0.5) * h) * 0.9;
+      ctx.fillRect(x + ww - 2 - i * 1.5, y + dy, 2, h * 0.10);
+    }
+    ctx.restore();
+  };
+
+  /* 随手勾的波浪：一根贯穿画面的长曲线，用来给空白区「压」出层次。
+     这是背景里最便宜的一层「画」—— 一条 stroke，不吃填充率。 */
+  D.scrawl = (ctx, s, st) => {
+    const y0 = s.y == null ? PV.H * 0.5 : s.y;
+    const amp = s.amp == null ? PV.H * 0.05 : s.amp;
+    const ph = s.ph == null ? 0 : s.ph;
+    const a = s.a == null ? 0.22 : s.a;
+    const w = s.w == null ? 3 : s.w;
+    const grow = s.grow == null ? 0 : s.grow;
+    const k = grow > 0 ? clamp((st.phase || 0) / grow, 0, 1) : 1;
+    if (k <= 0) return;
+    const n = 160, end = Math.max(2, Math.round(n * k));
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = _ink(s, st);
+    ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 0; i <= end; i++) {
+      const u = i / n;
+      const x = -PV.W * 0.02 + PV.W * 1.04 * u;
+      const y = y0
+        + Math.sin(u * 6.1 + ph) * amp
+        + Math.sin(u * 17.3 + ph * 2.1) * amp * 0.22;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  };
 })();

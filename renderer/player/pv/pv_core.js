@@ -206,8 +206,8 @@
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
         const u = x / N, v = y / N;
-        const n = sample(g4, 4, u, v) * 0.55 + sample(g8, 8, u, v) * 0.28 +
-                  sample(g32, 32, u, v) * 0.17;
+        const n = sample(g4, 4, u, v) * 0.22 + sample(g8, 8, u, v) * 0.33 +
+                  sample(g32, 32, u, v) * 0.45;
         /* 映射到极淡的黑/白：只改明度不改色相，铺在纸上是「厚度」 */
         const d = (n - 0.5) * 2;                       // -1..1
         const i = (y * N + x) * 4;
