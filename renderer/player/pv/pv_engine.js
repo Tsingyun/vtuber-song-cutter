@@ -661,6 +661,22 @@
     g3.addColorStop(0, rgba(mix(c1, [255, 255, 255], 0.10), 0.35));
     g3.addColorStop(1, rgba(c1, 0));
     o.ctx.fillStyle = g3; o.ctx.fillRect(0, 0, PV.W, PV.H * 0.55);
+    /* 纸纤维：一次烘焙（PV.paperFiber 512² 平铺），逐帧零成本。
+       只走 multiply —— 它是「纸浆厚度」，不是叠一层灰。 */
+    if (PV.paperFiber) {
+      const pat = o.ctx.createPattern(PV.paperFiber(ST.seed || 7717), 'repeat');
+      if (pat) {
+        o.ctx.save();
+        o.ctx.globalCompositeOperation = 'multiply';
+        o.ctx.globalAlpha = 0.85;
+        /* 平铺时缩到 0.5：512² 的贴图直接铺 1920×1080 时，纤维有 3.7 倍那么大，
+           读作「纸上有污渍」而不是「纸的纤维」。缩一半 → 纤维 1~2px，才是纸。 */
+        o.ctx.scale(0.5, 0.5);
+        o.ctx.fillStyle = pat;
+        o.ctx.fillRect(0, 0, PV.W * 2, PV.H * 2);
+        o.ctx.restore();
+      }
+    }
     _paperKey = key; _paperC = o.c;
     return _paperC;
   }
@@ -1168,6 +1184,10 @@
   /* 本帧是否正在放转场：正在放的时候画面不是「纯某一镜」，不能拿去当快照，
      否则极短的镜头会把自己的转场残影拍进 A，一路叠下去。 */
   let XBusy = false;
+
+  /* 分段渲染的起点没有「上一镜」：预热用的是缩小画布，快照必然是错的，
+     必须显式作废，否则第一帧会拿一张 192×108 的残图当 A 去放转场。 */
+  PV.resetCross = () => { XCValid = false; XCFrom = -1; XCAt = -1; };
 
   function saveCross(src, shot, t) {
     if (XBusy) return;

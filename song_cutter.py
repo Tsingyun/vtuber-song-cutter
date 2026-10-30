@@ -47,6 +47,7 @@ from songcut import ctc_align                         # noqa: E402  CTC 强制�
 from songcut import wave_refine                       # noqa: E402  波形边界精修
 from songcut import decor_pick                        # noqa: E402  标题装饰方案自动匹配
 from songcut import timeline_sync                     # noqa: E402  切入点检测 + 时间轴同步
+from songcut import spec as SPEC                     # noqa: E402  成片规格唯一真源（RULES §86）
 try:
     from songcut import qc as QC                       # noqa: E402  成片自检（PASS/WARN/BLOCK 判定化）
 except Exception as _qc_e:                             # numpy 缺失等 → 自检降级，不阻断主流程
@@ -138,17 +139,40 @@ STREAMER_ART = CFG.expand(CFG.path("streamer", "art_image", default="") or "")
 
 
 # ---------------- 基础工具 ----------------
-def log(msg):
-    print(time.strftime("[%H:%M:%S] ") + msg, flush=True)
+def log(msg, level="info", **kv):
+    """控制台/文本日志 + 结构化事件流。
+
+    为什么要第二份：全仓 604 处 print 没法统计「哪一环在降级、慢在哪」。
+    这里保留人读的文本，同时把同一句话写进 events.jsonl（一行一个 JSON），
+    之后无论是 grep 还是脚本汇总都不必再解析中文。level 只是粗分档
+    （info / warn / fail），不引入 logging 的层次体系 —— 管线是脚本，不是服务。
+    """
+    line = time.strftime("[%H:%M:%S] ") + msg
+    print(line, flush=True)
     if log._fh:
-        log._fh.write(time.strftime("[%H:%M:%S] ") + msg + "\n")
+        log._fh.write(line + "\n")
         log._fh.flush()
+    if log._ev:
+        try:
+            rec = {"t": round(time.time(), 3), "level": level, "msg": msg}
+            rec.update(kv)
+            log._ev.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            log._ev.flush()
+        except Exception:
+            pass          # 事件流永远不许影响主流程
+
+
+log._fh = None
+log._ev = None
 
 
 def open_log(workdir, date):
     d = os.path.join(workdir, "cuts", date)
     os.makedirs(d, exist_ok=True)
     log._fh = io.open(os.path.join(d, "cutter.log"), "a", encoding="utf-8")
+    # 结构化事件流：一行一个 JSON（时间戳/级别/消息/附带的键值）。
+    # 逐首的耗时、降级原因、闸门结论都往这里写，之后才能回答「慢在哪一环」。
+    log._ev = io.open(os.path.join(d, "events.jsonl"), "a", encoding="utf-8")
 
 
 log._fh = None
@@ -2036,8 +2060,12 @@ def main():
                     help="完全不读在线歌单表（全自动场景：歌名由转写 + 歌词联网核验自主判定）")
     ap.add_argument("--keep-mp3", action="store_true", help="保留 MP3（默认成品验证通过后自动删除）")
     ap.add_argument("--no-qc", action="store_true", help="跳过成片自检（默认每首都跑，约 15~20s）")
-    ap.add_argument("--qc-strict", action="store_true",
-                    help="自检不通过则以退出码 3 结束（供自动化流程判定是否继续）")
+    # 2026-10-30：闸门默认**硬**。自检不通过还退出 0，等于「自检是建议」——
+    # 那正是「成品看着粗糙但流水线说成功」的来源。需要放行时显式 --no-qc-strict。
+    ap.add_argument("--qc-strict", dest="qc_strict", action="store_true", default=True,
+                    help="自检不通过则以退出码 3 结束（默认开启）")
+    ap.add_argument("--no-qc-strict", dest="qc_strict", action="store_false",
+                    help="自检不通过也退出 0（仅在人工确认后使用，会写进 manifest 的 waivers）")
     ap.add_argument("--qc-deep", action="store_true",
                     help="自检启用深度项（V06 全片帧节奏扫描，约 +60s/首）")
     ap.add_argument("--lrc-override", default="",
@@ -2170,7 +2198,15 @@ def main():
         os.path.basename(src), v["width"], v["height"], v.get("avg_frame_rate"), vdur))
 
     qc_fail = 0          # 自检未通过计数（--qc-strict 时决定退出码）
-    manifest = {"date": args.date, "source": src, "source_specs":
+    manifest = {"date": args.date, "source": src,
+                # 放行记录：谁在什么时候关掉了哪道闸门。空 = 本次没有任何豁免。
+                "waivers": ([{"kind": "ignore-gate", "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                              "why": "--ignore-gate 指定，渲染前闸门降级为警告"}]
+                            if GATE_IGNORE else []) +
+                           ([{"kind": "no-qc-strict", "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                              "why": "自检不通过也放行（人工确认）"}]
+                            if not getattr(args, "qc_strict", True) else []),
+                "source_specs":
                 {"width": v["width"], "height": v["height"], "fps": v.get("avg_frame_rate"),
                  "duration": round(vdur, 2)}, "songs": []}
 
@@ -2254,9 +2290,11 @@ def main():
                         })
                         continue
             specs = verify_specs(ffprobe, out_mp4)
-            ok = (specs["width"] == 1920 * OUT_RES and specs["height"] == 1080 * OUT_RES
-                  and specs["fps"] >= 59.9
-                  and specs["video_bitrate_kbps"] >= MIN_VIDEO_KBPS)   # B站二压防护：码率下限
+            # 规格判据不再写在这里：30fps 的手书 PV 曾因写死 59.9 被判「不达标」。
+            # 统一走 songcut/spec.py（分辨率集合 / 帧率集合 / 码率安全区）。
+            ok, _spec_fails = SPEC.check(specs)
+            for _f in _spec_fails:
+                log("  ✗ " + _f)
             if ref_extra:
                 want = ref_extra["cut_end"] - ref_extra["cut_start"] + ref_extra.get("head_pad", 0)
                 if abs(specs["duration"] - want) > 1.5:
@@ -2364,7 +2402,7 @@ def main():
     n_qc = sum(1 for s in manifest["songs"] if (s.get("qc") or {}).get("passed"))
     log("=== 完成：共 %d 首，规格达标 %d 首，自检通过 %d 首；manifest → %s ===" % (
         len(manifest["songs"]), n_ok, n_qc, mf))
-    if getattr(args, "qc_strict", False) and qc_fail:
+    if getattr(args, "qc_strict", True) and qc_fail:
         log("⚠ 严格模式：%d 首未通过自检，退出码 3" % qc_fail)
         return 3
     return 0

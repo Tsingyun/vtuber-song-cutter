@@ -42,6 +42,7 @@ import time
 import numpy as np
 
 from songcut import config as CFG
+from songcut import spec as SPEC
 
 try:                                    # 繁转简降级链（与 lyrics_fetch 一致）
     from songcut.lyrics_fetch import _t2s as t2s
@@ -221,8 +222,9 @@ def check_container(info, want_w, want_h):
                   "%sx%s" % (v.get("width"), v.get("height")),
                   v.get("width") == want_w and v.get("height") == want_h, BLOCK,
                   {"期望": "%dx%d" % (want_w, want_h)}, "检查 OUT_RES / render_song.cjs 的 res 参数"))
-    out.append(_f("S02", "规格", "帧率", "%.3f fps" % fps, fps >= TH["fps_min"], BLOCK,
-                  {"阈值": TH["fps_min"]}, "渲染端 -r 60 未生效或编码器丢帧，重渲该片段"))
+    out.append(_f("S02", "规格", "帧率", "%.3f fps" % fps, SPEC.fps_ok(fps), BLOCK,
+                  {"允许": "/".join(str(x) for x in SPEC.FPS_ALLOWED)},
+                  "渲染端 -r 未生效或编码器丢帧，重渲该片段"))
     out.append(_f("S03", "规格", "像素格式/色域",
                   "%s / %s / %s / range=%s" % (v.get("pix_fmt"), v.get("color_space"),
                                                v.get("color_transfer"), v.get("color_range")),
@@ -230,8 +232,8 @@ def check_container(info, want_w, want_h):
                   and v.get("color_range") == "tv" and v.get("color_transfer") == "bt709", BLOCK,
                   {}, "补 -vf scale=...:out_color_matrix=bt709 与 -color* 系列；NVENC 需 h264_metadata bsf"))
     out.append(_f("S04", "规格", "视频码率", "%d kbps" % (vbr // 1000),
-                  TH["vbr_min_kbps"] <= vbr / 1000 <= TH["vbr_max_kbps"], BLOCK,
-                  {"安全区": "%d~%d kbps" % (TH["vbr_min_kbps"], TH["vbr_max_kbps"])},
+                  SPEC.vbr_ok(vbr / 1000), BLOCK,
+                  {"安全区": "%d~%d kbps" % SPEC.VBR_SAFE_KBPS},
                   "低于下限会被平台二压（糊）；高于上限同样触发二压。调 OUT_BITRATE"))
     out.append(_f("S05", "规格", "轨道数", "%d 轨" % len(info.get("streams", [])),
                   len(info.get("streams", [])) == 2, BLOCK,

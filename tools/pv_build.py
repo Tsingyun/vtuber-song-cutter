@@ -50,8 +50,11 @@ def ap(**kw):
                    help="成片帧率。必须显式写进 job：不给的话 render_song 会退到 "
                         "storyboard.meta.fps（导演层默认 60），于是 koma=12 变成每张画 5 帧，"
                         "和按 30fps 量的时间轴全部错位")
-    a.add_argument("--pages", type=int, default=1, help="ffmpeg 两阶段并行度；1080p 样片用 1")
+    a.add_argument("--pages", type=int, default=0,
+                   help="ffmpeg 两阶段并行实例数；0=按分辨率自动（4K→3，1080p→1）")
     a.add_argument("--bitrate", type=int, default=0, help="0 = res>=2 ? 18M : 12M")
+    a.add_argument("--jq", type=float, default=0.92,
+                   help="中间 JPEG 质量（0.92=190KB/帧；0.98 仅用于逐字节取证）")
     a.add_argument("--reuse-sb", action="store_true", help="不重跑导演层，直接用现有编排稿")
     a.add_argument("--no-mux", action="store_true", help="只出视频，不封音轨")
     return a.parse_args()
@@ -72,6 +75,7 @@ def main():
         cmd = [PY, os.path.join(ROOT, "tools/pv_direct.py"),
                "--timing", a.timing, "--analysis", a.analysis, "--out", sb_path,
                "--start", str(a.start), "--dur", str(a.dur), "--seed", str(a.seed),
+               "--fps", str(a.fps),
                "--title", a.title, "--artist", a.artist, "--vocal", a.vocal, "--date", a.date]
         if a.live:
             cmd += ["--live", a.live]
@@ -94,6 +98,7 @@ def main():
 
     out = os.path.abspath(a.out).replace("\\", "/")
     silent = out.replace(".mp4", ".video.mp4") if not a.no_mux else out
+    pages = a.pages or (3 if a.res >= 2 else 1)
     job = {
         "playerDir": os.path.join(ROOT, "renderer/player").replace("\\", "/"),
         "page": "index_pv.html",
@@ -104,17 +109,17 @@ def main():
         "fps": a.fps,
         "bitrate": a.bitrate or (18000000 if a.res >= 2 else 12000000),
         "encoder": "ffmpeg",
-        "pages": a.pages,
+        "pages": pages,
         "out": silent,
     }
     job_path = os.path.join(ROOT, "_tmp/pv/job_%s.json" % os.path.basename(out).replace(".mp4", ""))
     os.makedirs(os.path.dirname(job_path), exist_ok=True)
     json.dump(job, open(job_path, "w", encoding="utf-8"), ensure_ascii=False)
-    print("[job] %s  dur=%.2fs  res=%s  pages=%d" % (job_path, dur, a.res, a.pages))
+    print("[job] %s  dur=%.2fs  res=%s  pages=%d  fps=%d" % (job_path, dur, a.res, pages, a.fps))
 
     env = dict(os.environ, NODE_PATH=NODE_PATH)
     run([NODE, os.path.join(ROOT, "renderer/render_song.cjs"),
-         "--job", job_path, "--encoder", "ffmpeg"], env=env)
+         "--job", job_path, "--encoder", "ffmpeg", "--jq", str(a.jq)], env=env)
 
     if a.no_mux:
         print("[out] %s（未封音轨）" % out)

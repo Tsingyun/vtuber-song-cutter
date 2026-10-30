@@ -124,7 +124,15 @@ async function cleanupArtifacts() {
   const NVPRESET = /^p[1-7]$/.test(PRESET) ? PRESET : (argOf('nvpreset') || 'p1');
   /* 并行渲染实例数（仅 ffmpeg 通路可用）。3 是实测拐点：13.1→25.2→33.7→34.8 fps（P=1/2/3/4）。 */
   const PAGES = ENCODER === 'ffmpeg' ? Math.max(1, Number(argOf('pages') || job.pages || 2)) : 1;
-  const JQ = Number(argOf('jq') || job.jpegQuality || 0.98);
+  /* 中间 JPEG 质量：4K 实测 q0.98 是 668KB/帧、q0.90 是 190KB/帧，两者 toBlob 成本
+     都落在「光栅回读」上（中位 122ms），但传输与落盘差 3.5×。成片是 18Mbps CBR
+     （30fps 下 ≈75KB/帧），q0.90 的量化噪声远低于最终编码噪声，肉眼不可分。
+     逐帧字节不可复现的取证场景请配 --jq 0.98。 */
+  const JQ = Number(argOf('jq') || job.jpegQuality || 0.92);
+  /* 光栅后端：cpu=1 软件（逐字节可复现，4K 1.2s/帧）/ 默认 GPU（4K 0.19s/帧）。
+     touchdup=0 关掉「首渲丢弃」——GPU 首触 jitter 只影响每张画的第 1 帧 ±1~2。 */
+  const CPU_RASTER = argOf('cpu', job.cpuRaster != null ? String(job.cpuRaster) : '0') === '1';
+  const TOUCHDUP = argOf('touchdup', job.touchdup != null ? String(job.touchdup) : '1') !== '0';
   const outAbs = path.resolve(out);
 
   // 1. 本地收片服务（成片可能几百 MB，走 HTTP POST 落盘）
@@ -304,7 +312,8 @@ async function cleanupArtifacts() {
     throw new Error('播放器页面不存在：' + pagePath);
   }
   const BGQ = job.bg ? ('&bg=' + encodeURIComponent(job.bg)) : '';   // 专业背景层方案切换
-  const url = 'file:///' + pagePath.replace(/\\/g, '/') + '?render=1&res=' + RES + BGQ;
+  const url = 'file:///' + pagePath.replace(/\\/g, '/') + '?render=1&res=' + RES + BGQ +
+    '&cpu=' + (CPU_RASTER ? '1' : '0') + '&touchdup=' + (TOUCHDUP ? '1' : '0');
 
   // 3. 注入音频 + 元数据 + 歌词 + 封面
   const meta = {
@@ -376,6 +385,7 @@ async function cleanupArtifacts() {
     process.exit(3);
   }
   const setup = handles[0].setup;
+  console.log(`[raster] ${CPU_RASTER ? 'CPU（软件光栅，逐字节可复现）' : 'GPU'} / touchdup=${TOUCHDUP ? 'on' : 'off'} / jq=${JQ}`);
   console.log(`[setup] ${1920 * RES}x${1080 * RES} 时长 ${setup.dur.toFixed(2)}s，共 ${setup.total} 帧（${FPS}fps），` +
               `歌词 ${setup.lyrics} 行，码率 ${(BITRATE / 1e6).toFixed(1)} Mbps，${PAGES} 个渲染实例`);
 
@@ -402,26 +412,41 @@ async function cleanupArtifacts() {
         return await h.page.evaluate(async ({ s, e, up, q }) => {
           // 歌词排版有跨帧累积状态，每个实例都必须从 f0 顺序快进到自己的起点（绘制仅 0.3 ms/帧）
           // fast=1：只推排版状态，不装载人物帧（否则这一段会把 48 个镜头的图全解一遍）
-          for (let i = 0; i < s; i++) window.__frame(i, { fast: 1 });
+          if (typeof window.__fastTo === 'function') window.__fastTo(s);
+          else for (let i = 0; i < s; i++) window.__frame(i, { fast: 1 });
+          /* koma 格缓存：同一张画的 2~3 个输出帧逐字节相同，只需编码一次。
+             实测 4K30/koma12：6950 帧 → 2780 次 toBlob（省掉 60% 的光栅+编码），
+             而发给 ffmpeg 的仍是 6950 份 JPEG（重复份直接复用同一份 Buffer）。
+             ⚠ 不能连 __frame 一起跳过：画布是累加的，跳帧会让上一张画留在屏上。 */
+          let ck = null, cbuf = null, enc = 0;
           for (let i = s; i < e; i++) {
             /* 页面可以返回 Promise：人物层是「按镜头滑动装载」的，换镜头时要把那一镜
                的直播帧解码完再画（否则会画到回落帧 = 人物闪）。v9/v10 的 __frame
                返回 undefined，await undefined 无副作用。 */
-            const pend = window.__frame(i);
-            if (pend && typeof pend.then === 'function') await pend;
-            const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', q));
-            if (!blob) return { ok: false, error: 'toBlob 返回 null @' + i };
-            /* ⚠ 别把 Blob 直接当 fetch body：Chrome 的 Blob 存储在 renderer 里**单独记账**，
-               不占普通 JS 堆，长片会一路累积到配额上限，然后整页报
-               net::ERR_BLOB_OUT_OF_MEMORY + 「TypeError: Failed to fetch」——而且 pageerror
-               抓不到（网络层错误），表现成「随机崩在某个百分比」。转 ArrayBuffer 后 Blob
-               立刻无引用可回收，ArrayBuffer 走普通堆，配额与高压 GC 都正常生效。 */
-            const buf = await blob.arrayBuffer();
+            const k = (typeof window.__komaOf === 'function') ? window.__komaOf(i) : i;
+            let buf;
+            if (cbuf && k === ck) {
+              /* 同一张画：不重绘、不编码，只推进进度（见 index_pv.html 的 __tick 注释） */
+              if (typeof window.__tick === 'function') window.__tick(i); else await window.__frame(i);
+              buf = cbuf;
+            } else {
+              const pend = window.__frame(i);
+              if (pend && typeof pend.then === 'function') await pend;
+              const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', q));
+              if (!blob) return { ok: false, error: 'toBlob 返回 null @' + i };
+              /* ⚠ 别把 Blob 直接当 fetch body：Chrome 的 Blob 存储在 renderer 里**单独记账**，
+                 不占普通 JS 堆，长片会一路累积到配额上限，然后整页报
+                 net::ERR_BLOB_OUT_OF_MEMORY + 「TypeError: Failed to fetch」——而且 pageerror
+                 抓不到（网络层错误），表现成「随机崩在某个百分比」。转 ArrayBuffer 后 Blob
+                 立刻无引用可回收，ArrayBuffer 走普通堆，配额与高压 GC 都正常生效。 */
+              buf = await blob.arrayBuffer();
+              ck = k; cbuf = buf; enc++;
+            }
             const resp = await fetch(up + '?i=' + i, { method: 'POST', body: buf });
             if (!resp.ok) return { ok: false, error: 'HTTP ' + resp.status + ' @' + i };
             if ((i & 255) === 0 && typeof window.gc === 'function') { try { window.gc(); } catch (err) {} }
           }
-          return { ok: true, n: e - s };
+          return { ok: true, n: e - s, enc: enc };
         }, { s, e, up: frameUrlBase, q: JQ });
       } finally {
         /* 本段渲完立刻关掉这个实例：两页并行时另一页还在跑，早关能提前释放整份

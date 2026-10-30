@@ -812,6 +812,167 @@ def _lyr_sim(a, b):
     return difflib.SequenceMatcher(None, x, y).ratio()
 
 
+
+# ---------------------------------------------------------------------------
+# 置景（dress）：把「排版卡」变成「有场景的版面」
+#
+# 问题（2026-10-30 复盘）：dawn 模式跑出来的成片，47 句里有 12 句一个背景件都没有，
+# 其余多数只有一枚 alpha 0.20 的 halo —— 整片读作「大字贴在奶油纸上」，
+# 也就是「不像手书 PV」。器件库并不缺（PV.BG 19 件 / PV.DECOR 25 件），缺的是
+# **每镜的最低置景配额**。这里按段落给一套场景（底色 / 结构 / 光 / 活物），
+# 只补缺项，不覆盖映射表已经写好的意象。
+#
+# 纪律：
+#   · 全部走 seeded rng（a.seed ^ 镜头号）→ 同 seed 同结果，确定性验收不受影响；
+#   · alpha 上限：底 0.18 / 结构 0.07 / 光 0.20 / 活物 0.16 ——「留白是正片」，
+#     置景是让留白看起来有纸、有空气，不是把画面填满；
+#   · 有人的镜头（live 生效）只补光与活物，不动版心，避免和 placeFigure 打架。
+SEC_SCENE = {
+    "intro": dict(base=("watercolor", {"a": 0.16, "n": 4}),
+                  light=("sunrise", {"a": 0.20, "y": 0.78}),
+                  struct=("grid", {"a": 0.045, "step": 96}),
+                  life=("dust", {"a": 0.13})),
+    "V1": dict(base=("watercolor", {"a": 0.14, "n": 3}),
+               light=("windowLight", {"a": 0.13, "n": 2, "ang": -26}),
+               struct=("hatch", {"a": 0.040}),
+               life=("dust", {"a": 0.12})),
+    "C1": dict(base=("wash", {"a": 0.16, "n": 3, "col": "accent"}),
+               light=("rays", {"a": 0.12, "n": 3, "rot": -0.22}),
+               struct=("halftone", {"a": 0.050, "step": 14}),
+               life=("petal", {"a": 0.14, "n": 10})),
+    "V2": dict(base=("watercolor", {"a": 0.13, "n": 3}),
+               light=("windowLight", {"a": 0.12, "n": 2, "ang": 22}),
+               struct=("grid", {"a": 0.042, "step": 120}),
+               life=("dust", {"a": 0.11})),
+    "C2": dict(base=("wash", {"a": 0.15, "n": 3, "col": "accent"}),
+               light=("rays", {"a": 0.12, "n": 4, "rot": 0.18}),
+               struct=("halftone", {"a": 0.046, "step": 12}),
+               life=("petal", {"a": 0.15, "n": 12})),
+    "Br": dict(base=("wash", {"a": 0.12, "n": 2, "col": "ghost"}),
+               light=("arch", {"a": 0.16, "h": 760, "w": 520, "x": 0.5, "y": 0.52}),
+               struct=("topo", {"a": 0.050, "rings": 9, "rot": -0.12}),
+               life=("dust", {"a": 0.13})),
+    "FC": dict(base=("wash", {"a": 0.17, "n": 4, "col": "accent"}),
+               light=("sunrise", {"a": 0.18, "y": 0.80}),
+               struct=("halftone", {"a": 0.052, "step": 11}),
+               life=("petal", {"a": 0.15, "n": 14})),
+    "outro": dict(base=("watercolor", {"a": 0.15, "n": 4}),
+                  light=("sunrise", {"a": 0.14, "y": 0.90}),
+                  struct=("grid", {"a": 0.035, "step": 140}),
+                  life=("petal", {"a": 0.16, "n": 16})),
+}
+# 「已有同类」判据：按 k 归类，避免同一类叠两层
+_K_BASE = {"watercolor", "wash", "mega", "panel"}
+_K_STRUCT = {"grid", "hatch", "halftone", "topo", "rings", "ink"}
+_K_LIGHT = {"sunrise", "windowLight", "arch", "rays", "halo", "leak"}
+
+
+def _pick_layout(text, base_k, rnd, prev_k, special):
+    """版式轮转：映射表把 28/47 句都写成 block（同一块版心重复 28 次 = 读作字幕）。
+    只对**没有人物**的镜头轮换，且按句长/词数做形态约束（同本文件头部的版式词汇
+    表：词多的不能上 keySplit、句子长的不能上「下部 telop」）。"""
+    if special in ("cryGiant", "offsetPair", "threeWordCascade"):
+        return base_k                      # 特别句的版式是刻意选的，不动
+    nw = len((text or "").split())
+    nc = len(text or "")
+    # 只允许「整句仍然可读」的版式。keySplit / scaleSteps 会把次要词压到 0.27 倍，
+    # 6 词以上的句子缩成 10px 的小字（实测 t=75「The first time…」那条完全读不了），
+    # 所以它们只在 ≤4 词的短句里出现。
+    if nc >= 34:
+        pool = ["block", "cropGiant", "lowerThird", "block"]
+    elif nc >= 20:
+        pool = ["block", "lowerThird", "bandHide", "indexTable", "block"]
+    elif nw <= 4:
+        pool = ["keySplit", "center", "cross", "scaleSteps", "fullTrack", "block"]
+    elif nw <= 6:
+        pool = ["center", "cross", "fullTrack", "block"]
+    else:
+        pool = ["block", "fullTrack", "lowerThird", "block"]
+    if rnd.random() > 0.30:
+        return base_k                      # 70% 尊重映射表的原版面
+    for _ in range(4):
+        k = pool[rnd.randrange(len(pool))]
+        if k != prev_k and k != base_k:
+            return k
+    return base_k
+
+
+def dress_shots(shots, seed, has_live, lines=None):
+    """按段落给每镜补置景，并对无人物镜头做版式轮转。原地修改并返回。"""
+    import random as _random
+    prev_k = None
+    for sh in shots:
+        if sh.get("kind") != "line":
+            continue
+        rnd = _random.Random((seed ^ (sh["i"] * 2654435761)) & 0xFFFFFFFF)
+        scene = SEC_SCENE.get(sh.get("section", ""), SEC_SCENE["V1"])
+        bgl = list(sh.get("bgl") or [])
+        have = {d.get("k") for d in bgl}
+
+        if not (have & _K_BASE):
+            k, d = scene["base"]
+            bgl.insert(0, dict(d, k=k))            # 底色：整段一致
+        if not (have & _K_STRUCT) and rnd.random() < 0.75:
+            k, d = scene["struct"]
+            bgl.append(dict(d, k=k, a=round(d["a"] * (0.8 + 0.5 * rnd.random()), 3)))
+        if not (have & _K_LIGHT):
+            k, d = scene["light"]
+            bgl.append(dict(d, k=k))               # 光：每镜都要有方向光
+        if not (have & {"dust", "petal"}) and rnd.random() < 0.60:
+            k, d = scene["life"]
+            bgl.append(dict(d, k=k, a=round(d["a"] * (0.85 + 0.3 * rnd.random()), 3)))
+        sh["bgl"] = bgl
+
+        if not (sh.get("decor") or []):
+            picks = ["cropMarks", "photoCorners", "stitchLines", "vrule", "brackets"]
+            k = picks[rnd.randrange(len(picks))]
+            d = {"k": k, "m": 56, "seed": 11 + sh["i"] * 7, "a": 0.16}
+            if k == "vrule":
+                d["side"] = "l" if float((sh.get("layout") or {}).get("x") or 0.075) >= 0.5 else "r"
+                d["a"] = 0.16
+            elif k == "brackets":
+                d["a"] = 0.18
+            sh["decor"] = [d]
+
+        if not has_live and not sh.get("fig"):
+            lay = dict(sh.get("layout") or {})
+            base_k = lay.get("k") or "block"
+            # 逐句文本不在 shot 里（shot 只存 line 下标），必须回 lines 取 ——
+            # 拿空串去算词数会把每一句都判成「短句」，于是长句也被分到 keySplit
+            # （实测 t=75 那句被压成 10px 小字，整句读不了）。
+            _ln = sh.get("line")
+            _txt = ""
+            if lines and isinstance(_ln, int) and 0 <= _ln < len(lines):
+                _txt = (lines[_ln].get("text") or "")
+            nk = _pick_layout(_txt, base_k, rnd, prev_k, sh.get("special") or "")
+            if nk != base_k:
+                lay = {"k": nk, "face": lay.get("face")}
+                if nk == "indexTable":
+                    lay["meta"] = sh.get("section", "")
+                if nk == "lowerThird":
+                    lay["label"] = True
+                sh["layout"] = lay
+            # 主字大小：映射表一律用 0.102H（≈110px/1080），连起来读是「小字幕」。
+            # 手书 PV 的主字按句长分级：短句 0.20H、中句 0.15H、长句 0.12H。
+            # 只改 block（其余版式自己算字号），且只在没有人物时改。
+            # 形态否决：映射表也会给长句排窄栏（实测第 4 句 9 个词排成 8 行竖条，
+            # 读作「坏版」）。版面词汇表本身就是**形态约束**，先否决再谈轮转。
+            cur0 = sh.get("layout") or {}
+            if cur0.get("k") in ("vRuler", "bandHide", "keySplit", "scaleSteps", "cross") \
+                    and (len(_txt) > 30 or len((_txt or "").split()) > 7):
+                sh["layout"] = {"k": "block", "face": cur0.get("face")}
+
+            cur = sh.get("layout") or {}
+            if cur.get("k") == "block" and cur.get("hK") is None:
+                nc2 = len(_txt)
+                hk = 0.200 if nc2 <= 16 else (0.168 if nc2 <= 24 else
+                                              (0.140 if nc2 <= 32 else 0.118))
+                cur = dict(cur, hK=hk, cy=0.47, availW=0.88, lead=1.12, maxRows=3)
+                sh["layout"] = cur
+            prev_k = (sh.get("layout") or {}).get("k")
+    return shots
+
+
 def build_dawn_shots(a, lines, m, dur):
     """把意象映射表翻译成编排稿镜头（不抽卡：一切由歌词意象决定）。"""
     from collections import Counter
@@ -986,7 +1147,8 @@ def build_dawn_shots(a, lines, m, dur):
             "tier": 1 if energy < 0.6 else (2 if energy < 0.8 else 3),
             "section": sec.get("name", ""),
             "energy": energy,
-            "layout": _dawn_layout(spec, DAWN_LIVE.get(i)),
+            "layout": _dawn_layout(spec, (DAWN_LIVE.get(i)
+                                          if getattr(a, "live_json", "") else None)),
             "type": {},
             "enter": ent, "hold": hold, "exit": xit,
             "treat": {"k": "solid"},
@@ -994,7 +1156,10 @@ def build_dawn_shots(a, lines, m, dur):
             "bgl": bgl, "bg": [],
             "decor": decor_items(spec, i),
             "post": post, "cam": cam,
-            "fig": (dict(DAWN_LIVE[i]) if i in DAWN_LIVE else None),
+            # 没有 live 序列时**不能**保留画框：DAWN_LIVE 会把版心挤到 0.42 宽、
+            # 右边留一块空白给一个不存在的人（实测 t=29.3 整块字挤在左上、右侧空一半）。
+            "fig": (dict(DAWN_LIVE[i]) if (i in DAWN_LIVE and getattr(a, "live_json", ""))
+                    else None),
             "sync": False, "wobble": wob,
             "unified": False,
             "special": sp,
@@ -1013,6 +1178,9 @@ def build_dawn_shots(a, lines, m, dur):
         shots.append(sh)
 
     # ---- 尾奏卡（字退去后只剩花瓣与署名）
+    # 置景：每镜的最低配额 + 无人物时的版式轮转（见 dress_shots 头注）
+    dress_shots(shots, a.seed, bool(getattr(a, "live_json", "")), lines)
+
     shots.append({
         "i": len(shots), "t0": round(outro_t0, 3), "t1": round(dur, 3),
         "line": -1, "kind": "card", "tier": 1, "section": "outro",
@@ -1091,7 +1259,7 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
         "meta": {
             "title": a.title, "artist": a.artist, "vocal": a.vocal,
             "source": a.source, "date": a.date,
-            "seed": a.seed, "dur": dur, "fps": 60, "start": w0,
+            "seed": a.seed, "dur": dur, "fps": (getattr(a, "fps", 0) or 60), "start": w0,
             "koma": a.koma, "keyBg": a.keyBg or None,
             "concept": "dawn", "imagery": path.replace("\\", "/"),
             "live": live_desc,   # head 圆窗 / body 竖幅（1027 演唱原视频）
@@ -1147,6 +1315,8 @@ def main():
     ap.add_argument("--date", default="")
     ap.add_argument("--live", default="")
     ap.add_argument("--lrc", default="")
+    ap.add_argument("--fps", type=int, default=30,
+                    help="成片帧率（写进 meta；30fps + koma12 = 每张画 2~3 个输出帧）")
     ap.add_argument("--koma", type=int, default=12,
                     help="二帧量化：每秒画几张（JIZURA 默认 12，0=不量化）")
     ap.add_argument("--keyBg", default="", choices=["", "green", "black", "white"],
@@ -1521,7 +1691,7 @@ def main():
         "meta": {
             "title": a.title, "artist": a.artist, "vocal": a.vocal,
             "source": a.source, "date": a.date,
-            "seed": a.seed, "dur": dur, "fps": 60, "start": w0,
+            "seed": a.seed, "dur": dur, "fps": (getattr(a, "fps", 0) or 60), "start": w0,
             "koma": a.koma, "keyBg": a.keyBg or None,
             "mark": "",
         },

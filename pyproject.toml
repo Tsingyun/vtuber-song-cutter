@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "songcut"
+version = "0.9.0"
+description = "vtuber 歌切：转写→识别→切点→歌词对齐→4K 播放器逐帧渲染→QC"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+  "numpy>=1.26",
+  "requests>=2.31",
+  "Pillow>=10.0",
+  "opencc-python-reimplemented>=0.1.7",
+]
+
+[project.optional-dependencies]
+# 开发/验收用（CI 只装这一组 + 基础依赖）
+dev = ["pytest>=8.0"]
+
+[tool.setuptools]
+packages = ["songcut"]
+
+[tool.pytest.ini_options]
+# 默认只收集「纯逻辑」测试：视频/浏览器相关的是长跑量具，由 tools/check_all.py 或
+# 人工在出片后执行，不进 CI 的快速回路。
+testpaths = ["tests"]
+addopts = "-q"
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"

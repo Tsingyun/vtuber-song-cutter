@@ -1,4 +1,8 @@
 <!doctype html>
+<!-- ROLE: PV · 文字 PV 渲染页（手书产线）
+    职责：只做「按 storyboard 逐帧出画」，实现全在 pv/*.js（core/bg/type/typo/parts/piece/cam/trans/engine）。
+    这是唯一被 pv_* 量具（pv_flash/pv_uniform/pv_determinism/pv_fontcheck）覆盖的页面。
+-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -54,11 +58,15 @@
 <script src="pv/pv_engine.js"></script>
 <script>
 const cv = document.getElementById('cv');          // render_song.cjs 按名字取这个全局
-/* willReadFrequently：这块画布的唯一用途是「画完就导出成帧」，用 CPU 后备存储。
-   GPU 光栅化对同一份绘制指令会给出 ±1~2 的抖动（渐变 dither、tile 调度），
-   在 4K 长片里表现为「同一帧两次渲染 md5 不同」——确定性验收直接不过。
-   ?cpu=0 可关（只用于对比性能，正式渲染务必保持开启）。 */
-const WRF = new URLSearchParams(location.search).get('cpu') !== '0';
+/* 光栅后端（2026-10-30 剖面结论，见 RULES §86）：
+     willReadFrequently:true = CPU 后备存储 = 软件光栅。4K 实测 toBlob 1230ms/帧。
+     GPU 光栅 4K 实测 190ms/帧（q0.90），差 5~6×；软件后端只在「确定性取证」时用。
+   代价：GPU 首触 jitter（渐变 dither/tile 调度）会让同一张画的第 1 帧与后几帧
+   差 ±1~2。视觉不可见，但 md5 会不等 —— 所以保留 touchdup（首渲丢弃）开关，
+   用 ?touchdup=0 关掉换速度，用 ?cpu=1 回到逐字节可复现。 */
+const QS = new URLSearchParams(location.search);
+const WRF = QS.get('cpu') === '1';
+const TOUCHDUP = QS.get('touchdup') !== '0';
 const ctx = cv.getContext('2d', WRF ? { alpha: false, willReadFrequently: true } : { alpha: false });
 const VW = 1920, VH = 1080;
 const OUT_SCALE = (() => {
@@ -179,7 +187,7 @@ window.__frame = async (i, opts) => {
   /* koma 换态首渲丢弃（RULES 76）：GPU 光栅化对每种绘制状态的首次执行会漏 ±1 抖动，
      同一张画的 5 个输出帧里第 1 帧会与后 4 帧字节不一致。量化态切换时先渲一遍丢弃，
      再渲正式帧；同 koma 的后续帧天然已是热态，单渲即可。fast 预推不产出画面，跳过。 */
-  if (!fast && qt !== _lastQt) { _lastQt = qt; PV.renderAt(ctx, t); }
+  if (!fast && TOUCHDUP && qt !== _lastQt) { _lastQt = qt; PV.renderAt(ctx, t); }
   PV.renderAt(ctx, t);
   HL.prog = i;
 };
@@ -212,6 +220,33 @@ window.__pvShot = async (cfg) => {
   PV.renderAt(ctx, cfg.t);
   PV.renderAt(ctx, cfg.t);
   return cv.toDataURL('image/png');
+};
+/* 当前帧属于哪一张画（koma 格号）。
+   renderAt 内部已按 1/KOMA 量化 t ⇒ 同一格内每帧的绘制结果**逐字节相同**。
+   驱动器据此把「一格一编码」做掉：6950 个输出帧只需 2780 次 toBlob（RULES §86）。 */
+/* 同一张画的后续输出帧：只推进进度，不重绘。
+   为什么不能只跳 toBlob：Canvas2D 的绘制指令是**累积**的，跳掉导出不等于跳掉绘制，
+   下一次 toBlob 会把这 2~3 帧的指令全replay 一遍 —— 实测单次编码从 114ms 涨到 302ms，
+   省下的时间又赔回去。只有连 __frame 一起跳过，才真的零成本。 */
+window.__tick = (i) => { HL.prog = i; HL.frame = i; HL.vT = i / HL.fps; };
+/* 快进到第 s 帧（多实例分段渲染用）：只推排版状态，**不产出像素**。
+   为什么不能在大画布上逐帧 __frame(fast)：GPU 后端的绘制指令是累积的，
+   2317 帧的指令堆在显示列表里，实测两个实例预热 2 分钟还没开始出帧。
+   这里把画布临时缩到 192×108（光栅面积 1/400），预热完恢复尺寸并作废转场快照。 */
+window.__fastTo = (s) => {
+  if (!s) return;
+  const w = cv.width, h = cv.height;
+  cv.width = 192; cv.height = 108;
+  for (let i = 0; i < s; i++) window.__frame(i, { fast: 1 });
+  cv.width = w; cv.height = h;
+  applyScale();
+  if (PV.resetCross) PV.resetCross();
+  _lastQt = null;
+};
+window.__komaOf = (i) => {
+  const K = (CFG && CFG.storyboard && CFG.storyboard.meta && CFG.storyboard.meta.koma) || 0;
+  const t = i / HL.fps;
+  return K > 0 ? Math.floor(t * K + 1e-6) : t;
 };
 /* 取当前画布（tools/pv_range.cjs 用）：顺序渲染后要逐帧落盘对比。
    只是读，不参与渲染，不影响成片路径的任何字节。 */
