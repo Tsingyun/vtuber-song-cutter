@@ -95,18 +95,20 @@ def main():
         prev_step = float(np.max(d[lo:ic - 1])) if ic - 2 >= lo else float(d[ic - 1])
         # 抽帧滞后：t 被量化到 1/koma 栅格，切点后 0~2 个输出帧才真正换镜
         dcut = float(np.max(d[ic:min(n, ic + 3)]))
-        # 下限 3.0 而不是 2.0：转场**第一格**本来就会吃掉一小块（mask/iris 从中心开、
-        # wipe 的第一刀横跨 1/5 画幅），拿它跟「上一镜静止时的步长」比只在大出
-        # 一个量级时才说明问题。真正的「弹回」实测在 15~37，3.0 挡得住。
-        thr_cut = max(3.0, 1.6 * prev_step)
-        # ② 转场结尾不能比自己内部的步长更大：p→1 时 A 只剩一条缝，那一步很小；
-        #    若几何写反，p→1 时 A 盖满全屏、随即被丢弃 ⇒ 末端一根孤峰。
         seg = d[ic:iend + 1]
         # 「换画帧」的下限必须高于编码噪声：1080p 12Mbps 时同画的重复帧是**逐字节相同**
         # （d=0.00），4K 18Mbps 下同一张画的重编会有 0.03~0.07 的抖动。拿 0.03 当门槛
         # 会把 4K 成片里所有「静止帧」都算进中位，中位被拉到 0.07，于是每个切点都误报。
         act = seg[seg > 0.30]
         med = float(np.median(act)) if len(act) >= 2 else max(float(seg.max()), 0.05)
+        # 切点的比较基线必须**同时**看「上一镜静止时的步长」和「本转场内部的步长」。
+        # 只看前者会把 zoom / push 这类整幅运动的转场全部判失败：zoom 在 0.42s 里
+        # 放大到 2.15 倍，第一格就已经放大 1.28 倍，切点帧差 7~14 是**设计本身**。
+        # 而真正的弹回是**孤峰**（实测 15~37，紧随其后掉回 3 以下）——它相对转场
+        # 内部中位仍是十几倍，用 max(...) 之后照样抓得住。
+        thr_cut = max(3.0, 1.6 * max(prev_step, med))
+        # ② 转场结尾不能比自己内部的步长更大：p→1 时 A 只剩一条缝，那一步很小；
+        #    若几何写反，p→1 时 A 盖满全屏、随即被丢弃 ⇒ 末端一根孤峰。
         # 转场之后的「本底节奏」：新镜自己也在动（逐词出现、相机推），拿它当中位基线的
         # 一部分，否则「转场结束正好撞上一个词跳出来」会被误判成末端瞬切。
         after = d[min(n - 1, iend + 2):min(n, iend + 9)]
@@ -117,9 +119,18 @@ def main():
         #    只要那一两帧确实变亮了（且随后回落），切点帧差大是应该的。
         #    真正的缺陷（残留白幕 / 淡不回去）由 dend 抓，不在这里放过。
         is_flash = (k == "flash") and float(np.max(dl[ic:min(n, ic + 3)])) > 5.0
+        # ④ 切点后**持续**在高位 ≠ 弹回。
+        #    zoom / push 是整幅运动：新镜背景在第一张画就露出来，加上放大，
+        #    帧差天然是上一镜的 6~8 倍，而且**单调递减**（实测 142.79s：
+        #    10.1 → 7.8 → 5.2 → 4.5 → 0.7）。真正的弹回是**孤峰**：
+        #    切点一帧冲到 15~37，紧跟着就掉回基线（0.5 量级）。
+        #    所以要求「下一帧仍在高位」且「绝对量也不小」，两者同时成立才放行 ——
+        #    这样 2 帧以上的持续闪仍然会被抓。
+        dcut2 = float(np.max(d[ic + 1:min(n, ic + 4)])) if ic + 1 < n else 0.0
+        sustain = dcut > 1.0 and dcut2 > 0.35 * dcut and dcut2 > 2.5
         # 0.05 的数值容差：阈值本身是「灰阶差」这种整数级量，卡在 3.00/3.00 上
         # 报失败没有意义；真正要抓的是成倍超出（实测缺陷在 15~37）。
-        bad_cut = (not is_flash) and dcut > thr_cut + 0.05 and dcut > 1.0
+        bad_cut = (not is_flash) and (not sustain) and dcut > thr_cut + 0.05 and dcut > 1.0
         bad_end = dend > thr_end + 0.05 and dend > 1.0
         rows.append((t0, k, dur, dcut, thr_cut, dend, thr_end, med, bad_cut, bad_end, is_flash))
         if bad_cut or bad_end:
