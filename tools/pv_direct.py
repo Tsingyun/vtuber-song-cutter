@@ -869,7 +869,7 @@ LIVE_SPANS = {
     # 「连续两次同一形态同一侧」。
     #
     # ---------------- V1「醒」：先只在纸下面，然后露一个圆 ----------------
-    1:  dict(mode="wash", seq="s1", layer="avoid", veilK=0.78, a=0.46, lift=0.20,
+    1:  dict(mode="wash", seq="s1", layer="avoid", veilK=0.82, a=0.34, lift=0.28,
              fy=0.46, paper=0.6, ph=0.05,
              reveal={"k": "fade", "dur": 1.10}, out=0.90,
              zoom0=1.03, zoom1=0.07, motion=0.8, win=(9.72, 7.58)),
@@ -910,7 +910,7 @@ LIVE_SPANS = {
              zoom0=1.06, zoom1=0.08, motion=1.0, win=(110.93, 10.48),
             cy=0.545),
     # ---------------- 桥段前：满幅淡底，字压在她身上 ----------------
-    28: dict(mode="wash", seq="s9", layer="avoid", veilK=0.72, a=0.52, lift=0.18,
+    28: dict(mode="wash", seq="s9", layer="avoid", veilK=0.74, a=0.46, lift=0.22,
              fy=0.50, paper=0.6, ph=0.66,
              reveal={"k": "fade", "dur": 0.90}, out=0.80,
              zoom0=1.03, zoom1=0.09, motion=0.9, win=(131.00, 10.39)),
