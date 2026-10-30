@@ -164,6 +164,7 @@ def main():
     log("分析：%.1fs" % stages.get("analyze", 0))
 
     # ---- ④ 歌词
+    linfo = {}                     # --lrc 直给时没有元数据，manifest 要能容错
     if a.lrc:
         lrc = os.path.abspath(a.lrc)
     else:
@@ -283,6 +284,22 @@ def main():
         "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     mp = os.path.join(outdir, "manifest.json")
+    # songs[] 是 songcut.qc 的入口格式（`_pick_entry` 按 mp4 绝对路径匹配）。
+    # 此前 pv_one 只写扁平字段，QC 一条都读不到 —— 于是「一条命令出片」的最后
+    # 一步仍然要手工拼 manifest（RULES §88 的断点④），等于没闭环。
+    man["songs"] = [{
+        "mp4": os.path.abspath(out_mp4),
+        "song": a.song, "artist": a.artist, "vocal": a.vocal,
+        "cut_start": float(a.start), "cut_end": float(a.end), "dur": float(dur),
+        # 原唱官方时长：D01 拿它判「成片有没有被切短」。取不到就留空，
+        # QC 会明确写「缺 orig_duration_s，跳过」而不是误判。
+        "orig_duration_s": (round(linfo["netease_duration_ms"] / 1000.0, 3)
+                            if linfo.get("netease_duration_ms") else None),
+        "timeline_offset_s": 0.0,
+        "lrc_path": os.path.abspath(lrc), "lrc_src_path": os.path.abspath(lrc),
+        "pipeline": "pv_one/%dK%ds-koma%d" % (a.res, a.fps, a.koma),
+        "storyboard": os.path.abspath(sb),
+    }]
     with open(mp, "w", encoding="utf-8") as f:
         json.dump(man, f, ensure_ascii=False, indent=2)
 

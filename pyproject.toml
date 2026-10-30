@@ -14,6 +14,9 @@ dependencies = [
   "requests>=2.31",
   "Pillow>=10.0",
   "opencc-python-reimplemented>=0.1.7",
+  # pv_fonts_audit.py 用它读字面覆盖（缺字会静默滑到系统宋体，见 RULES §83）。
+  # 漏在依赖外时 check_all 的第 ④ 步会直接 ModuleNotFoundError。
+  "fonttools>=4.50",
 ]
 
 [project.optional-dependencies]
