@@ -61,6 +61,33 @@
       texture: { grain: 0.7, paper: 1, scan: 0 }, ghost: 0.5,
       decor: { cropMarks: 1, rule: 1, barcode: 0, dots: 0.3, chapter: 1 },
     },
+    /* ---------------- 画心（2026-10-31） ----------------
+       为什么单开一个 pack：这首歌的底色性格是「宣纸 / 夜 / 月 / 赭」四件事，
+       paper 的品红 accent 太「J-POP」，dawn 的奶油暖橙是「晨光绘本」，两者都会
+       把「人狐畸恋、画皮、月色」读成「可爱」或「时髦」。这里的 accent 统一收到
+       胭脂（#9D3B46 / #A0323D）与赭金（#B08C46），accent2 是月色青（#7F8E9E）。
+       五套 = 吟唱(素纸) → 主歌(夜) → 副歌(月) → 高潮(朱) → 尾奏(烬)。
+       全部浅/深底隔段交替，跨段换纸时观感是「翻过一页画」，不是「换了个滤镜」。 */
+    huaxin: {
+      name: '畫心・宣紙',
+      schemes: [
+        /* 0 素纸：吟唱与前奏。米白宣纸 + 墨青字 + 胭脂点睛 */
+        { bg: '#F5F0E7', fg: '#24272E', sub: '#6E6A61', accent: '#9D3B46', accent2: '#7F8E9E', ink: '#24272E', dim: '#DCD4C6', ghostA: '#9D3B46', ghostB: '#7F8E9E', glow: '#EADFC9', paper: true },
+        /* 1 夜：主歌。近黑底 + 米字 + 胭脂/月青双影 */
+        { bg: '#171A21', fg: '#EAE4D7', sub: '#9A968C', accent: '#B4464F', accent2: '#93A6B8', ink: '#EAE4D7', dim: '#2A2E36', ghostA: '#B4464F', ghostB: '#93A6B8', glow: '#39414E', paper: true },
+        /* 2 月：副歌。冷银灰底 —— 「目光似月色寂寞」的底色 */
+        { bg: '#DCE1E4', fg: '#232A32', sub: '#606870', accent: '#A0323D', accent2: '#B08C46', ink: '#232A32', dim: '#C2C9CD', ghostA: '#A0323D', ghostB: '#B08C46', glow: '#EDF1F3', paper: true },
+        /* 3 朱：副歌高潮。「画不出你的骨骼」的疼，只在最强处出现 */
+        { bg: '#33131A', fg: '#F3E7DA', sub: '#C39C98', accent: '#D8A44E', accent2: '#CC525C', ink: '#F3E7DA', dim: '#4C1F28', ghostA: '#D8A44E', ghostB: '#CC525C', glow: '#59303A', paper: true },
+        /* 4 烬：尾奏。「我的心只愿为你而割舍」之后的余温 */
+        { bg: '#201D19', fg: '#D9CFC1', sub: '#8E857A', accent: '#8E6B3C', accent2: '#6E7A86', ink: '#D9CFC1', dim: '#332E28', ghostA: '#8E6B3C', ghostB: '#6E7A86', glow: '#4A4038', paper: true },
+      ],
+      /* 两个字族就够：宋骨（display/serif）+ 文楷（只在情绪短句上落一笔）。
+         第三个中文字族一加，全片就会读成「字体拼贴」。 */
+      fonts: { display: ['cnSerifB'], serif: ['cnSerifLt', 'cnSerif'], body: ['cnSerifLt'], mono: ['mono'] },
+      texture: { grain: 0.55, paper: 1, scan: 0 }, ghost: 0.62,
+      decor: { cropMarks: 0, rule: 0.25, barcode: 0, dots: 0.15, chapter: 0 },
+    },
     hud: {
       name: 'ダークHUD',
       schemes: [
@@ -105,7 +132,7 @@
       decor: { cropMarks: 0, rule: 0.3, barcode: 0, dots: 0.2, chapter: 0 },
     },
   };
-  PV.PACK_ORDER = ['dawn', 'noir', 'crimson', 'paper', 'hud', 'mono'];
+  PV.PACK_ORDER = ['dawn', 'huaxin', 'noir', 'crimson', 'paper', 'hud', 'mono'];
 
   const lum = hex => {
     const c = PV.hex(hex);

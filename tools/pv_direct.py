@@ -592,10 +592,42 @@ def _check_live_spans(shots):
     print("[live] %d 处人物挂点，均与镜头起点对齐（win = t0 - 2.0s）" % n)
 
 
+CJK_LINE_RE = re.compile(r"[\u3400-\u4dbf\u9fff]")
+
+
+def _is_cjk_text(t):
+    """这一句里有没有汉字。假名/谚文不算 —— 本项目的日文歌走另一套字面。"""
+    return bool(CJK_LINE_RE.search(t or ""))
+
+
+def _title_face(t):
+    """片名/尾卡的字面：拉丁 Fraunces 斜体，中文回到宋骨 700（与歌词同骨）。
+
+    为什么不是 900：全片铺开 900 会读作「重磅海报」，把凄美压成威压；
+    900 只作为**极值**用在单句上（由 _dawn_face 的 weight:max 分支给）。
+    """
+    return "cnSerif" if _is_cjk_text(t) else "frauncesItB"
+
+
 def _dawn_face(spec):
-    """字重/字族：正文 Nunito，情感短句 Fraunces 斜体，weight:max 上 Nunito 最粗。"""
+    """字重/字族：拉丁=正文 Nunito、短句 Fraunces 斜体；中文=宋骨，短句落文楷。
+
+    为什么要分语言：这套字面表原来是纯拉丁的（Nunito / Fraunces 都没有汉字）。
+    中文歌进来时 `ctx.font` 会**逐字静默回退**到 Noto Sans SC —— 全片变成黑体，
+    而「横细竖粗的宋骨」是古风片唯一的语法来源（与 RULES §83 同一个病）。
+    中文只许两个字族：宋（cnSerifLt 正文 / cnSerifB 强拍）+ 文楷（cnKai 只给
+    情绪短句落一笔）。**不许**出现第三个中文字族，否则读作字体拼贴。
+    """
+    txt = spec.get("text") or ""
+    if _is_cjk_text(txt):
+        img = set(spec.get("img") or [])
+        if spec.get("weight") == "max":
+            return "cnSerifB"
+        if (img & {"brill", "cry", "moon", "ink"}) and len(txt) <= 14:
+            return "cnKai"
+        return "cnSerifLt"
     img = set(spec.get("img") or [])
-    nw = len((spec.get("text") or "").split())
+    nw = len(txt.split())
     if (img & {"brill", "cry"}) and nw <= 7:
         return "frauncesItB"
     if spec.get("weight") == "max":
@@ -1323,6 +1355,10 @@ def build_dawn_shots(a, lines, m, dur):
         if _lyr_sim(t1, t2) < 0.85:
             raise SystemExit("[dawn] 第 %d 句文本不一致：映射=%r 时机=%r" % (i, t1, t2))
 
+    # 风格包：默认 dawn；中文歌在映射表 _meta.pack 里指定（如 "huaxin"）。
+    # 写死 "dawn" 会让「画心」这类片共用晨光绘本的奶油橙，情绪直接跑偏。
+    pk = (m.get("_meta") or {}).get("pack") or "dawn"
+
     secs = m.get("sections") or []
     def sec_at(t):
         for s in secs:
@@ -1407,14 +1443,14 @@ def build_dawn_shots(a, lines, m, dur):
         "i": 0, "t0": 0.0, "t1": round(ml[0]["t0"], 3),
         "line": -1, "kind": "card", "tier": 1, "section": "intro",
         "text": a.title or m.get("_meta", {}).get("song", "Innocence"),
-        "layout": {"k": "titleCard", "face": "frauncesItB",
+        "layout": {"k": "titleCard", "face": _title_face(a.title or ""),
                    "kicker": "ORIGINAL SONG", "artist": a.artist,
                    "meta": "VOCAL %s · %s" % (a.vocal, a.date), "shadow": True},
         "enter": {"k": "fadeSlow", "dur": 1.2, "stagger": 0.05, "lead": 0.20},
         "hold": {"k": "breathe", "amp": 0.55},
         "exit": {"k": "fade", "dur": 0.85},
         "type": {}, "treat": {"k": "solid"},
-        "pal": {"pack": "dawn", "idx": 0},
+        "pal": {"pack": pk, "idx": 0},
         "bgl": [dict(D_BG["sunrise"], k="sunrise"),
                 dict(D_BG["windowLight"], k="windowLight", n=2, a=0.10)],
         "bg": [], "decor": [dict(D_DECOR["softCorners"], k="softCorners", seed=3)],
@@ -1484,7 +1520,7 @@ def build_dawn_shots(a, lines, m, dur):
             "type": {},
             "enter": ent, "hold": hold, "exit": xit,
             "treat": {"k": "solid"},
-            "pal": {"pack": "dawn", "idx": pal_idx(spec, sec)},
+            "pal": {"pack": pk, "idx": pal_idx(spec, sec)},
             "bgl": bgl, "bg": [],
             "decor": decor_items(spec, i),
             "post": post, "cam": cam,
@@ -1517,7 +1553,7 @@ def build_dawn_shots(a, lines, m, dur):
         "i": len(shots), "t0": round(outro_t0, 3), "t1": round(dur, 3),
         "line": -1, "kind": "card", "tier": 1, "section": "outro",
         "text": "",
-        "layout": {"k": "titleCard", "face": "frauncesItB",
+        "layout": {"k": "titleCard", "face": _title_face(m.get("_meta", {}).get("song", "")),
                    "kicker": "", "artist": "",
                    "meta": "%s — %s ｜ 歌切：%s ｜ %s"
                            % (m.get("_meta", {}).get("song", "Innocence"),
@@ -1526,7 +1562,7 @@ def build_dawn_shots(a, lines, m, dur):
         "hold": {"k": "breathe", "amp": 0.4},
         "exit": {"k": "fade", "dur": 1.6},
         "type": {}, "treat": {"k": "solid"},
-        "pal": {"pack": "dawn", "idx": 4},
+        "pal": {"pack": pk, "idx": 4},
         "bgl": [dict(D_BG["petal"], k="petal", n=16, a=0.16),
                 dict(D_BG["sunrise"], k="sunrise", y=0.9, a=0.10)],
         "bg": [], "decor": [],
@@ -1604,7 +1640,7 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
             "paper_ok": True,
             "mark": "",
         },
-        "palette": {"pack": "dawn", "idx": 0},
+        "palette": {"pack": (m.get("_meta") or {}).get("pack") or "dawn", "idx": 0},
         "audio": {"bpm": ana["bpm"], "barSec": ana["bar_sec"],
                   "sections": [[s["t0"], s["t1"], s["name"]] for s in secs]},
         "lines": lines,

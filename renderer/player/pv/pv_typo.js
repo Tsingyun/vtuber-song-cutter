@@ -47,7 +47,10 @@
     const sp = PV.measure(ctx, ' ', st.face, size);
     let x = 0;
     ws.forEach((w, k) => {
-      if (k) x += sp * (1 + (st.track || 0));
+      /* 汉字之间**不插空格宽**：中文的词距不是空格，是字形自带边距 + 设计的 track。
+         插了那个空格，一行十来个字就被拉开成「分散对齐」，宋体的横细竖粗全被吃掉
+         （2026-10-31 实测：画心样片整行读作 PPT 而非法帖）。拉丁照旧。 */
+      if (k) x += (isCJKUnit(ws[k - 1]) && isCJKUnit(w)) ? 0 : sp * (1 + (st.track || 0));
       const g = PV.buildGlyphs(ctx, { text: w.t, words: [{ text: w.t, t0: w.t0, t1: w.t1 }] },
         Object.assign({}, st, { size, text: w.t }));
       for (const q of g) { q.x += x; q.wi = w.i; }
@@ -63,7 +66,72 @@
      后者含 opticalTighten 与逐字字距，两套数不相等。结果是 wrap 以为一行 1267、
      实际画出 1396，长句整行捅到人物身上（i=44 压了 145px）。
      现在统一用 row() 量：排一次版，多量几十次测量，换掉满屏溢出。 */
+  /* ---------------- 中文断行（2026-10-31） ----------------
+     中文按字成「词元」（pv_timing.split_units 一个汉字一个单元），走拉丁那套 wrap 会
+     出两个一眼假的问题：
+       ① 每个字之间插一个**空格宽**（拉丁的词距），整行看上去像被拉开的字距 ——
+          宋体的横细竖粗全被这点空吃掉，「印刷感」变成「PPT 分散对齐」；
+       ② 到边界就断，不管断在哪个字上（实测「看着你抱着我目 / 光似月色」）。
+     所以中文单独一条：字距交给 track（设计量），断行做「避头尾」——行首不落
+     的/了/着/地/得 这类收尾字，行尾不落在/是/和/与 这类必须黏后字的虚词。 */
+  const CJK_CH = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/;
+  const NO_START = '的了着过地得们呢吧啊呀嘛哦';
+  const NO_END = '在是和与就也都而把被给让向从对最很太不没无一旦并或：:、，。';
+  const isCJKUnit = q => typeof q.t === 'string' && q.t.length === 1 && CJK_CH.test(q.t);
+
+  /* 避头尾：逐断点修，最多两轮（一次挪动会改变下一处的位置）。
+     行首不许落「的/了/着…」这类收尾字，行尾不许落「在/是/和/与…」这类必须黏后字的
+     虚词 —— 中文排版的禁则，也是「这一版排过」与「这一版没排过」的分界。 */
+  function kinsoku(rows) {
+    for (let pass = 0; pass < 2; pass++) {
+      for (let k = 0; k < rows.length - 1; k++) {
+        const A = rows[k], B = rows[k + 1];
+        if (!A.length || !B.length) continue;
+        const head = B[0].t, tail = A[A.length - 1].t;
+        if (NO_START.includes(head) && A.length > 1) {
+          B.unshift(A.pop());
+        } else if (NO_END.includes(tail) && B.length > 1) {
+          A.push(B.shift());
+        }
+      }
+    }
+  }
+
+  function wrapCJK(ctx, ws, face, size, track, maxW) {
+    const st0 = { face, track: track || 0, squeeze: 1 };
+    const wcache = new Map();
+    const wOf = q => {
+      const k = q.t;
+      if (!wcache.has(k)) wcache.set(k, PV.glyphWidth(row(ctx, st0, [q], size).g));
+      return wcache.get(k);
+    };
+    const rows = [];
+    let cur = [], w = 0;
+    for (const q of ws) {
+      const ww = wOf(q);
+      if (cur.length && w + ww > maxW) { rows.push(cur); cur = []; w = 0; }
+      w += ww;
+      cur.push(q);
+    }
+    if (cur.length) rows.push(cur);
+    if (rows.length < 2) return rows;
+    kinsoku(rows);
+    /* 均衡：两行时把宽度差压到 1.3 倍以内，否则读作「上面挤、下面空」。
+       只在两行、且两行都是中文的情况下做，三行以上交给原 greedy。 */
+    if (rows.length === 2) {
+      const wsum = r => r.reduce((a, q) => a + wOf(q), 0);
+      let guard = 0;
+      while (guard++ < 4) {
+        const a = wsum(rows[0]), b = wsum(rows[1]);
+        if (a <= b * 1.30 || rows[0].length < 3) break;
+        rows[1].unshift(rows[0].pop());
+      }
+    }
+    return rows.filter(r => r.length);
+  }
+
   function wrap(ctx, ws, face, size, track, maxW) {
+    if (ws.length > 2 && ws.every(isCJKUnit)) return wrapCJK(ctx, ws, face, size, track, maxW);
     const st0 = { face, track: track || 0, squeeze: 1 };
     const wcache = new Map();
     const wOf = q => {
@@ -139,6 +207,7 @@
     const rows = [];
     let j = n, r = br;
     while (j > 0 && r > 0) { const i = prev[r][j]; if (i < 0) break; rows.unshift(ws.slice(i, j)); j = i; r--; }
+    if (rows.length > 1 && ws.every(isCJKUnit)) kinsoku(rows);
     return rows.length ? rows : wrap(ctx, ws, face, size, track, maxW);
   }
 
@@ -193,7 +262,8 @@
     const kickY = Math.min(H * 0.30, baseY - size * 0.92);
     marks.push(label(m + lab * 1.5, kickY, (st.kicker || 'ORIGINAL SONG'), lab, p.sub, { track: 0.24, at: 0.18 }));
     marks.push(plate(m, kickY - lab * 0.60, lab * 0.42, lab * 0.42, p.accent, { at: 0.18, dur: 0.3 }));
-    if (st.artist) marks.push(label(m, baseY + size * 0.34 + lab * 2.4, st.artist, lab * 1.55, p.fg, { at: 0.55 }));
+    if (st.artist) marks.push(label(m, baseY + size * 0.34 + lab * 2.4, st.artist, lab * 1.55, p.fg,
+      { at: 0.55, face: /[\u3400-\u9fff]/.test(String(st.artist)) ? 'cnSerifLt' : null }));
     if (st.meta) {
       marks.push(label(m, baseY + size * 0.34 + lab * 4.5, st.meta, lab * 0.94, p.sub, { track: 0.16, at: 0.75 }));
     }
@@ -751,9 +821,15 @@
          少了 SC 兜底就会让「岁」静默滑到泛型 monospace（Windows 中文环境=宋体），
          同一个词里一半黑一半宋。Latin 走 IBM Plex Mono（档案行的 mono 质感），
          中文一律 Noto Sans SC，日文假名才轮到 Zen Kaku。见 RULES §83。 */
-      ctx.font = '400 ' + (m.size || 24) + 'px "IBM Plex Mono", "Noto Sans SC", "Zen Kaku Gothic New", monospace';
+      /* m.face 可选：中文的「署名行」（片名卡上的原唱名）不该走 mono 的 0.14em 字距 ——
+         三个汉字被拉开就是「网页表单」；宋体紧排才是「电影片尾」。拉丁/数字仍走 mono。 */
+      const _sz = m.size || 24;
+      ctx.font = m.face
+        ? PV.cssFace(m.face, _sz)
+        : '400 ' + _sz + 'px "IBM Plex Mono", "Noto Sans SC", "Zen Kaku Gothic New", monospace';
       ctx.textBaseline = 'alphabetic';
-      const tr = (m.track || 0.14) * (m.size || 24);
+      const _cjkLab = /[\u3400-\u9fff]/.test(String(m.text || ''));
+      const tr = (m.track == null ? (_cjkLab ? 0.02 : 0.14) : m.track) * _sz;
       const al = m.align || 'left';
       ctx.textAlign = 'left';
       const s = String(m.text || '');
