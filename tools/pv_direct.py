@@ -258,6 +258,11 @@ BG_POOL = [("rings", 2), ("halftone", 1.8), ("wash", 1.6), ("grid", 1.3),
 # 硬约束：没有 --style 时下面每个函数都原样返回入参，所以旧工作流的编排稿
 # 逐字段不变（这条是 S3 的验收条件之一，不是「应该」）。
 _STYLE = None
+# 风格弧线（--arc）：与 _STYLE 是两层，互不替代。
+#   _STYLE 决定「这支片像谁」（整片一套取值收窄）；
+#   _ARC   决定「这一刻像什么」（逐句随内容漂移）。
+# 可以只用其中一个，也可以叠着用：档案定基调，弧线在基调里呼吸。
+_ARC = None
 
 VALID_TRANS = ("wipe", "blinds", "blocks", "clock", "dissolve", "flash", "grad",
                "ink", "iris", "mask", "push", "slice", "zoom")
@@ -2073,8 +2078,13 @@ def main():
                     help="JIZURA 层的合成方式；screen 对应它原生 keyBg 通道（白字压黑底）")
     ap.add_argument("--jz-alpha", type=float, default=1.0,
                     help="JIZURA 层整体不透明度（0~1）")
+    ap.add_argument("--arc", action="store_true",
+                    help="风格弧线：按歌词意境 + 曲风能量，逐句连续调制配色/字距/转场 "
+                         "（默认关闭；关闭时编排稿逐字段与旧版相同）")
+    ap.add_argument("--arc-dump", default="",
+                    help="把弧线的关键帧与逐句判据写成 JSON（检查用）")
     a = ap.parse_args()
-    global _STYLE
+    global _STYLE, _ARC
     if a.style:
         if a.concept:
             # 意象映射表是逐镜定稿（谁在哪一镜、字放哪、怎么转场都写死了）。
@@ -2170,6 +2180,22 @@ def main():
     # SL 与 LOOK 同构：{段名: (pack, scheme0)}；无风格层时 SL=None，下面全部走原表。
     SL = style_look(secs, mood_of) if _STYLE else None
 
+    # ---- 风格弧线（--arc）：逐句坐标。必须在 lines 平移之后、
+    # 按句循环之前算完 —— 它按「句」采样，句内不再变。
+    ARC_SCH = {}
+    ARC_SW = {}
+    if a.arc:
+        import pv_arc
+        _ARC = pv_arc.build(lines, ana, w0, dur)
+        ARC_SCH = pv_arc.pack_schemes()
+        print("[arc] %d 句 → %d 关键帧  句边界过渡 %.2fs  （意境 %.0f%% / 曲风 %.0f%%）"
+              % (len(lines), len(_ARC.keys), _ARC.meta["lead"],
+                 100 * _ARC.meta["w_lyric"], 100 * _ARC.meta["w_music"]))
+        print(pv_arc.describe(_ARC))
+        if a.arc_dump:
+            pv_arc.dump(_ARC, a.arc_dump)
+            print("[arc] -> %s" % a.arc_dump)
+
     print("[look] 段落 → 纸%s" % ("（风格层：%s）" % "/".join(_STYLE["packs"]) if SL else ""))
     for s in secs:
         pk = (SL.get(s["name"]) if SL else None) or LOOK.get(s["name"], ("noir", 0))
@@ -2203,15 +2229,38 @@ def main():
         r = rng(a.seed, 200 + i)
 
         pack, sch0 = (SL.get(sec["name"]) if SL else None) or LOOK.get(sec["name"], ("noir", 0))
-        # 段内轮转：每累计 SWITCH_EVERY 秒换同 pack 的下一套 scheme。
-        # 旧写法是「过中点 且 sch==0 才换成 1」——于是只有 crimson 段能触发，
-        # 而且 13 镜里只换后半段一次，纸还是读成连着的一整片。
-        st = SEC_SW.setdefault(sec["name"], [sec["t0"], sch0])
-        nsc = SCHEME_N.get(pack, 1)
-        if nsc > 1 and (sec["t1"] - sec["t0"]) > 34 and l["t0"] - st[0] >= SWITCH_EVERY:
-            st[1] = (st[1] + 1) % nsc
-            st[0] = l["t0"]
-        sch = st[1]
+        sch, arc_mix, arc_why = sch0, None, ""
+        av, arc_jump = None, 0.0
+        if _ARC is not None:
+            # 弧线接管换纸：scheme 由「这一句的 lum」决定，而不是「这一段轮转到第几套」。
+            # 段内轮转的时间常数（SWITCH_EVERY=24s）在 35 秒的副歌里一次都不会触发，
+            # 四句共用一套纸 —— 那正是「风格没跟着内容走」最直接的表现。
+            av = _ARC.at(l["t0"])
+            st_arc = ARC_SW.setdefault(pack, {"cur": None, "last": None})
+            sch, arc_mix, arc_why = _ARC.pick(
+                pack, l["t0"], ARC_SCH.get(pack) or [],
+                cur=st_arc["cur"], last_switch=st_arc["last"])
+            if st_arc["cur"] != sch:
+                st_arc["last"] = l["t0"]
+            # 换纸的「幅度」= 两套 scheme 底色的亮度差。它决定转场要放多长，
+            # 所以必须在换纸那一刻就算出来，而不是等渲染时再说。
+            if st_arc["cur"] is not None and st_arc["cur"] != sch:
+                try:
+                    arc_jump = abs(ARC_SCH[pack][sch]["lum"]
+                                   - ARC_SCH[pack][st_arc["cur"]]["lum"])
+                except (KeyError, IndexError):
+                    arc_jump = 0.0
+            st_arc["cur"] = sch
+        else:
+            # 段内轮转：每累计 SWITCH_EVERY 秒换同 pack 的下一套 scheme。
+            # 旧写法是「过中点 且 sch==0 才换成 1」——于是只有 crimson 段能触发，
+            # 而且 13 镜里只换后半段一次，纸还是读成连着的一整片。
+            st = SEC_SW.setdefault(sec["name"], [sec["t0"], sch0])
+            nsc = SCHEME_N.get(pack, 1)
+            if nsc > 1 and (sec["t1"] - sec["t0"]) > 34 and l["t0"] - st[0] >= SWITCH_EVERY:
+                st[1] = (st[1] + 1) % nsc
+                st[0] = l["t0"]
+            sch = st[1]
         fonts = FONTS.get(pack, FONTS["noir"])
 
         words = [w["text"] for w in l["words"]]
@@ -2284,6 +2333,17 @@ def main():
                 typ["track"] = _ty["tracking"]
             if _ty.get("leading") is not None:
                 typ["lead"] = _ty["leading"]
+        if av is not None:
+            # 弧线的 dense 调制字距。有档案时**乘**在档案的基准上，而不是覆盖它：
+            # 档案说的是「这支片的字距性格」，弧线说的是「这句该更疏还是更密」，
+            # 两者是基调 × 变化的乘法关系。覆盖会让档案的性格在弧线一开就消失。
+            import pv_arc as _pa
+            tp = _pa.type_params(av)
+            if _STYLE and _STYLE["type"].get("tracking") is not None:
+                typ["track"] = round(_STYLE["type"]["tracking"]
+                                     * (0.55 + 0.90 * float(av["dense"])), 4)
+            else:
+                typ["track"] = tp["track"]
 
         # ---- 入场 / 保持 / 退场（P0-2 三重加权抽卡）
         # pAssemble 是 piece 级入场：字被拆成零件后各自飞回来拼成整体。
@@ -2343,6 +2403,26 @@ def main():
             # 档案实测的渐变跨度。不写这一项，引擎会退回每种转场的默认时长，
             # 「时长」这一维就完全不受档案影响 —— 那等于风格只改了颜色。
             trans["dur"] = _STYLE["trans_dur"]
+        if av is not None:
+            # 弧线调制转场时长：静 0.55s / 动 0.30s（见 pv_arc.trans_params）。
+            # 换纸幅度大（跨深/浅，arc_jump > 0.30）时再拉长到 0.55s 以上 ——
+            # 一整块月白换成靛蓝用 0.30s 的擦除，读作「闪」；这正是要避免的「突兀」。
+            # 弧线的值比档案更具体，所以放在档案之后覆盖。
+            import pv_arc as _pa
+            _d = _pa.trans_params(av)["dur"]
+            if arc_jump > 0.30:
+                _d = max(_d, 0.55)
+            trans["dur"] = round(_d, 3)
+            if arc_jump > 0.30:
+                # 大跳时把转场族收到**空间分离**的柔族 —— grad（渐变扫过）。
+                #
+                # 为什么不用 dissolve：一开始就是它，实测不可用。两镜都满字、
+                # 且大字位置不同时，透明叠化会把两层笔画压成一片黑糊（t=20.5 的实拍帧：
+                # 「是我一首」与「你的执着」重叠成一团）。dissolve 只在两镜内容相近时成立，
+                # 而「换纸」恰恰是内容最不相同的时刻。
+                # grad 则是空间上分开的：新画面从一侧推进，任何一帧都只有一个清晰的字层。
+                if transk != "grad":
+                    trans["k"] = "grad"
 
         # ---- 相机
         poolc, alt = [], []
@@ -2409,6 +2489,20 @@ def main():
         else:
             recall[txt] = (layk, entk, transk)
 
+        # ---- 换纸镜头：入场延迟，让「旧句的字被擦掉」与「新句的字长出来」错开
+        # 实测依据：t=20.5（换纸 0.13s 后）两镜的大字在同一帧里重叠，读作一团黑块。
+        # 原因是转场擦的是上一镜的**最后一帧**，而那一帧里旧字还有 45%（X_KEEP），
+        # 新字同时已经入场 —— 两层笔画压在软坡里，谁都不清楚。
+        # 把入场推后 0.26s（约 8 帧），软坡推进到一半时新字才开始长，重叠窗口就没了。
+        # 只对换纸镜头生效：普通换句没有这个问题，全局推后会变成「字幕迟半拍」。
+        if arc_jump > 0.30 and ent:
+            ent["lead"] = round(max(float(ent.get("lead") or 0.04), 0.26), 3)
+            # 上一镜的退场走到底（0.96），让快照 A 是一张近乎空白的纸。
+            # 这才是「翻页」该有的样子：上一句讲完 → 字退干净 → 纸翻过去 → 新句长出来。
+            # 只推入场、不推退场，A 里仍然压着 45% 的旧字，软坡里两层笔画照样打架。
+            if shots:
+                shots[-1]["xKeep"] = 0.96
+
         shots.append({
             "i": len(shots), "t0": round(t0, 3), "t1": round(t1, 3),
             "line": i, "kind": "line", "tier": m["cam"], "section": sec["name"],
@@ -2417,12 +2511,18 @@ def main():
             "enter": ent, "hold": hold, "exit": xit,
             "trans": trans,
             "treat": {"k": "solid"},
-            "pal": {"pack": pack, "idx": sch},
+            "pal": dict({"pack": pack, "idx": sch},
+                        **({"mix": arc_mix} if arc_mix else {})),
+            # 逐镜坐标：引擎侧不再读它（它读 sb.arc 的曲线），留着是给
+            # probe/抽帧工具与人工核对用的 —— 「这一镜为什么是这个颜色」
+            # 必须能在编排稿里直接看到答案，而不是反算 pu 曲线。
+            **({"arc": {k2: round(av[k2], 3) for k2 in av}} if av is not None else {}),
             "bgl": bgl, "bg": bg, "decor": decor, "post": [],
             "cam": cam, "fig": fig, "sync": False, "wobble": 0,
             "unified": recap,
-            "note": "%s / %s / %s / %s%s" % (sec["name"], pack, layk, entk,
-                                             " / recap" if recap else ""),
+            "note": "%s / %s / %s / %s%s%s" % (sec["name"], pack, layk, entk,
+                                               " / recap" if recap else "",
+                                               (" / arc:" + arc_why) if arc_why else ""),
         })
 
     # ---- 片头标题卡：占满整个前奏（绝不移动歌词时间轴）
@@ -2517,10 +2617,35 @@ def main():
                       "w": int(jm.get("w") or 1920), "h": int(jm.get("h") or 1080),
                       "pattern": jm.get("pattern") or "j_%05d.png"}
         hit = [s for s in shots if s["t1"] > seq_t0 and s["t0"] < seq_t0 + jm["n"] / float(jm["fps"])]
+        deep_fix = 0
         for s in hit:
+            ja = a.jz_alpha
+            # ---- 深底自动退后（2026-11-01，随风格弧线一起出现的问题）----
+            # JIZURA 层用 screen 混合：白字压在**黑底**上，浅底上天然不可见 ——
+            # 所以它作为「背景装饰」一直是安全的，一直到这支片开始有深底镜头。
+            # 深底上 screen 会把它的整片歌词浮出来，与我们的歌词**同屏两套字**，
+            # 而且它排得比我们密（看 t=16 的实拍帧：背景一墙「记着你的」）。
+            # 这不是调参问题，是「浅底看不见、深底才显形」的隐式假设被打破。
+            # 处理：深底镜头的 JIZURA 退到 0.14 倍（0.40 → 0.056）。实测 0.45 倍
+            # （0.18）时它的整片歌词仍然清晰可读 —— 因为它是 screen 合成 + 白字，
+            # 在深底上的对比度远高于浅底。退到 0.056 后只剩一层暗纹（放大可辨字形、
+            # 整体看读作纹理），既不与主歌词抢读，也仍然保留它的排版质感。
+            lum = None
+            try:
+                import pv_arc as _pa
+                _sch = _pa.pack_schemes().get((s.get("pal") or {}).get("pack") or "")
+                if _sch:
+                    lum = _sch[int((s["pal"] or {}).get("idx") or 0) % len(_sch)]["lum"]
+            except Exception:
+                lum = None
+            if lum is not None and lum < 0.5:
+                ja *= 0.14
+                deep_fix += 1
             s["jz"] = {"seq": "jz", "tOff": round(-seq_t0, 3),
                        "layer": a.jz_layer, "blend": a.jz_blend,
-                       "a": round(a.jz_alpha, 3)}
+                       "a": round(ja, 3)}
+        if deep_fix:
+            print("[jz] 深底 %d 镜：alpha ×0.14（screen 在深底会把整片字浮出来）" % deep_fix)
         print("[jz] %s  %d 帧 @%.2ffps  起点 %.2fs  覆盖 %d/%d 镜  layer=%s blend=%s"
               % (os.path.basename(os.path.dirname(a.jz)), jm["n"], jm["fps"],
                  seq_t0, len(hit), len(shots), a.jz_layer, a.jz_blend))
@@ -2547,6 +2672,10 @@ def main():
             **({"live": live} if live else {}),
         },
         "palette": {"pack": "noir", "idx": 0},
+        # 风格弧线随编排稿一起走：渲染端只认这份曲线，不需要回头再算一遍
+        # （再算一遍就可能因为 analysis/词典版本不同而漂移 —— 编排稿必须自包含）。
+        **({"arc": {"version": 1, "meta": _ARC.meta, "keys": _ARC.keys}}
+           if _ARC is not None else {}),
         "audio": {"bpm": ana["bpm"], "barSec": ana["bar_sec"],
                   "sections": [[s["t0"], s["t1"], s["name"]] for s in secs]},
         "lines": lines,

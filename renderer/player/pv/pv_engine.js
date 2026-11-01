@@ -1232,7 +1232,9 @@
          背景纹理全部被吃掉，等于白做。 */
       PV.FX.vignette(ctx, { a: 0.40, r0: PV.H * 0.46, r1: PV.H * 1.10 }, { S });
     }
-    if (!kb) PV.drawGrain(ctx, 0, 0, PV.W, PV.H, (shot._S || S).flat ? 0.30 : 0.55, ST.dpr);
+    if (!kb) PV.drawGrain(ctx, 0, 0, PV.W, PV.H,
+      PV.arcGrain ? PV.arcGrain(t, (shot._S || S).flat ? 0.30 : 0.55)
+                  : ((shot._S || S).flat ? 0.30 : 0.55), ST.dpr);
 
     /* 角落极淡标记：歌名/来源改成片头标题卡承载后，全片只留这一行。
        压在画面右下角、alpha 0.16 —— 存在但不抢戏，观众要看得到、平时看不见。 */
@@ -1244,6 +1246,13 @@
     /* 切间过渡（TRANS 分组）：把上一镜快照按转场几何让掉，露出这一镜。
        p=0 时整幅盖 A、p=1 时什么都不画（契约见 pv_trans.js 文件头）。 */
     crossFade(ctx, shot, t);
+    /* ---- 风格弧线的逐帧色温层（pv_arc.js）----
+       画在转场**之后**：这一层说的是「整幅画面此刻的温度」，不是「某个镜头的温度」。
+       画在转场之前，A（上一镜快照）会带着旧色温从底下透出来，转场期间出现
+       「一半暖一半冷」的横向割裂 —— 而这条割裂正好落在观众最注意的那 0.4 秒里。
+
+       绿幕/黑幕导出时跳过：抠像要纯色，任何一层薄色都是脏边。 */
+    if (!kb && PV.drawArcTone) PV.drawArcTone(ctx, t);
     /* ---- 上下黑边（letterbox）----
        参考片 BV1jUxC6SEko 的有效画面是 1920×980 @ y=58，上下共 9.3% 是纯黑边；
        它属于**构图**（画幅之内才是画面），不是后期加的相框。
@@ -1430,6 +1439,9 @@
     ST.koma = opt.koma != null ? opt.koma : (meta && meta.koma != null ? meta.koma : 12);
     ST.dur = opt.dur;
     ST.S = buildStyle(opt.storyboard.palette || {}, ST.dpr);
+    /* 风格弧线：没有 arc 字段时 setArc 返回 null，下面所有 arc 调用都会短路 ——
+       旧编排稿（含所有既有成片的 storyboard.json）逐字节不变。 */
+    if (PV.setArc) PV.setArc(opt.storyboard.arc);
     /* 绿幕导出（JIZURA 的 keyBg）：job.meta.keyBg = 'green'|'black'|'white'。
        单镜头也能用 shot.keyBg 覆写（演示片里混一段色键素材就是这么做的）。 */
     ST.keyBg = opt.keyBg || (opt.storyboard.meta && opt.storyboard.meta.keyBg) || null;
@@ -1477,9 +1489,18 @@
         || { text: sh.text || '', t0: sh.t0, t1: sh.t1, words: [], chars: [] };
       /* 调色板必须先于构图解算：版面要拿九角色去画自己的线/注记/暗影。
          编排稿里 pal 只写 {pack, idx}（30 字节），色值由 pv_scheme.js 解算 ——
-         改一个色值只改一处，不必回写 48 个镜头的 JSON。 */
+         改一个色值只改一处，不必回写 48 个镜头的 JSON。
+
+         `pal.mix` 是风格弧线的产物（tools/pv_arc.py）：曲线落在两套 scheme 之间时，
+         这里按权重**混**出一套调色板，而不是二选一跳变。混不出来（跨深/浅）时
+         STYLE_MIX 返回 null，退回 idx 那套 —— 这条退化路径必须显式处理，
+         否则 Object.assign(undefined) 会让整镜没有 pal，画面退化成全局 ST.S 的配色。 */
       sh._pal = sh.pal
-        ? (sh.pal.pack ? Object.assign({}, PV.STYLE(sh.pal.pack, sh.pal.idx | 0), sh.pal) : sh.pal)
+        ? (sh.pal.pack
+          ? Object.assign({}, (sh.pal.mix
+            ? (PV.STYLE_MIX(sh.pal.pack, sh.pal.mix) || PV.STYLE(sh.pal.pack, sh.pal.idx | 0))
+            : PV.STYLE(sh.pal.pack, sh.pal.idx | 0)), sh.pal)
+          : sh.pal)
         : null;
       sh._S = sh._pal ? Object.assign({}, ST.S, buildStyle(sh._pal, ST.dpr)) : ST.S;
       const stp = Object.assign({ line, text: (sh.text || line.text) }, sh.layout || {}, sh.type || {});
@@ -1504,7 +1525,12 @@
       const sh = ST.shots[k];
       const hasNext = k + 1 < ST.shots.length;
       const xd0 = (sh.exit && sh.exit.dur != null) ? sh.exit.dur : 0.42;
-      sh._xcap = (hasNext && PV.TRANS) ? X_KEEP : 1;
+      /* xKeep：有下一镜时退场走到哪里停（默认 0.55，剩下的交给转场擦）。
+         换纸镜头（风格弧线的跨深/浅切换）会把它推到 0.96 —— 那一镜的 A 必须
+         近乎空纸，否则转场擦过去的是一整片**上一句的字**，与新句的字在软坡里
+         叠成一团（实测 t=20.5）。退场走完本身也是对的叙事：这句讲完了。 */
+      const keep = (sh.xKeep != null) ? sh.xKeep : X_KEEP;
+      sh._xcap = (hasNext && PV.TRANS) ? keep : 1;
       sh._xout = Math.max(0.05, xd0 * sh._xcap);
     }
     ST.stats = { glyphs: total, shots: ST.shots.length };
