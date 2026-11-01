@@ -84,6 +84,15 @@ def main():
     ap.add_argument("--body-w", type=int, default=580)
     ap.add_argument("--body-h", type=int, default=772)   # 580:772 = 3:4
     ap.add_argument("--jobs", default=None, help="输出 job 描述 json")
+    # 满幅底衬的裁切窗：缺省仍是 1027 那场的 600..1370（聊天栏右缘 590、
+    # 礼物卡左缘 1370）。换成另一场直播（UI 版面不同）必须能改。
+    ap.add_argument("--wide-x", type=int, default=600)
+    # 纵向偏移：原设计从 y=0 切 16:9，前提是「脸只占画面 1/3」。
+    # 这一场取景很紧（头部从 y=0 到 610），y=0 的 540 高正好切在下巴上方 ⇒
+    # 淡底里是一张「没有下巴的脸」。y=110 让下巴落在 500/540，帽子只擦掉一条边。
+    ap.add_argument("--wide-y", type=int, default=0)
+    ap.add_argument("--wide-w", type=int, default=770)
+    ap.add_argument("--wide-h", type=int, default=433)
     a = ap.parse_args()
 
     ss = a.cut_start + a.start
@@ -121,15 +130,16 @@ def main():
         # 420 是从旧版继承来的，而这一版录播的**聊天栏右缘在 x≈590** —— 从 420 起
         # 会带进 170px 聊天区：淡底里漏出紫色弹幕气泡，一眼就是「截了张图」。
         # 600..1370（770×433，16:9）刚好把聊天栏与右下礼物卡（左缘≈1370）都关在框外。
-        cw, chh = int(round(770 * sc)), int(round(433 * sc))
-        cx0 = int(round(600 * sc))
+        cw, chh = int(round(a.wide_w * sc)), int(round(a.wide_h * sc))
+        cx0 = int(round(a.wide_x * sc))
+        cy0 = int(round(a.wide_y * sc))
         # 480 宽放大到 1920 是 4×，实测色块明显；960 是 2×，柔但仍是「失焦」不是「马赛克」
         ww, wh = 960, 540
         # 降饱和在 ffmpeg 侧烘死：canvas 的 ctx.filter 每帧重跑 saturate 在 4K 下很贵，
         # 而底衬本身就是「失焦的现场」，颜色要退到背景里去，不能和歌词/封面的彩色抢。
         files = extract(a.src, ss, a.dur,
-                        "fps=%d,crop=%d:%d:%d:0,scale=%d:%d:flags=lanczos,hue=s=0.42"
-                        % (a.wide_fps, cw, chh, cx0, ww, wh),
+                        "fps=%d,crop=%d:%d:%d:%d,scale=%d:%d:flags=lanczos,hue=s=0.42"
+                        % (a.wide_fps, cw, chh, cx0, cy0, ww, wh),
                         d, "w_%05d.jpg", q=5)
         info["wide"] = {"dir": d.replace("\\", "/"), "n": len(files), "fps": a.wide_fps,
                         "w": ww, "h": wh, "pattern": "w_%05d.jpg"}

@@ -577,22 +577,37 @@ def _check_live_spans(shots):
         f = sh.get("fig")
         if not f:
             continue
+        off = float(f.get("tOff") or 0)
+        if sh.get("line", 0) < 0:
+            # 拆镜产生的 breath 镜：它不属于任何一句，t0 必然偏离 win.start。
+            # 它唯一的正确性要求是「时间落在序列窗口内」，否则引擎取不到帧、
+            # 那一镜会静默变成空纸（比报错更难发现）。
+            rel = sh["t0"] + off
+            wd = float(f.get("wDur") or 0)
+            if rel < -0.10 or (wd > 0 and rel > wd + 0.10):
+                bad.append("shot %d(breath) t0=%.2f 落在序列窗口 %.2f~%.2f 之外"
+                           % (sh["i"], sh["t0"], -off, -off + wd))
+            continue
         n += 1
         # fig 里 win 已被 _live_fig pop 掉（只留 tOff = -win.start），
         # 所以反查用 t0 + tOff = win.start，它应当等于镜头起点前 2.0s。
-        st = sh["t0"] + float(f.get("tOff") or 0)
+        st = sh["t0"] + off
         if abs(st - 2.0) > 0.35:
             bad.append("shot %d t0=%.2f 窗口起点=%.2f（应为 t0-2.0）"
                        % (sh["i"], sh["t0"], st))
     if bad:
         raise SystemExit("[live] 挂点与镜头时间对不上（键错位？）：\n  " + "\n  ".join(bad))
-    if n != len(LIVE_SPANS):
+    if n != len(_SPANS):
         raise SystemExit("[live] 只挂上 %d 处，LIVE_SPANS 有 %d 处"
-                         "（某段的 seq 没在 live.json 里？）" % (n, len(LIVE_SPANS)))
+                         "（某段的 seq 没在 live.json 里？）" % (n, len(_SPANS)))
     print("[live] %d 处人物挂点，均与镜头起点对齐（win = t0 - 2.0s）" % n)
 
 
-CJK_LINE_RE = re.compile(r"[\u3400-\u4dbf\u9fff]")
+# 注意：必须写成「\u3400-\u4dbf」+「\u4e00-\u9fff」两段。
+# 写成 r"[\u3400-\u4dbf\u9fff]" 时，最后一个 \u9fff 是「单个字符」而不是
+# 范围终点 —— 字符类实际等于 {CJK扩展A} ∪ {U+9FFF}，常用汉字（U+4E00~U+9FFF）
+# 一个都不匹配。中文就静默回退成黑体，全片正常渲染、零报错（2026-11-01 实测）。
+CJK_LINE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 
 
 def _is_cjk_text(t):
@@ -976,6 +991,33 @@ LIVE_SPANS = {
 }
 
 
+# ---- 挂点表可切换（2026-11-01）
+# 内置那张是 Innocence 的 14 段，写死在源码里。第二首歌（画心）进来时，
+# 密度要求从 32% 拉到 70%，段数、画法、窗口全不一样 —— 每首歌改源码必然
+# 会把上一首弄坏。所以挂点表改成**可切换**：`--live-spans <json>` 传一份
+# （键仍是句号），缺省仍用内置表，老片零回归。
+_SPANS = dict(LIVE_SPANS)
+
+
+def set_spans(d):
+    """换挂点表。JSON 的键一律是字符串，而调用方传的是**句号 int** ——
+    不转回来，`i not in _SPANS` 会静默命中「没有这一句」，34 处人物一处都不挂，
+    而编排稿照常生成、渲染照常跑完，只是全片没有直播画面（2026-10-31 实测）。"""
+    global _SPANS
+    if not d:
+        _SPANS = dict(LIVE_SPANS)
+        return _SPANS
+    _SPANS = {}
+    for k, v in d.items():
+        if k.startswith("_"):
+            continue
+        try:
+            _SPANS[int(k)] = v
+        except (TypeError, ValueError):
+            _SPANS[k] = v
+    return _SPANS
+
+
 # 演唱写法 vs 官方写法的规范化：同一句歌词在官方歌词里是 "wanna"，
 # 在实唱对齐的 cut.lrc 里可能是 "want to"（反之亦然）。只做「去掉标点/大小写差异 +
 # 合并已知同音缩写」，不做模糊匹配 —— 真错行时相似度会低到 0.2 以下。
@@ -1322,6 +1364,31 @@ def dress_shots(shots, seed, lines=None):
     return shots
 
 
+# ---- 长间隙拆镜（2026-11-01）
+# 逐句循环里 t1 = **下一句的 t0**，所以两句之间夹着间奏时，这一镜就被撑成
+# 一整个间奏。2026-11-01《画心》实测两处：V1→V2 之间 13.7s（还行），
+# C2→C3 之间 **94.2s** —— 一个镜头停 94 秒，纸纹再好看也读作「卡住了」。
+# 拆法：每镜不超过 ~16s，超出的部分拆成「breath 镜」—— 无词、只留纸与装饰
+# （引擎里 line=-1 时用 shot.text，空串 ⇒ 不出字形，背景层照常画）。
+_LONG_GAP = 16.0
+_SPLIT_LEN = 13.0
+
+
+def _split_spans(t0, t1):
+    """把一个镜头的时间段拆成若干段。短的不动。"""
+    d = t1 - t0
+    if d <= _LONG_GAP:
+        return [(t0, t1)]
+    n = max(2, int(round(d / _SPLIT_LEN)))
+    step = d / n
+    out = []
+    for k in range(n):
+        a = round(t0 + k * step, 3)
+        b = round(t0 + (k + 1) * step, 3) if k < n - 1 else t1
+        out.append((a, b))
+    return out
+
+
 def _live_fig(i, a):
     """第 i 句要不要放直播画面。空串 --live-json 时一律不放（抽卡测试用）。
 
@@ -1329,11 +1396,14 @@ def _live_fig(i, a):
     引擎按 (t + tOff) 索引，所以 tOff = -win.start。两边共用一个 win，
     不会出现「抽了 9s、引擎却按 12s 取」这种静默错位。
     """
-    if not getattr(a, "live_json", "") or i not in LIVE_SPANS:
+    if not getattr(a, "live_json", "") or i not in _SPANS:
         return None
-    f = dict(LIVE_SPANS[i])
-    start, _dur = f.pop("win")
+    f = dict(_SPANS[i])
+    start, wdur = f.pop("win")
     f["tOff"] = round(-start, 3)
+    # wDur：序列窗口长度。拆镜后的 breath 镜时间会落在 win 之外（一个 94s 的
+    # 间奏拆成 7 镜，只有第一镜的 t0 等于 win.start），闸门要能拿它判越界。
+    f["wDur"] = round(wdur, 3)
     return f
 
 
@@ -1543,7 +1613,65 @@ def build_dawn_shots(a, lines, m, dur):
             seen_key[key] += 1
         if i > 0:   # 片头卡→第一句不带转场（从黑柔溶进来）
             sh["trans"] = pick_trans(key)
+
+        # 长间隙拆镜：第一段保留原文案与图，多出来的部分**合成一个**无词 breath 镜。
+        # 为什么只拆一刀而不是切成 N 段（2026-11-01 改）：同一句拆出来的几段，
+        # fig 是逐字复制的（同 seq、同 tOff、同 alpha），中间没有词也没有换版式 ——
+        # 多切一刀只是多一个「两帧一模一样却要走一遍交叉淡化」的切点。而满幅淡底
+        # 是**半透明**的：淡化期间 A/B 两层叠在一起，转场一撤 A，整幅就掉一档亮度
+        # （实测 53.87s 门禁 8.8 > 7.9）。拆一刀足够把「有词」和「没词」分开，
+        # 剩下的整段给一个长镜头 —— 视线里是「她一直在那儿」，而不是 6 次微跳。
+        segs = _split_spans(t0, t1)
+        sh["t1"] = segs[0][1]
         shots.append(sh)
+        _prev_br = None
+        for _sa, _sb in ([(segs[1][0], segs[-1][1])] if len(segs) > 1 else []):
+            br = json.loads(json.dumps(sh))
+            br["i"] = len(shots)
+            br["t0"] = _sa
+            br["t1"] = _sb
+            br["line"] = -1
+            br["text"] = ""
+            br["special"] = (sp + "+breath") if sp else "breath"
+            br["note"] = sh["note"] + " / breath"
+            # 入场/退场不能比转场长：fig.reveal 是 1.1s 的渐显，而转场只有
+            # 0.42~0.58s —— 转场走完时人物才亮到 45%，剩下的 0.6s 继续亮，
+            # 门禁看到的就是「转场结束那一帧突跳」（实测 250.24s dend 9.27）。
+            # breath 镜前后本来就有转场，渐显交给转场，多一层只会打架。
+            br["enter"] = dict(D_ENTER["softIn"], dur=0.40)
+            br["exit"] = dict(D_EXIT["fade"], dur=0.40)
+            br["trans"] = pick_trans(None)
+            # 渐显长度必须**等于**转场长度。母镜的 reveal 是 1.1s，而转场只有
+            # 0.42~0.58s ⇒ 转场走完时人物才亮到一半，剩下半秒继续亮，
+            # 门禁（pv_flash）看到的就是「转场结束那一帧突跳」（实测 53.87/250.24）。
+            # 反过来直接删掉 reveal 也不行：B 一上来就是满的，遮罩揭开到最后
+            # 一步等于硬切（实测 8.7 / 13.7，比留着还糟）。
+            if br.get("fig") and isinstance(br["fig"].get("reveal"), dict):
+                br["fig"]["reveal"]["dur"] = float((br.get("trans") or {}).get("dur") or 0.42)
+            if "sc" in br:
+                br["sc"] = float(br["sc"])
+            # 间奏镜没有词可压 ⇒ 不必替字让路。wash 的 a=0.30 / lift=0.26 是
+            # 「字全宽压在脸上」的妥协值，单独占满整屏时就只剩一层影。
+            # 抬到 0.55 上下才像「她在那儿」，至于慢推镜带来的变化交给 zoom。
+            if br.get("fig") and (br["fig"].get("mode") == "wash"):
+                _a = float(br["fig"].get("a", 0.30))
+                br["fig"]["a"] = round(min(0.55, _a * 1.8), 3)
+                br["fig"]["lift"] = round(float(br["fig"].get("lift", 0.26)) * 0.45, 3)
+                # veilK 是「把上半挖空留给歌词」的纵向渐隐。没有词的镜头上半就白空着，
+                # 一整段 96s 的间奏里那是 40% 的死面积（实测 270s 那帧上方全是空纸 +
+                # 一条孤零零的白线）。去掉 veil，整幅铺满，只剩纸色透过。
+                br["fig"].pop("veilK", None)
+                br["fig"]["fy"] = 0.5
+                # 同一段拆出来的几镜共用一个缩放：zoom0 每镜复位会让切点上
+                # 「缩回去一小格」，6 个 13s 的间奏镜连起来就是 6 次回缩。
+                # 固定 1.08 + 沿用上一镜的 ph（呼吸/漂移是 t 的连续函数，
+                # ph 换了就等于相位跳变）⇒ 整段读作一个长镜头。
+                br["fig"]["zoom0"] = 1.08
+                br["fig"]["zoom1"] = 0.0
+                if _prev_br is not None and _prev_br["fig"].get("seq") == br["fig"].get("seq"):
+                    br["fig"]["ph"] = _prev_br["fig"].get("ph", 0.0)
+            _prev_br = br
+            shots.append(br)
 
     # ---- 尾奏卡（字退去后只剩花瓣与署名）
     # 置景：每镜的最低配额 + 无人物时的版式轮转（见 dress_shots 头注）
@@ -1552,12 +1680,14 @@ def build_dawn_shots(a, lines, m, dur):
     shots.append({
         "i": len(shots), "t0": round(outro_t0, 3), "t1": round(dur, 3),
         "line": -1, "kind": "card", "tier": 1, "section": "outro",
-        "text": "",
+        # text 就是片尾的大标题。原先是空串 —— 整张卡只剩 kicker 和署名行，
+        # 16.8s 的尾奏里没有歌名也没有歌手（2026-11-01 实测：画心/张靓颖一格都没出现）。
+        # 片名与歌手一律取**原唱**（RULES §1），歌切署名放 meta。
+        "text": m.get("_meta", {}).get("song") or a.title or "",
         "layout": {"k": "titleCard", "face": _title_face(m.get("_meta", {}).get("song", "")),
-                   "kicker": "", "artist": "",
-                   "meta": "%s — %s ｜ 歌切：%s ｜ %s"
-                           % (m.get("_meta", {}).get("song", "Innocence"),
-                              a.artist, a.vocal, a.date), "shadow": False},
+                   "kicker": "ORIGINAL SONG", "artist": a.artist,
+                   "meta": "VOCAL %s · %s" % (a.vocal, a.date),
+                   "shadow": False},
         "enter": {"k": "fadeSlow", "dur": 1.4, "stagger": 0.05, "lead": 0.20},
         "hold": {"k": "breathe", "amp": 0.4},
         "exit": {"k": "fade", "dur": 1.6},
@@ -1649,11 +1779,26 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(sb, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
-    # ---- 闸门：挂点与镜头时间必须对得上
-    _check_live_spans(shots)
+    # ---- 闸门：挂点与镜头时间必须对得上（只在挂了 live 时才有意义；
+    #      没传 --live-json 的抽卡测试不该被这条挡住）
+    if getattr(a, "live_json", ""):
+        _check_live_spans(shots)
 
     # ---- 报告
     nl = sum(1 for s in shots if s["kind"] == "line")
+    # ---- 人物占比（RULES §103）：时长占比 + 逐镜加权像素覆盖
+    _tl = [s for s in shots if s.get("fig")]
+    _tsum = sum(s["t1"] - s["t0"] for s in _tl)
+    _cov = 0.0
+    for s in _tl:
+        f = s["fig"]
+        d = s["t1"] - s["t0"]
+        _cov += d * float(f.get("cov") or 0.28)
+    _cov /= max(1e-6, _tsum)
+    print("[fig] 人物 %d 镜 / %.1fs = %.1f%% 时长；加权覆盖 %.1f%% 画幅  %s"
+          % (len(_tl), _tsum, _tsum / max(1e-6, dur) * 100, _cov * 100,
+             "OK" if (_tsum / max(1e-6, dur) >= 0.70) else "★ 未达 70%"))
+
     print("[concept] dawn 意象驱动（不抽卡，逐句由映射表决定）")
     print("[shots] %d 句 → %d 镜（片头/尾各 1）  %.2fs" % (len(lines), len(shots), dur))
     print("[imagery] %s" % dict(Counter(
@@ -1701,9 +1846,16 @@ def main():
                     help="dawn=意象驱动（读 --imagery 映射表，不抽卡）")
     ap.add_argument("--live-json", default="",
                     help="1027 原视频序列的 live.json（prepare_live.py 产出）")
+    ap.add_argument("--live-spans", default="",
+                    help="挂点表 JSON（键=句号）。缺省用内置的 Innocence 那张")
     ap.add_argument("--imagery", default="",
                     help="逐句意象映射 JSON（--concept dawn 用），默认 docs/innocence-v2-imagery-map.json")
     a = ap.parse_args()
+
+    if a.live_spans:
+        with open(a.live_spans, encoding="utf-8") as f:
+            set_spans(json.load(f))
+        print("[live-spans] %s（%d 处）" % (a.live_spans, len(_SPANS)))
 
     tdoc = json.load(open(a.timing, encoding="utf-8"))
     ana = json.load(open(a.analysis, encoding="utf-8"))

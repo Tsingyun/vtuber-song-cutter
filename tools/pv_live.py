@@ -47,7 +47,7 @@ def run(cmd):
     return p.stdout
 
 
-def one(span_idx, fig, src, cut_start, out_root, force):
+def one(span_idx, fig, src, cut_start, out_root, force, geo=None, fps=None):
     name = fig["seq"]                       # s1..s6
     mode = fig["mode"]
     # 抽哪种序列由画法决定：
@@ -73,17 +73,28 @@ def one(span_idx, fig, src, cut_start, out_root, force):
         except (ValueError, OSError):
             pass
 
+    G = geo or {"head": HEAD, "body": BODY, "face": FACE}
+    F = fps or {"head": 30, "body": 30, "wide": 24}
+    # 单个挂点可以带 fps：96s 的间奏按 10fps 抽是 960 帧（解码后约 2GB），
+    # 5fps 只有 481 帧、慢推镜下看不出差别，却决定 4K 渲染会不会 OOM。
+    if fig.get("fps"):
+        F = dict(F)
+        F[seqk] = int(fig["fps"])
     cmd = [sys.executable, os.path.join(HERE, "prepare_live.py"),
            "--src", src, "--cut-start", "%.2f" % cut_start,
            "--start", "%.3f" % start, "--dur", "%.3f" % dur,
            "--out", out, "--jobs", jp, "--mode", seqk,
-           "--head-fps", "30", "--body-fps", "30",
-           "--head-x", str(HEAD["x"]), "--head-y", str(HEAD["y"]),
-           "--head-s", str(HEAD["s"]), "--head-out", str(HEAD["s"]),
-           "--wide-fps", "24",
-           "--body-x", str(BODY["x"]), "--body-y", str(BODY["y"]),
-           "--body-w", str(BODY["w"]), "--body-h", str(BODY["h"]),
-           "--face-x", str(FACE["x"]), "--face-y", str(FACE["y"])]
+           "--head-fps", str(F["head"]), "--body-fps", str(F["body"]),
+           "--head-x", str(G["head"]["x"]), "--head-y", str(G["head"]["y"]),
+           "--head-s", str(G["head"]["s"]), "--head-out", str(G["head"]["s"]),
+           "--wide-fps", str(F["wide"]),
+           "--body-x", str(G["body"]["x"]), "--body-y", str(G["body"]["y"]),
+           "--body-w", str(G["body"]["w"]), "--body-h", str(G["body"]["h"]),
+           "--face-x", str(G["face"]["x"]), "--face-y", str(G["face"]["y"]),
+           "--wide-x", str(G.get("wide", {}).get("x", 600)),
+           "--wide-y", str(G.get("wide", {}).get("y", 0)),
+           "--wide-w", str(G.get("wide", {}).get("w", 770)),
+           "--wide-h", str(G.get("wide", {}).get("h", 433))]
     run(cmd)
     info = json.load(open(jp, encoding="utf-8"))
     ent = info.get(seqk)
@@ -108,7 +119,36 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "_tmp", "live"))
     ap.add_argument("--only", default="", help="只抽指定段（seq 名，逗号分隔，如 s3,s4）")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--spans", default="", help="挂点表 JSON。缺省用内置的 Innocence 那张")
+    ap.add_argument("--head-fps", type=int, default=30)
+    ap.add_argument("--body-fps", type=int, default=30)
+    ap.add_argument("--wide-fps", type=int, default=24)
+    # 裁切几何：每场直播的 UI 版面不一样（聊天栏右缘、礼物卡左缘决定安全区），
+    # 写死一套参数换个人/换个主题就整片带 UI。全部走参数，缺省值仍是 1027 那场。
+    ap.add_argument("--head-x", type=int, default=HEAD["x"])
+    ap.add_argument("--head-y", type=int, default=HEAD["y"])
+    ap.add_argument("--head-s", type=int, default=HEAD["s"])
+    ap.add_argument("--body-x", type=int, default=BODY["x"])
+    ap.add_argument("--body-y", type=int, default=BODY["y"])
+    ap.add_argument("--body-w", type=int, default=BODY["w"])
+    ap.add_argument("--body-h", type=int, default=BODY["h"])
+    ap.add_argument("--face-x", type=int, default=FACE["x"])
+    ap.add_argument("--face-y", type=int, default=FACE["y"])
+    ap.add_argument("--wide-x", type=int, default=600)
+    ap.add_argument("--wide-y", type=int, default=0)
+    ap.add_argument("--wide-w", type=int, default=770)
+    ap.add_argument("--wide-h", type=int, default=433)
     a = ap.parse_args()
+
+    global LIVE_SPANS
+    if a.spans:
+        LIVE_SPANS = json.load(open(a.spans, encoding="utf-8"))
+        print("[live] 挂点表 %s（%d 段）" % (a.spans, len(LIVE_SPANS)))
+    G = {"head": {"x": a.head_x, "y": a.head_y, "s": a.head_s},
+         "body": {"x": a.body_x, "y": a.body_y, "w": a.body_w, "h": a.body_h},
+         "face": {"x": a.face_x, "y": a.face_y},
+         "wide": {"x": a.wide_x, "y": a.wide_y, "w": a.wide_w, "h": a.wide_h}}
+    F = {"head": a.head_fps, "body": a.body_fps, "wide": a.wide_fps}
 
     src = a.src
     if not src:
@@ -127,7 +167,7 @@ def main():
         fig = LIVE_SPANS[idx]
         if only and fig["seq"] not in only:
             continue
-        name, ent = one(idx, fig, src, a.cut_start, a.out, a.force)
+        name, ent = one(idx, fig, src, a.cut_start, a.out, a.force, G, F)
         seqs[name] = ent
 
     # 合并：进度里已有的段要保留（--only 重抽某段时不能把别的段抹掉，
@@ -142,9 +182,9 @@ def main():
         except (ValueError, OSError):
             pass
 
-    hx, hy, hs = HEAD["x"], HEAD["y"], HEAD["s"]
-    db = {"face": {"cx": round((FACE["x"] - hx) / float(hs), 4),
-                   "cy": round((FACE["y"] - hy) / float(hs), 4)},
+    hx, hy, hs = G["head"]["x"], G["head"]["y"], G["head"]["s"]
+    db = {"face": {"cx": round((G["face"]["x"] - hx) / float(hs), 4),
+                   "cy": round((G["face"]["y"] - hy) / float(hs), 4)},
           "cut_start": a.cut_start}
     db.update(seqs)
     with open(lj, "w", encoding="utf-8") as f:
@@ -157,13 +197,12 @@ def main():
         if os.path.isdir(p):
             tot += sum(os.path.getsize(os.path.join(p, f)) for f in os.listdir(p))
     print("[live] 合并 %d 段 → %s（%.0f MB）" % (len(seqs), lj, tot / 1e6))
+    byseq = {v["seq"]: (i, v) for i, v in LIVE_SPANS.items() if isinstance(v, dict)}
     for k in sorted(seqs):
         v = seqs[k]
-        print("  %-3s %3d 帧 @%dfps  win=%.2fs → tOff=%.2f"
-              % (k, v["n"], v["fps"], LIVE_SPANS[[i for i in LIVE_SPANS
-                                                 if LIVE_SPANS[i]["seq"] == k][0]]["win"][0],
-                 -LIVE_SPANS[[i for i in LIVE_SPANS
-                              if LIVE_SPANS[i]["seq"] == k][0]]["win"][0]))
+        i0, sp0 = byseq.get(k, (None, {"win": (0, 0)}))
+        print("  %-4s 句%-3s %3d 帧 @%dfps  win=%.2fs → tOff=%.2f"
+              % (k, i0, v["n"], v["fps"], sp0["win"][0], -sp0["win"][0]))
 
 
 if __name__ == "__main__":
