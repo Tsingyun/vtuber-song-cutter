@@ -30,7 +30,7 @@ window.__init = async (cfg) => {
     lyrics: cfg.lrc,
     title: cfg.title || '', artist: cfg.artist || '',
     style: cfg.style || 'noir', seed: cfg.seed || 20261027,
-    fps: 30, res: 1080, aspect: '16:9',
+    fps: 30, res: cfg.res || 1080, aspect: '16:9',
     lang: cfg.lang || 'auto',
     unify: true, typeset: true,
     extra: true, wa: false, horror: false, typo: true, kinetic: true,

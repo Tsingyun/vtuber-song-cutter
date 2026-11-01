@@ -1994,6 +1994,14 @@ def main():
                     help="覆盖档案建议的纸包（档案建议新包但还没写进 pv_scheme.js 时用）")
     ap.add_argument("--style-strict", action="store_true",
                     help="档案里出现不认识的键时直接失败（默认只告警）")
+    ap.add_argument("--jz", default="",
+                    help="JIZURA 帧序列的 jz.json（tools/pv_jz.cjs 产出）")
+    ap.add_argument("--jz-layer", default="behind", choices=["behind", "front"],
+                    help="JIZURA 层压在歌词之下(behind)还是之上(front，会遮挡歌词)")
+    ap.add_argument("--jz-blend", default="screen", choices=["screen", "normal", "lighter", "overlay"],
+                    help="JIZURA 层的合成方式；screen 对应它原生 keyBg 通道（白字压黑底）")
+    ap.add_argument("--jz-alpha", type=float, default=1.0,
+                    help="JIZURA 层整体不透明度（0~1）")
     a = ap.parse_args()
     global _STYLE
     if a.style:
@@ -2407,6 +2415,29 @@ def main():
         if lj.get("face"):
             live["face"] = lj["face"]
 
+    # ---- JIZURA 帧序列层（--jz，由 tools/pv_jz.cjs 预渲）
+    # 契约与 live 序列**同构**：同一个 dir/n/fps/w/h/pattern，装进同一个 ST.seq，
+    # 走同一套滑窗预载。这样"新增一层"不需要新的加载器，也没有第二套时间轴 ——
+    # 时间轴这里只有一个来源：序列的 frame0 对应 source.start（歌曲时间，需减去 w0）。
+    if a.jz and os.path.exists(a.jz):
+        jm = json.load(open(a.jz, encoding="utf-8"))
+        seq_t0 = float((jm.get("source") or {}).get("start", 0.0)) - w0
+        live = live or {}
+        live["jz"] = {"dir": os.path.abspath(jm["dir"]).replace("\\", "/"),
+                      "n": int(jm["n"]), "fps": float(jm["fps"]),
+                      "w": int(jm.get("w") or 1920), "h": int(jm.get("h") or 1080),
+                      "pattern": jm.get("pattern") or "j_%05d.png"}
+        hit = [s for s in shots if s["t1"] > seq_t0 and s["t0"] < seq_t0 + jm["n"] / float(jm["fps"])]
+        for s in hit:
+            s["jz"] = {"seq": "jz", "tOff": round(-seq_t0, 3),
+                       "layer": a.jz_layer, "blend": a.jz_blend,
+                       "a": round(a.jz_alpha, 3)}
+        print("[jz] %s  %d 帧 @%.2ffps  起点 %.2fs  覆盖 %d/%d 镜  layer=%s blend=%s"
+              % (os.path.basename(os.path.dirname(a.jz)), jm["n"], jm["fps"],
+                 seq_t0, len(hit), len(shots), a.jz_layer, a.jz_blend))
+        if not hit:
+            print("[jz] ! 序列与窗口不重叠（起点 %.2fs 落在 0~%.2fs 之外）" % (seq_t0, dur))
+
     sb = {
         "version": 2,
         "meta": {
@@ -2415,6 +2446,16 @@ def main():
             "seed": a.seed, "dur": dur, "fps": (getattr(a, "fps", 0) or 60), "start": w0,
             "koma": a.koma, "keyBg": a.keyBg or None,
             "mark": "",
+            # 参考片实测的画幅黑边（**总占比**，引擎按单边减半画）。
+            # 用展开而不是写死 0：没有风格层时这个键根本不存在，
+            # 旧编排稿的 JSON 逐字段不变（S3 的回归条件）。
+            **({"letterbox": _STYLE["frame"]["letterbox"]}
+               if _STYLE and _STYLE["frame"].get("letterbox") else {}),
+            # 序列声明（直播人物 / JIZURA 层）写进编排稿，让编排稿**自包含**：
+            # 之前只有意象路径写过这一项，抽卡路径必须渲染时再传 --live，
+            # 于是同一份 storyboard 换个入口渲染就少了人 —— 这类「差一个参数」的
+            # 事故排查成本极高，而序列本来就该是编排稿的一部分。
+            **({"live": live} if live else {}),
         },
         "palette": {"pack": "noir", "idx": 0},
         "audio": {"bpm": ana["bpm"], "barSec": ana["bar_sec"],

@@ -116,6 +116,12 @@
     if (sh && sh.fig && sh.fig.seq && ST.seq[sh.fig.seq]) {
       want[sh.fig.seq] = spanOf(sh, sh.fig.seq, sh.fig.tOff);
     }
+    /* JIZURA 帧序列层同样按镜头滑窗装载：漏掉这条时 drawJz 取不到图会静默不画，
+       表现是「这一段本该有动态文字层，但画面里什么都没有」，零报错。 */
+    if (sh && sh.jz && ST.seq[sh.jz.seq || 'jz']) {
+      const nm = sh.jz.seq || 'jz';
+      want[nm] = spanOf(sh, nm, sh.jz.tOff);
+    }
     let n = 0, bytes = 0;
     for (const name of Object.keys(ST.seq)) {
       const s = ST.seq[name];
@@ -445,6 +451,31 @@
     ctx.globalAlpha = clamp(a * 0.13 * k, 0, 1);
     ctx.fillStyle = rgba(S.accentRGB, 1);
     ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+
+  /* ---------------- JIZURA 帧序列层 ----------------
+     为什么是「预渲好的帧序列」而不是运行时直画：JIZURA 每帧要跑三趟色散 + 纸纹生成，
+     4K 下逐帧直画会把渲染时间翻几倍；帧序列在我们这边只是一层贴图，
+     渲染热路径零新增成本，确定性也由「同一批 PNG」直接保证（取舍见 docs §3.4）。
+     契约与 live 序列**同构**：同一个 dir/n/fps/w/h/pattern、同一个 getFrame、
+     同一个滑窗预载 —— 新增一层不需要新的加载器，也不需要第二套时间轴。 */
+  function drawJz(ctx, shot, t) {
+    const j = shot.jz || {};
+    const nm = j.seq || 'jz';
+    if (!ST.seq[nm]) return;
+    // 与 live 序列**同一套时间约定**：tOff = -序列起点，帧号 = (t + tOff) × fps。
+    // 和 spanOf（预载窗口）必须一致 —— 两边算法不同就会出现「预载到了但画不出来」。
+    const im = getFrame(nm, t + (j.tOff || 0));
+    if (!im) return;
+    const a = j.a == null ? 1 : j.a;
+    if (a <= 0.004) return;
+    ctx.save();
+    ctx.globalAlpha = clamp(a, 0, 1);
+    // screen = JIZURA 原生 keyBg 通道（白字压黑底，screen 叠加即等于透明）
+    if (j.blend && j.blend !== 'normal') ctx.globalCompositeOperation = j.blend;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(im, 0, 0, PV.W, PV.H);
     ctx.restore();
   }
 
@@ -1155,6 +1186,10 @@
     drawBG(ctx, shot.bgl, t, shot.t0, shot._S);
     drawDecor(ctx, shot.bg, t, shot.t0, shot._S);
 
+    /* JIZURA 层（后）：位置在背景之上、人物与文字之下 —— 对应「后景文字」这一层。
+       放在文字之前是刻意的：我们的歌词永远压得住它，不会出现「两层字打架却说不清谁在前」。 */
+    if (shot.jz && shot.jz.layer !== 'front') drawJz(ctx, shot, t);
+
     // 人物（后）
     let figBox = null;
     if (shot.fig) {
@@ -1168,6 +1203,10 @@
 
     // 人物（前）：「文字从她身前过」只在 layer=front 的镜头成立
     if (shot.fig && shot.fig.layer === 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S, shot);
+
+    /* JIZURA 层（前）：压在文字之上 —— 这就是「歌词被文字层局部遮挡/覆盖」的通道。
+       只有显式 layer:'front' 的镜头才走这里，默认是 'behind'，避免糊住唱词。 */
+    if (shot.jz && shot.jz.layer === 'front') drawJz(ctx, shot, t);
 
     // 前景装饰
     drawDecor(ctx, shot.decor, t, shot.t0, shot._S);
@@ -1205,10 +1244,34 @@
     /* 切间过渡（TRANS 分组）：把上一镜快照按转场几何让掉，露出这一镜。
        p=0 时整幅盖 A、p=1 时什么都不画（契约见 pv_trans.js 文件头）。 */
     crossFade(ctx, shot, t);
-    /* 存 A：**屏幕上真正的那一帧**（含暗角/颗粒/角落标记），且必须在 crossFade
+    /* ---- 上下黑边（letterbox）----
+       参考片 BV1jUxC6SEko 的有效画面是 1920×980 @ y=58，上下共 9.3% 是纯黑边；
+       它属于**构图**（画幅之内才是画面），不是后期加的相框。
+       必须画在 crossFade 之后、存快照之前：
+         · 之前画 → 转场时会被上一镜的内容盖住，黑边闪一下；
+         · 之后不画 → 快照里没黑边，下一镜从 A 淡出时黑边会「跳」进来。
+       单边上限 5%：再宽就会切掉 cropGiant/fullTrack 的字头，那是缺陷不是构图。 */
+    drawLetterbox(ctx, shot);
+    /* 存 A：**屏幕上真正的那一帧**（含暗角/颗粒/角落标记/黑边），且必须在 crossFade
        之后 —— 拍的是「这一帧最终长什么样」，不是「镜头内容长什么样」。 */
     saveCross(ctx, shot, t);
   };
+
+  /* 上下黑边。比例来自编排稿 meta.letterbox（0~0.45，取**总占比**，单边减半）。 */
+  function drawLetterbox(ctx, shot) {
+    const raw = (shot && shot.lb != null) ? shot.lb : (ST.sb && ST.sb.meta || {}).letterbox;
+    const v = Number(raw) || 0;
+    if (v <= 0.001) return;
+    const h = Math.round(PV.H * Math.min(0.05, v / 2));
+    if (h <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, PV.W, h);
+    ctx.fillRect(0, PV.H - h, PV.W, h);
+    ctx.restore();
+  }
 
   /* ---------------- 切间过渡（TRANS 分组，pv_trans.js） ----------------
      JIZURA 的 TRANS 分组是把「上一 cut 的静止帧」和当前帧合成。我们逐帧顺序渲染，

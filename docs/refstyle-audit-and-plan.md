@@ -376,3 +376,42 @@ tools/pv_jz.py           JIZURA 离线出帧 → 帧序列（复刻 live 的契�
   形态由人工抽帧确认（t=14.85 是均匀叠化），需要时人工改档案的 `trans_pool`。
 - `violet` 包的主字是 Noto Sans SC（`cnSansB`）：拉丁歌词也会用它的拉丁字形，
   比 Archivo Black 软一档。要给这个包更硬的拉丁族，属后续调优。
+
+### S4 · JIZURA 帧序列层（2026-11-01 完成，机制级验证）
+
+**做法**（沿用 §3.4 的取舍：离线帧序列，不替换引擎、不做运行时直画）
+- `tools/pv_jz.cjs`：驱动 `renderer/pv/probe.html`（已存在的适配层探针），
+  用 playwright 逐帧取 `__shot(t,'transparent')` 的 dataURL，落成 `j_%05d.png`，
+  同时写 `jz.json`（`dir/n/fps/w/h/pattern` + `source{start,dur,style,bpm}` + plan 摘要）。
+- `pv_direct --jz <jz.json> [--jz-layer behind|front] [--jz-blend screen|normal] [--jz-alpha k]`：
+  把序列声明写进 `meta.live.jz`，并给覆盖范围内的镜头挂 `shot.jz`。
+- `pv_engine`：新增 `drawJz()`，**契约与 live 序列完全同构**（同一个 `ST.seq`、
+  同一个 `getFrame`、同一个滑窗预载 `spanOf`），所以没有第二套加载器、也没有第二套时间轴。
+  两个挂点：文字之前（后景文字层）与文字之后（前景覆盖层）。
+
+**时间轴为什么不漂**：给 JIZURA 的 LRC 由 `timing.json` 生成，并按窗口起点整体平移；
+**不让它自己检测**。它自己有一套前奏/间奏规划，一旦接管就会让歌词整体位移 ——
+那正是任务书里明令禁止的「加入动画导致歌词延迟」。
+
+**实测（画心 90~94s，24 帧 @6fps，1920×1080 透明）**
+- 渲一帧 ~48ms；24 帧 4.7MB；两次渲染字节一致 ✓
+- plan 摘要：`lang=zh-Hans` / 2 行 / 6 cuts / 10 拍 / 字体全部命中（missingFonts 空）
+- 合成后抽帧：后景是 JIZURA 自己的排版语言（HUD 面板 SEC/BAR/KEY、几何色块、巨字轮廓），
+  前景是我们的歌词，层次清楚；`--jz-alpha 0.55` 时它读作「质感层」而不是第二套排版
+- 一个坑值得记：`--jz-alpha 1.0` 时 JIZURA 的白块会压在我们的字下方，
+  白字压白块、对比度掉到读不清 —— 默认不透明度取 1.0 是错的，
+  实际用法应显式给 0.55 左右。
+
+**未完成**：整片预渲（时长 × 6fps × ~200KB/帧，一首 7 分钟约 1.2GB）尚未跑；
+`enabled` 分组（关掉 JIZURA 自己的歌词层、只留动效与装饰）还没接参数，
+这是下一步提升合成质量最直接的一个旋钮。
+
+### S5（部分）· 画幅黑边
+
+参考片有效画面 1920×980 @ y=58（上下共 9.3%），属于构图而不是后期加框。
+`pv_engine` 新增 `drawLetterbox()`，比例来自编排稿 `meta.letterbox`（总占比，单边减半，
+上限 5%：再宽会切掉 cropGiant/fullTrack 的字头，那是缺陷不是构图）。
+画在 `crossFade` 之后、存快照之前 —— 之前画会被上一镜盖住（黑边闪一下），
+之后不画则快照里没黑边（下一镜从 A 出来时黑边会跳进来）。
+实测：亮底（月白）上黑边清晰、文字未被切；纯黑底（夜巡）上黑边不可见 ——
+这不是 bug，近黑底加黑边本来就看不出来，参考片能读到黑边是因为它的画面区有插画。
