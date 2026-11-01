@@ -17,6 +17,12 @@ renderer/player/
   pv/pv_core.js          基础工具：噪声、渐变贴图、随机（全部可播种）
   pv/pv_type.js          字体表、字形构建、9 种构图（layout）
   pv/pv_parts.js         入场 / 保持 / 退场 / 字形样式（treat）四类部件
+  pv/pv_parts_ext.js     第二批部件（补齐保持类与重字饰）
+  pv/pv_scheme.js        配色 pack / scheme / 字体角色 / 质感（对齐 JIZURA 的 style pack）
+  pv/pv_typo.js          13 种版面（layout）
+  pv/pv_piece.js         字形拆片（piece 级动画）
+  pv/pv_cam.js           11 种相机
+  pv/pv_trans.js         **13 种转场**（10-29 之后新增，早期文档漏记）
   pv/pv_engine.js        镜头调度、相机、纸底、装饰、人物层、合成
   pv_fonts/              自托管字体（OFL，5 族 / 382 分片 / 7.1 MB）
 
@@ -28,6 +34,10 @@ tools/
   pv_determinism.py      成片级「重复渲染一致性」验收
   pv_stills.cjs          抽帧预览（不编码视频）
   pv_fetch_fonts.py      字体拉取与子集化
+  pv_live.py             人物层挂点编排（读 live_spans.json → storyboard.fig）
+  pv_slice.py            30s 窗口局部验证夹具（重渲一轮 28min → 3min）
+  pv_flash.py            切点连续性门禁（转场两端帧差）
+  pv_check.py            成片门禁（时长/格式/纸色/残幅/人物镜）+ 接触表
 ```
 
 数据流：
@@ -221,7 +231,7 @@ node _tmp/pv/scan.cjs
 
 | JIZURA 有 | 我们的选择 | 理由 |
 |---|---|---|
-| **20 种 trans**（`cubeTurn` / `shatterTiles` / `inkBlob` / `pixelate` …） | 只用「左右延迟擦除 + accent 亮线」 | 它每镜都走 `TRANS`，A 帧要**重渲一遍上一镜**再合成；我们是顺序渲染 13931 帧，成本翻倍。且抽帧实测：四方向 + 0.32s 的版本会把片头标题**拦腰横切**、A/B 交错读作「画面没刷新」。收敛到左右各一 + 0.22s + `1-(1-q)^2.2` 之后，切镜处的帧差尖峰从 16.8 降到 4.0/5.6 |
+| **20 种 trans**（`cubeTurn` / `shatterTiles` / `inkBlob` / `pixelate` …） | ~~只用「左右延迟擦除 + accent 亮线」~~ → **10-29 之后已扩到 13 种**（见 `pv_trans.js`） | 它每镜都走 `TRANS`，A 帧要**重渲一遍上一镜**再合成；我们是顺序渲染 13931 帧，成本翻倍。且抽帧实测：四方向 + 0.32s 的版本会把片头标题**拦腰横切**、A/B 交错读作「画面没刷新」。收敛到左右各一 + 0.22s + `1-(1-q)^2.2` 之后，切镜处的帧差尖峰从 16.8 降到 4.0/5.6 |
 | **44 种背景** | 加了 `topo`（等高线自转）与 `rays`（光芒摆动）两种，按 tier 概率接入（tier≤1 0.62 / tier2 0.55 / tier3 0.45） | 背景层已有 12 种 + 烘焙场，再多会变成「每镜都在换滤镜」。日本 PV 的层次感来自**同一底子上的缓慢差异**，不是每镜换背景 |
 | **18 族日文字体，全量预载** | 只加载当前编排**实际用到的**（`PV.FACES` + `warmFonts(实际歌词)`） | 全量预载在 4K 长片上是几十秒的空白启动；而且字体是分 unicode-range 的，英文歌请求日文分片纯属浪费（RULES §56 的误报就是这么来的） |
 | `J.rng` mulberry32 + 运行期随机 | 全部随机量在**排版期**一次算定（`PV.rng(seed, shot.i, k)`），渲染期零随机 | 交付要求「同一 t 两次渲染字节一致、同一 job 渲两遍 md5 相同」。运行期 RNG 会破坏这条 |
