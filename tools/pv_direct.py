@@ -543,10 +543,29 @@ def fig_reserve(fig, W=1920):
 
     为什么必须精确算：`fixed=False` 时 placeFigure 会在六个锚点里挑「离字最远」的一个，
     于是导演层以为人在右、引擎把她放到了左边（实测 t=14 的圆窗压在 SEC/BAR 表上）。
-    改成 fixed 之后人的位置是确定的，文字的版心也就能算准 —— 两边都不靠猜。
+    改成 fixed 之后人的位置是确定的，文字版心也就能算准 —— 两边都不靠猜。
+
+    wash / soft / split 是后加的形态，几何不是「一个 h」能表达的：
+      · wash 满幅淡底，字**直接压在她身上**，本来就不该让位 → 0
+      · soft 无框羽化 / split 分栏，宽度只能由 wf 推（定案里就是这么写宽度的）
+    不补这三支，`fig["h"]` 会直接 KeyError —— 而 wash 恰恰是画心定案用得最多的
+    形态（12/34 处），等于「一开人物就崩」。
     """
-    if fig["mode"] == "disc":
+    md = fig.get("mode")
+    if md == "wash":
+        return 0
+    if md == "disc":
         return 2 * int(fig["r"]) + 48
+    if md == "pill" and fig.get("w"):
+        # pill 的宽度是**显式给的**（w×h）。原来落到下面那句「按 h 估宽」，
+        # 660 宽的窗只让出 int(410*0.752)+24=332px —— 实测 t=3.0 的字被窗压住半个「爱」字。
+        return int(fig["w"]) + 24
+    if md == "arch" and fig.get("h") and fig.get("wRatio"):
+        # arch 同理：宽度 = h × wRatio，比「h×0.752」的通用估计准。
+        return int(int(fig["h"]) * float(fig["wRatio"])) + 24
+    if md in ("soft", "split"):
+        w = fig.get("w") or int(float(fig.get("wf", 0.40)) * W)
+        return int(w) + 24
     return int(int(fig["h"]) * 0.752) + 24
 
 
@@ -702,15 +721,20 @@ D_TRANS_DUR = {"wipe": 0.42, "ink": 0.48, "flash": 0.34, "iris": 0.44, "push": 0
                "zoom": 0.40, "dissolve": 0.58, "grad": 0.50, "mask": 0.46}
 
 
-def _check_live_spans(shots):
+def _check_live_spans(shots, expect=None):
     """LIVE_SPANS 的键是**句号**（0 基），不是镜头号 —— 片头占掉 shot 0，
     所以 shot = line + 1。索引错一位不会报任何错，只会让每一处人物晚一个镜头
     出现：抽片窗口还落在序列内，画面正常渲染，只是「该有人的那句没有」。
     2026-10-30 实测整条片子 14 处全部偏移一格，靠肉眼看抽帧才发现。
 
     判据用**时间**反查而不是用键反查：约定「抽片窗口 = 镜头起点前 2.0s」，
-    这条约定本身写在每个 win 里，所以它是可验证的。"""
-    bad, n = [], 0
+    这条约定本身写在每个 win 里，所以它是可验证的。
+
+    注意 tOff 已经把窗口起点 w0 算进去了（tOff = w0 - win.start），
+    所以这里用 t0 + tOff 直接就是「相对窗口的 2.0s」，**不能再加 w0** ——
+    加了会变成 w0 两倍，整片（w0=0）看不出来，切片时全员误报。
+    """
+    bad, seen = [], set()
     for sh in shots:
         f = sh.get("fig")
         if not f:
@@ -726,7 +750,7 @@ def _check_live_spans(shots):
                 bad.append("shot %d(breath) t0=%.2f 落在序列窗口 %.2f~%.2f 之外"
                            % (sh["i"], sh["t0"], -off, -off + wd))
             continue
-        n += 1
+        seen.add(sh.get("line", 0))
         # fig 里 win 已被 _live_fig pop 掉（只留 tOff = -win.start），
         # 所以反查用 t0 + tOff = win.start，它应当等于镜头起点前 2.0s。
         st = sh["t0"] + off
@@ -735,10 +759,11 @@ def _check_live_spans(shots):
                        % (sh["i"], sh["t0"], st))
     if bad:
         raise SystemExit("[live] 挂点与镜头时间对不上（键错位？）：\n  " + "\n  ".join(bad))
-    if n != len(_SPANS):
-        raise SystemExit("[live] 只挂上 %d 处，LIVE_SPANS 有 %d 处"
-                         "（某段的 seq 没在 live.json 里？）" % (n, len(_SPANS)))
-    print("[live] %d 处人物挂点，均与镜头起点对齐（win = t0 - 2.0s）" % n)
+    exp = len(_SPANS) if expect is None else int(expect)
+    if len(seen) != exp:
+        raise SystemExit("[live] 只挂上 %d 处，挂点表有 %d 处"
+                         "（某段的 seq 没在 live.json 里？）" % (len(seen), exp))
+    print("[live] %d 处人物挂点，均与镜头起点对齐（win = t0 - 2.0s）" % len(seen))
 
 
 # 注意：必须写成「\u3400-\u4dbf」+「\u4e00-\u9fff」两段。
@@ -1156,6 +1181,47 @@ def set_spans(d):
     return _SPANS
 
 
+# ---- 抽卡路径的人物挂点（2026-11-01 demo 引入）
+# 抽卡路径原先的 fig 来自 fig_script()：形态随机、序列名写死 "head"/"body"，
+# 而那两个目录在画心里根本不存在（真实序列叫 h00~h33）—— 渲染时取不到图、
+# 引擎静默不画，编排稿里却明明白白写着 4 个「人物镜头」。
+# 这里给抽卡路径一条接真实序列的路：键=窗口内句号，值为 live_spans 同构的一段。
+# 不给 --fig-spans 时 _FIG_SPANS 为空，fig_script 的老行为**逐字段不变**。
+_FIG_SPANS = {}
+
+
+def set_fig_spans(d):
+    global _FIG_SPANS
+    _FIG_SPANS = {}
+    for k, v in (d or {}).items():
+        if k.startswith("_"):
+            continue
+        try:
+            _FIG_SPANS[int(k)] = v
+        except (TypeError, ValueError):
+            continue
+    return _FIG_SPANS
+
+
+def _fig_from_spans(i, w0=0.0):
+    """把一段挂点翻成 shot.fig。
+
+    时间约定（这里错过一次，代价是「人物全片不出现、零报错」）：
+      · win = [序列帧 0 对应的**绝对**歌曲秒, 窗口时长]
+      · shot.t0 / 引擎里的 t 都是**相对窗口**的（w0=216.33 时 t=0 就是 216.33s）
+      · 引擎取帧用 im = getFrame(seq, t + tOff)，所以
+            tOff = w0 - win.start
+        整片（w0=0）时就是 -win.start，与定案那张表完全一致，零回归；
+        切片时不能只写 -win.start —— 那会让每处索引都多减一个 w0，
+        结果是负数帧号，引擎静默不画，而编排稿上写着「4 处人物挂点」。
+    """
+    f = dict(_FIG_SPANS[i])
+    start, wdur = f.pop("win")
+    f["tOff"] = round(w0 - start, 3)
+    f["wDur"] = round(wdur, 3)
+    return f
+
+
 # 演唱写法 vs 官方写法的规范化：同一句歌词在官方歌词里是 "wanna"，
 # 在实唱对齐的 cut.lrc 里可能是 "want to"（反之亦然）。只做「去掉标点/大小写差异 +
 # 合并已知同音缩写」，不做模糊匹配 —— 真错行时相似度会低到 0.2 以下。
@@ -1538,7 +1604,9 @@ def _live_fig(i, a):
         return None
     f = dict(_SPANS[i])
     start, wdur = f.pop("win")
-    f["tOff"] = round(-start, 3)
+    # tOff = w0 - win.start（见 _fig_from_spans 的推导）。整片 w0=0 时就是 -win.start，
+    # 与定案编排稿逐字段一致；切片窗口必须补 w0，否则帧号变负、静默不画。
+    f["tOff"] = round(getattr(a, "start", 0.0) - start, 3)
     # wDur：序列窗口长度。拆镜后的 breath 镜时间会落在 win 之外（一个 94s 的
     # 间奏拆成 7 镜，只有第一镜的 t0 等于 win.start），闸门要能拿它判越界。
     f["wDur"] = round(wdur, 3)
@@ -1994,6 +2062,9 @@ def main():
                     help="覆盖档案建议的纸包（档案建议新包但还没写进 pv_scheme.js 时用）")
     ap.add_argument("--style-strict", action="store_true",
                     help="档案里出现不认识的键时直接失败（默认只告警）")
+    ap.add_argument("--fig-spans", default="",
+                    help="抽卡路径的人物挂点表（live_spans 同构，键=窗口内句号）；"
+                         "不给则按 fig_script 抽签（序列名是占位，不会真的取到图）")
     ap.add_argument("--jz", default="",
                     help="JIZURA 帧序列的 jz.json（tools/pv_jz.cjs 产出）")
     ap.add_argument("--jz-layer", default="behind", choices=["behind", "front"],
@@ -2033,6 +2104,12 @@ def main():
         with open(a.live_spans, encoding="utf-8") as f:
             set_spans(json.load(f))
         print("[live-spans] %s（%d 处）" % (a.live_spans, len(_SPANS)))
+
+    if a.fig_spans:
+        with open(a.fig_spans, encoding="utf-8") as f:
+            set_fig_spans(json.load(f))
+        print("[fig-spans] %s（%d 处，抽卡路径按表挂真实序列）"
+              % (a.fig_spans, len(_FIG_SPANS)))
 
     tdoc = json.load(open(a.timing, encoding="utf-8"))
     ana = json.load(open(a.analysis, encoding="utf-8"))
@@ -2145,7 +2222,11 @@ def main():
 
         # ---- 人物：先决定有没有人，再决定版面（版面必须为人让位）
         fig = None
-        if r.random() < m["fig"]:
+        if _FIG_SPANS and i in _FIG_SPANS:
+            # 给了挂点表就**按表来**：哪一句有人、什么形态、用哪条序列，全部由表定，
+            # 不再抽签。抽签只负责「表里没写的那几句有没有人」。
+            fig = _fig_from_spans(i, w0)
+        elif r.random() < m["fig"]:
             fig = fig_script(mood, r, pack)
 
         # ---- 版面：语气池 → 形态过滤 → 三重加权抽卡（P0-2）
@@ -2181,14 +2262,16 @@ def main():
             for _ in range(4):
                 if res <= 1920 * 0.40:
                     break
-                if fig["mode"] == "disc" and fig["r"] > 140:
+                if fig["mode"] == "disc" and fig.get("r", 0) > 140:
                     fig["r"] = int(fig["r"] * 0.90)
-                elif fig["mode"] != "disc" and fig["h"] > 520:
+                elif fig["mode"] not in ("disc", "wash") and fig.get("h", 0) > 520:
                     fig["h"] = int(fig["h"] * 0.90)
                 else:
                     break
                 res = fig_reserve(fig)
-            avoid = {"side": fig["side"], "frac": round(res / 1920.0, 3)}
+            # wash 没有 side（它不站边，是满幅铺底），缺 side 时按右处理即可：
+            # 它的 frac 恒为 0，版心不会因此变窄。
+            avoid = {"side": fig.get("side", "r"), "frac": round(res / 1920.0, 3)}
         lay = layout_params(layk, mood, fig, r, nw, key, avoid)
 
         # ---- 类型：只有三级（主字 / 次字 / 注记），字体由 pack 决定
@@ -2398,6 +2481,12 @@ def main():
                 shots[i]["t1"] = nb
                 shots[i + 1]["t0"] = nb
                 shots[i]["sync"] = shots[i + 1]["sync"] = True
+
+    # ---- 闸门：抽卡路径挂了真实序列时，同样要求「人物镜 = 挂点表里的那几句」
+    # 抽卡路径以前没有这条闸门（fig 是占位，没有正确性可言）；一旦接上真实序列，
+    # 键错一位就会让某一镜静默变成空纸，而编排稿上写着「有人」。
+    if _FIG_SPANS:
+        _check_live_spans(shots, len(_FIG_SPANS))
 
     # ---- 直播序列
     live = None

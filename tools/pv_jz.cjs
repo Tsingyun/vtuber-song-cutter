@@ -95,8 +95,11 @@ if (bpm > 0) {
     ms: Date.now() - t0,
   };
   fs.writeFileSync(path.join(outDir, 'jz.json'), JSON.stringify(meta, null, 1));
-  console.log('[jz] %d 帧 %.1fs  %sx%s  style=%s lines=%d cuts=%d  %.0fms/帧',
-    n, dur, meta.w, meta.h, sum.style, sum.lines, sum.cuts, meta.ms / Math.max(1, n));
+  /* 不能用 %d/%.1f 这类 printf 说明符：Node 的 util.format 只认 %d %i %f %s %j %o %O %c %%，
+     `%.1f` 不是合法说明符 —— 它会被原样输出且**不消耗参数**，后面每一个占位符都跟着错位
+     （实测把 style 打成 1080、lines 打成 NaN）。一律用模板串，别用 printf。 */
+  console.log(`[jz] ${n} 帧 ${dur.toFixed(1)}s  ${meta.w}x${meta.h}  style=${sum.style} `
+    + `lines=${sum.lines} cuts=${sum.cuts}  ${(meta.ms / Math.max(1, n)).toFixed(0)}ms/帧`);
   if (sum.missingFonts && sum.missingFonts.length) console.log('[jz] ! 缺字体 %s', sum.missingFonts.join(','));
   if (errs.length) console.log('[jz] ! 页面错误 %d 条：%s', errs.length, errs.slice(0, 3).join(' | '));
 })();
