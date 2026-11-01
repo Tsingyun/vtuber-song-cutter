@@ -133,189 +133,274 @@
   "gradual_ratio": 0.724,
   "flash_ratio": 0.0,
   "span_s": 0.4,
-  "family": "gradual",
+  "family": "soft-fade",
   "pool": [
    "dissolve",
    "grad",
    "mask",
-   "ink",
-   "iris",
-   "blinds"
+   "ink"
   ],
   "list": [
    {
     "t": 1.067,
     "kind": "cut",
     "span_frames": 2,
-    "peak": 116.53
+    "peak": 116.53,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    },
    {
     "t": 8.633,
     "kind": "cut",
     "span_frames": 1,
-    "peak": 73.52
+    "peak": 73.52,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    },
    {
     "t": 14.767,
     "kind": "gradual",
     "span_frames": 7,
-    "peak": 37.24
+    "peak": 37.24,
+    "soft": false,
+    "r_mid": 47.93,
+    "r_ab": 23.19
    },
    {
     "t": 20.3,
     "kind": "gradual",
     "span_frames": 6,
-    "peak": 37.12
+    "peak": 37.12,
+    "soft": false,
+    "r_mid": 49.98,
+    "r_ab": 21.44
    },
    {
     "t": 25.6,
     "kind": "gradual",
     "span_frames": 6,
-    "peak": 35.8
+    "peak": 35.8,
+    "soft": false,
+    "r_mid": 44.21,
+    "r_ab": 20.76
    },
    {
     "t": 31.3,
     "kind": "gradual",
     "span_frames": 4,
-    "peak": 51.66
+    "peak": 51.66,
+    "soft": false,
+    "r_mid": 41.09,
+    "r_ab": 27.14
    },
    {
     "t": 36.067,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 65.49
+    "peak": 65.49,
+    "soft": false,
+    "r_mid": 77.6,
+    "r_ab": 26.2
    },
    {
     "t": 37.967,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 45.16
+    "peak": 45.16,
+    "soft": false,
+    "r_mid": 31.46,
+    "r_ab": 22.48
    },
    {
     "t": 41.4,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 51.22
+    "peak": 51.22,
+    "soft": false,
+    "r_mid": 54.82,
+    "r_ab": 24.72
    },
    {
     "t": 43.3,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 42.19
+    "peak": 42.19,
+    "soft": false,
+    "r_mid": 32.12,
+    "r_ab": 23.23
    },
    {
     "t": 46.633,
     "kind": "cut",
     "span_frames": 2,
-    "peak": 70.38
+    "peak": 70.38,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    },
    {
     "t": 48.533,
     "kind": "cut",
     "span_frames": 1,
-    "peak": 59.69
+    "peak": 59.69,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    },
    {
     "t": 52.067,
     "kind": "gradual",
     "span_frames": 4,
-    "peak": 36.74
+    "peak": 36.74,
+    "soft": false,
+    "r_mid": 33.01,
+    "r_ab": 35.32
    },
    {
     "t": 56.933,
     "kind": "cut",
     "span_frames": 1,
-    "peak": 49.68
+    "peak": 49.68,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    },
    {
     "t": 70.933,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 63.66
+    "peak": 63.66,
+    "soft": false,
+    "r_mid": 71.25,
+    "r_ab": 27.24
    },
    {
     "t": 81.433,
     "kind": "gradual",
     "span_frames": 4,
-    "peak": 44.49
+    "peak": 44.49,
+    "soft": false,
+    "r_mid": 51.02,
+    "r_ab": 20.75
    },
    {
     "t": 86.967,
     "kind": "gradual",
     "span_frames": 6,
-    "peak": 37.22
+    "peak": 37.22,
+    "soft": false,
+    "r_mid": 50.04,
+    "r_ab": 21.42
    },
    {
     "t": 92.267,
     "kind": "gradual",
     "span_frames": 6,
-    "peak": 35.82
+    "peak": 35.82,
+    "soft": false,
+    "r_mid": 44.21,
+    "r_ab": 20.77
    },
    {
     "t": 97.967,
     "kind": "gradual",
     "span_frames": 4,
-    "peak": 51.65
+    "peak": 51.65,
+    "soft": false,
+    "r_mid": 41.1,
+    "r_ab": 27.14
    },
    {
     "t": 102.733,
     "kind": "cut",
     "span_frames": 1,
-    "peak": 80.73
+    "peak": 80.73,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    },
    {
     "t": 124.067,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 52.87
+    "peak": 52.87,
+    "soft": false,
+    "r_mid": 74.22,
+    "r_ab": 23.4
    },
    {
     "t": 125.967,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 45.6
+    "peak": 45.6,
+    "soft": false,
+    "r_mid": 31.81,
+    "r_ab": 22.24
    },
    {
     "t": 129.4,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 51.3
+    "peak": 51.3,
+    "soft": false,
+    "r_mid": 54.94,
+    "r_ab": 24.74
    },
    {
     "t": 131.3,
     "kind": "gradual",
     "span_frames": 3,
-    "peak": 42.24
+    "peak": 42.24,
+    "soft": false,
+    "r_mid": 32.19,
+    "r_ab": 23.27
    },
    {
     "t": 134.633,
     "kind": "cut",
     "span_frames": 2,
-    "peak": 70.46
+    "peak": 70.46,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    },
    {
     "t": 140.067,
     "kind": "gradual",
     "span_frames": 4,
-    "peak": 36.82
+    "peak": 36.82,
+    "soft": false,
+    "r_mid": 33.07,
+    "r_ab": 35.33
    },
    {
     "t": 145.4,
     "kind": "gradual",
     "span_frames": 4,
-    "peak": 43.36
+    "peak": 43.36,
+    "soft": false,
+    "r_mid": 50.59,
+    "r_ab": 20.1
    },
    {
     "t": 150.667,
     "kind": "gradual",
     "span_frames": 6,
-    "peak": 37.98
+    "peak": 37.98,
+    "soft": false,
+    "r_mid": 49.64,
+    "r_ab": 21.32
    },
    {
     "t": 156.0,
     "kind": "cut",
     "span_frames": 1,
-    "peak": 59.66
+    "peak": 59.66,
+    "soft": null,
+    "r_mid": 0.0,
+    "r_ab": 0.0
    }
   ]
  },
@@ -615,6 +700,10 @@
   "pack": "violet",
   "pack_rank": [
    {
+    "pack": "violet",
+    "dist": 0.0
+   },
+   {
     "pack": "huaxin",
     "dist": 67.3
    },
@@ -625,37 +714,9 @@
    {
     "pack": "hud",
     "dist": 91.5
-   },
-   {
-    "pack": "noir",
-    "dist": 103.6
    }
   ],
-  "pack_proposal": {
-   "name": "violet",
-   "scheme": {
-    "bg": "#040508",
-    "fg": "#ececf0",
-    "accent": "#5a5897",
-    "sub": "#33335c",
-    "dim": "#2D2E31"
-   },
-   "why": "最近 pack=huaxin：底 8.6 / 字 6.0 / 强调 26.4（加权总分 67.3）；强调色差 26.4 ≥ 20",
-   "rank": [
-    {
-     "pack": "huaxin",
-     "dist": 67.3
-    },
-    {
-     "pack": "paper",
-     "dist": 69.9
-    },
-    {
-     "pack": "hud",
-     "dist": 91.5
-    }
-   ]
-  },
+  "pack_proposal": null,
   "layouts": {
    "titleCard": 3,
    "center": 2,
@@ -667,9 +728,7 @@
    "dissolve",
    "grad",
    "mask",
-   "ink",
-   "iris",
-   "blinds"
+   "ink"
   ],
   "trans_dur": 0.4,
   "type": {

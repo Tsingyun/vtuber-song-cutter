@@ -22,7 +22,7 @@
 | 人物 | 主体覆盖 / 水平偏置 / 出镜 | 0.024 / 0.67 / 67% |
 | 质感 | 颗粒 / 网点 / 扫描线 / 色散 | 0.024 / 0.130 / 0.000 / 0.0px |
 | 质感 | 泛光 / 画面变化率 | 0.0144 / 0.164 |
-| 转场 | 渐变比例 / 池 | 72% / dissolve, grad, mask, ink, iris, blinds |
+| 转场 | 渐变比例 / 池 | 72% / dissolve, grad, mask, ink |
 | 画幅 | letterbox / 下条带 | 9.3% / 3.6% |
 | 画幅 | 下条带长期有字（credit 条） | 100% |
 
@@ -32,6 +32,10 @@
 {
   "pack": "violet",
   "pack_rank": [
+    {
+      "pack": "violet",
+      "dist": 0.0
+    },
     {
       "pack": "huaxin",
       "dist": 67.3
@@ -43,37 +47,9 @@
     {
       "pack": "hud",
       "dist": 91.5
-    },
-    {
-      "pack": "noir",
-      "dist": 103.6
     }
   ],
-  "pack_proposal": {
-    "name": "violet",
-    "scheme": {
-      "bg": "#040508",
-      "fg": "#ececf0",
-      "accent": "#5a5897",
-      "sub": "#33335c",
-      "dim": "#2D2E31"
-    },
-    "why": "最近 pack=huaxin：底 8.6 / 字 6.0 / 强调 26.4（加权总分 67.3）；强调色差 26.4 ≥ 20",
-    "rank": [
-      {
-        "pack": "huaxin",
-        "dist": 67.3
-      },
-      {
-        "pack": "paper",
-        "dist": 69.9
-      },
-      {
-        "pack": "hud",
-        "dist": 91.5
-      }
-    ]
-  },
+  "pack_proposal": null,
   "layouts": {
     "titleCard": 3,
     "center": 2,
@@ -85,9 +61,7 @@
     "dissolve",
     "grad",
     "mask",
-    "ink",
-    "iris",
-    "blinds"
+    "ink"
   ],
   "trans_dur": 0.4,
   "type": {
@@ -124,9 +98,6 @@
   }
 }
 ```
-
-> ⚠ 建议新增 pack `violet`：最近 pack=huaxin：底 8.6 / 字 6.0 / 强调 26.4（加权总分 67.3）；强调色差 26.4 ≥ 20
-
 
 ## 三、指标口径
 

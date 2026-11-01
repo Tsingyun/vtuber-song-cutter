@@ -56,9 +56,12 @@ AW, AH = 640, 360
 # 参考视频的转场分类器只认得出「淡变 / 闪白 / 硬切」三态，认不出「这是 iris 还是 mask」；
 # 所以风格层只把池子收窄到**族**，族内选谁仍交给语气与抽卡 —— 否则一支片看下来
 # 每处转场都长得一样，那不是「学到了风格」，是「把变化锁死了」。
-TRANS_GRADUAL = ["dissolve", "grad", "mask", "ink", "iris", "blinds"]
-TRANS_HARD = ["slice", "wipe", "push", "blocks", "zoom", "clock"]
-ALL_TRANS = set(TRANS_GRADUAL) | set(TRANS_HARD)
+TRANS_SOFT = ["dissolve", "grad", "mask", "ink"]
+TRANS_GEOM = ["wipe", "slice", "push", "blocks", "zoom", "clock", "blinds", "iris"]
+ALL_TRANS = set(TRANS_SOFT) | set(TRANS_GEOM) | {"flash"}
+# 渐变比例很高时不是自动等于「溶解」——擦除也是多帧渐变。靠 `spread` 分辨：
+# 溶解时整幅同时变化（各块差异接近），擦除/推挤时差异集中在一条推进的边界上
+# （各块差异悬殊）。实测参考片 spread≈0.35，肉眼抽帧确认是均匀叠化。
 
 
 # ----------------------------------------------------------------------------
@@ -796,6 +799,13 @@ def classify_trans(path, shots, fps, window=0.42):
 
     做法：取切点前后各 window 秒、逐帧算与前一帧的差（10fps 采样），
     硬切 = 单帧尖峰且前后都平；渐变 = 连续 ≥3 帧都高于基线。
+
+    **能力边界（别高估这一项）**：它只能判「多帧变化 vs 单帧切换」，
+    判不出「这是 dissolve 还是 wipe」。曾试着用「中间帧是否 ≈ 两端帧均值」
+    来分辨均匀叠化与几何擦除，实测**失败**：本片过渡时整幅被重新调色，
+    r_mid 普遍是 r_ab 的 1.4~3.2 倍（中间帧根本不在两端帧之间），
+    该判据在有色偏的 PV 上不可用，已删除。所以形态由人工确认后写进档案：
+    BV1jUxC6SEko 抽 t=14.85 帧看过，是两幅均匀叠化（无几何边界）。
     """
     res = []
     for s in shots[1:]:
@@ -820,8 +830,22 @@ def classify_trans(path, shots, fps, window=0.42):
         lum = [float(f.mean()) for f in fs]
         if kind == "gradual" and max(lum) > 200 and (max(lum) - min(lum)) > 40:
             kind = "flash"
+        # 均匀叠化 vs 几何揭示：试过「中间帧 ≈ 两端帧均值」的自校准判据，
+        # 在本片（过渡时整体重新调色）上失效 —— 保留字段但**不参与判定**，
+        # 只作为诊断读数留在 list 里，供以后有干净样本时再标定。
+        soft, r_mid, r_ab = None, 0.0, 0.0
+        if kind == "gradual" and n >= 4:
+            A, B = fs[0], fs[-1]
+            j = int(np.argmax(d)) + 1
+            if 0 < j < len(fs):
+                M = fs[j]
+                r_mid = float(np.abs(M - (A + B) / 2).mean())
+                r_ab = float(np.abs(A - B).mean()) / 2.0
+                if r_ab > 1e-3:
+                    soft = bool(r_mid < 0.45 * r_ab)
         res.append({"t": round(t, 3), "kind": kind, "span_frames": span,
-                    "peak": round(mx, 2)})
+                    "peak": round(mx, 2), "soft": soft,
+                    "r_mid": round(r_mid, 2), "r_ab": round(r_ab, 2)})
     return res
 
 
@@ -917,12 +941,17 @@ def aggregate(per_shot, shots, trans, pix, probe_info, src, dense_n, shots_thr,
 
     gr = len(gradual) / float(max(1, len(trans)))
     fl = float(np.mean([1.0 if t["kind"] == "flash" else 0.0 for t in trans])) if trans else 0.0
+    # 只能判「多帧变化 vs 单帧切换」，判不出「溶解 vs 擦除」（原因见 classify_trans）。
+    # 渐变为主时给**软溶解族**，依据是人工抽帧（t=14.85 是均匀叠化，无几何边界）；
+    # 若某支参考片以擦除为主，请人工改档案的 trans_pool —— 这一维不做自动猜测，
+    # 猜错会把「推测」写进档案，比留空更糟。
     if gr >= 0.55:
-        trans_family, trans_pool = "gradual", list(TRANS_GRADUAL)
+        trans_family, trans_pool = "soft-fade", list(TRANS_SOFT)
     elif gr <= 0.25:
-        trans_family, trans_pool = "hard", list(TRANS_HARD)
+        trans_family, trans_pool = "cut", list(TRANS_GEOM)
     else:
-        trans_family, trans_pool = "mixed", TRANS_GRADUAL[:3] + TRANS_HARD[:2]
+        trans_family = "mixed"
+        trans_pool = list(TRANS_SOFT)[:3] + list(TRANS_GEOM)[:2]
     if fl >= 0.12:
         trans_pool.append("flash")
 
@@ -1133,7 +1162,7 @@ def to_engine(vsp):
     # 老档案（没有 pool 字段）或手改加了不存在的名字时，不能把非法转场名传下去。
     trans_pool = [k for k in (vsp["trans"].get("pool") or []) if k in ALL_TRANS]
     if not trans_pool:
-        trans_pool = list(TRANS_GRADUAL)
+        trans_pool = list(TRANS_SOFT)
 
     # 转场时长：用实测的渐变跨度（秒）；这条比「按渐变比例估」更接近真相 ——
     # 比例只说「有多少是淡接」，跨度才说「每一次淡接多长」。

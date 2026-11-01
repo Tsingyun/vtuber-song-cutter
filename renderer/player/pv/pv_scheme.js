@@ -88,6 +88,41 @@
       texture: { grain: 0.55, paper: 1, scan: 0 }, ghost: 0.62,
       decor: { cropMarks: 0, rule: 0.25, barcode: 0, dots: 0.15, chapter: 0 },
     },
+    /* ---------------- 紫罗兰夜光（参考片 BV1jUxC6SEko 量测而来，2026-11-01） ----------------
+       为什么单开一个 pack：量测出的三色是 `#040508` / `#ececf0` / `#5a5897` ——
+       近黑底 + 冷白字 + 一点紫。最近的两个现有 pack 分别是 huaxin（距离 67.3，
+       底 8.6 / 字 6.0 / 强调 26.4）与 paper（69.9）：底色字色都几乎一样，
+       差的**只是强调色**（胭脂 vs 紫罗兰）。所以不要复用 huaxin —— 一旦复用，
+       「月色/胭脂」的暖纸性格会把这支片的冷光读成「又是画心」。
+       与 huaxin 的分工是「冷光 / 暖纸」：huaxin 有纸纹与朱金，这里 paper=0、
+       grain 压到 0.45，性格全靠 glow 与 ghost 的双影微光，不靠饱和色块。
+       五套 = 夜巡(主歌) → 月白(桥/预副) → 靛(副歌) → 紫晕(高潮) → 余烬(尾奏)。
+       第 0 套刻意贴着量测值写（accent 就是量到的 #5A5897），便于回溯核对。 */
+    violet: {
+      name: 'ヴァイオレット・ナイト',
+      schemes: [
+        /* 0 夜巡：量测基准。近黑 + 冷白 + 紫，ghost 用更亮的紫做双影 */
+        { bg: '#040508', fg: '#ECECF0', sub: '#8E8CA8', accent: '#5A5897', accent2: '#4FB6C9', ink: '#ECECF0', dim: '#22242C', ghostA: '#8E86D8', ghostB: '#3E7E9E', glow: '#2A2350' },
+        /* 1 月白：桥段/预副歌的亮底。冷白纸，靛字，紫点睛 */
+        { bg: '#EDECF2', fg: '#1B1830', sub: '#5E5A78', accent: '#6B5AB8', accent2: '#8F7FC8', ink: '#1B1830', dim: '#D5D2E0', ghostA: '#8A7BC8', ghostB: '#7F8E9E', glow: '#FFFFFF' },
+        /* 2 靛：副歌。比夜巡更蓝更亮一档，紫被青紫撑开 */
+        { bg: '#0C1024', fg: '#E6E9F5', sub: '#8A90AE', accent: '#7E8BD6', accent2: '#C9A6E0', ink: '#E6E9F5', dim: '#1B2140', ghostA: '#9AA6F0', ghostB: '#C9A6E0', glow: '#1A2350' },
+        /* 3 紫晕：高潮。唯一的中紫底 + 亮字，紫晕最浓的一套 */
+        { bg: '#241C33', fg: '#F2E9F7', sub: '#B4A6C6', accent: '#B98BD0', accent2: '#8FD6E8', ink: '#F2E9F7', dim: '#3A2F4E', ghostA: '#D3A6E8', ghostB: '#8FD6E8', glow: '#4A2F6E' },
+        /* 4 余烬：尾奏。回到近黑，紫退成灰紫，光收敛 */
+        { bg: '#0A0A0F', fg: '#D8D6E0', sub: '#8B8798', accent: '#8E7BB8', accent2: '#6E7A86', ink: '#D8D6E0', dim: '#1E1E26', ghostA: '#8E7BB8', ghostB: '#6E7A86', glow: '#231F33' },
+      ],
+      /* 一个字族：冷白底的歌用「极粗黑」当主字（参考片就是无衬线），
+         宋体会立刻把「夜光」读成「古风」。 */
+      fonts: { display: ['cnSansB'], serif: ['cnSans'], body: ['cnSansLt'], mono: ['mono'] },
+      /* paper=0 是这一包的关键：夜光没有纸。grain 0.45（参考片量测 0.024，
+         在 0~1 的纸纹标度上属于「几乎没有」），scan 0 —— 它也没有 CRT 线。
+         flat:1 才是真正生效的那一项 —— 只写 texture.paper=0 时 drawPaper 照旧
+         画纸纹与暗角（flat 是 STYLE 里的常量 0），底色会带着一层纤维，读起来
+         还是「宣纸」，只是换成了冷色。 */
+      texture: { grain: 0.45, paper: 0, scan: 0 }, ghost: 0.42, flat: 1,
+      decor: { cropMarks: 0.2, rule: 0.4, barcode: 0, dots: 0.2, chapter: 0 },
+    },
     hud: {
       name: 'ダークHUD',
       schemes: [
@@ -132,7 +167,7 @@
       decor: { cropMarks: 0, rule: 0.3, barcode: 0, dots: 0.2, chapter: 0 },
     },
   };
-  PV.PACK_ORDER = ['dawn', 'huaxin', 'noir', 'crimson', 'paper', 'hud', 'mono'];
+  PV.PACK_ORDER = ['dawn', 'huaxin', 'violet', 'noir', 'crimson', 'paper', 'hud', 'mono'];
 
   const lum = hex => {
     const c = PV.hex(hex);
@@ -164,8 +199,8 @@
          1:1 裁切下**一根纤维都看不到**。这是「大字贴在奶油纸上」的最后一块拼图。
          flat 是 JIZURA 的「印刷品」语法（四角必须平），而手书 PV 的语法是
          「一张有厚度、有落差的纸」，两者不能共存。默认走纸面；真要平涂
-         由编排稿 meta.flat 显式覆盖。 */
-      flat: 0,
+         由编排稿 meta.flat 显式覆盖，或由 pack 自己声明（夜光/故障类没有纸）。 */
+      flat: p.flat ? 1 : 0,
       deep: lum(s.bg) < 0.42,
       schemes: p.schemes.length,
     };

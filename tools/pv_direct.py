@@ -50,6 +50,14 @@ FIT = {
     "marginNote": lambda nw, n, cjk: n <= 36,
     "fullTrack":  lambda nw, n, cjk: nw <= 8 and n <= 36,
     "block":      lambda nw, n, cjk: True,
+    # 这两个版面引擎里早就有了（pv_typo.js 的 L.center / L.titleCard），但一直没进
+    # 抽卡池 —— 于是任何一支片都抽不到「整句大字居中」这类构图。
+    # 参考片 BV1jUxC6SEko 的签名恰恰是它：字高 0.089H、2 行、center-mid、覆盖 6.2%。
+    # 只加进 FIT、**不**加进 VOICE 默认池：默认输出一个镜头都不会变，
+    # 只有风格层把权重推上去时它们才会被抽到（见 style_extra_layouts）。
+    "center":     lambda nw, n, cjk: 2 <= nw <= 13 and n <= 40,
+    # titleCard 会做「右侧竖排巨影」，字一多就变成两层字互相打架，所以只收极短的英雄句。
+    "titleCard":  lambda nw, n, cjk: nw <= 5 and n <= 14,
 }
 
 # 三种「语气」各自能用的版面池，权重写重复次数。
@@ -103,6 +111,16 @@ FONTS = {
     "paper": {"face": "mincho", "body": "sansMed"},
     "hud": {"face": "grotesk", "body": "sansMed"},
     "mono": {"face": "mincho", "body": "sansMed"},
+    # 冷光包用中文黑体当主字：参考片本来就是无衬线，宋体会把「夜光」读成「古风」。
+    # 已知限制：拉丁歌词也会走 Noto Sans SC 的拉丁字形（比 Archivo Black 软一档），
+    # 要更硬就得给这个包单独配拉丁族，属于后续调优，不影响正确性。
+    "violet": {"face": "cnSansB", "body": "cnSans"},
+    # huaxin / dawn 原本只能由 --imagery 的 _meta.pack 指定，抽卡路径永远抽不到，
+    # 所以 FONTS 里一直没有它们 —— 风格层会把 huaxin 当备选纸包，于是这些镜头
+    # 会**悄悄**落回 FONTS["noir"] 的 heavy（中文再兜底成无衬线），字体人格错乱。
+    # 两个条目与 pv_scheme.js 里各自的 fonts.display 保持一致。
+    "huaxin": {"face": "cnSerifB", "body": "cnSerifLt"},
+    "dawn": {"face": "frauncesItB", "body": "nunitoSemi"},
 }
 
 # 语气 → 相机档 / 人物概率 / 版面尺寸基线
@@ -162,13 +180,16 @@ PERS = {
         "trans":  {"wipe": 1.5, "ink": 1.6, "iris": 1.3, "blinds": 1.2},
         "decor":  {"tape": 1.7, "chip": 1.4, "ticket": 1.3, "stamp": 1.2, "brackets": 1.2},
     },
-    "hud": {
-        "layout": {"indexTable": 1.8, "vRuler": 1.5, "cross": 1.4, "lowerThird": 1.2},
-        "enter":  {"typeOn": 1.7, "sliceDown": 1.4, "assemble": 1.2},
-        "exit":   {"blurOut": 1.6, "fade": 1.3, "pExplode": 1.2},
-        "hold":   {"jitter": 1.4, "shimmer": 1.4, "trackIn": 1.2},
-        "trans":  {"blinds": 1.6, "clock": 1.5, "slice": 1.4, "wipe": 1.2},
-        "decor":  {"crosshair": 1.8, "timeline": 1.5, "barcode": 1.4, "ruler": 1.3},
+    # 「冷光」人格：字是主角、居中站位、入退场一律走淡（参考片 72% 渐变转场），
+    # 保持几乎不动（它不摇镜），冲击靠字号与留白而不是靠砸字。
+    "violet": {
+        "layout": {"center": 2.2, "fullTrack": 1.8, "cropGiant": 1.8, "keySplit": 1.4,
+                   "block": 1.2, "marginNote": 1.0},
+        "enter":  {"softIn": 2.2, "assemble": 1.5, "typeOn": 1.2},
+        "exit":   {"fadeUp": 2.0, "blurOut": 1.5, "fade": 1.4},
+        "hold":   {"breathe": 1.7, "drift": 1.5, "settle": 1.3, "sway": 1.1},
+        "trans":  {"dissolve": 2.2, "grad": 1.8, "mask": 1.4, "ink": 1.1},
+        "decor":  {"ruler": 1.2, "cornerTicks": 1.2, "dots": 1.0, "cropMarks": 0.8},
     },
 }
 # 未列名的 pack 用中性偏置（等价于无偏置）
@@ -231,6 +252,122 @@ BG_POOL = [("rings", 2), ("halftone", 1.8), ("wash", 1.6), ("grid", 1.3),
            ("hatch", 1.2), ("diagonal", 1.4), ("waveBand", 1.3), ("noiseField", 1.2),
            ("spotlight", 1.2), ("contour", 1.1), ("sunburst", 1.0), ("mesh", 1.2),
            ("gradWash", 1.3), ("topo", 1.0), ("dust", 1.0)]
+
+# --------------------------------------------------------------- 风格层（--style）
+# VSP 只做「收窄与加权」，不做逐镜指定 —— 取舍理由见 tools/pv_style.py 文件头。
+# 硬约束：没有 --style 时下面每个函数都原样返回入参，所以旧工作流的编排稿
+# 逐字段不变（这条是 S3 的验收条件之一，不是「应该」）。
+_STYLE = None
+
+VALID_TRANS = ("wipe", "blinds", "blocks", "clock", "dissolve", "flash", "grad",
+               "ink", "iris", "mask", "push", "slice", "zoom")
+
+
+def style_look(secs, mood_of):
+    """按段分配纸包。规则只有三条，每条都能一句话解释：
+
+    ① **爆发段一律回主包** —— 全曲最强处必须是档案里最像的那套纸，不能是备选；
+    ② **安静段在备选包之间轮转** —— 主歌退半步，让副歌回来时有落差；
+    ③ **驱动段在主包与第一备选之间轮转** —— 「主色 — 退半步」的呼吸。
+
+    没有备选包时（档案只给了一个 pack）全部用主包，此时等价于 LOOK 固定单包。
+    段内再换 scheme 由既有的 SWITCH_EVERY 负责，两套轮转互不干扰。
+    """
+    if not _STYLE:
+        return None
+    packs = _STYLE["packs"]
+    if not packs:
+        return None
+    n = len(packs)
+    cnt = {"quiet": 0, "drive": 0, "peak": 0}
+    out = {}
+    for s in secs:
+        md = mood_of(s["name"])
+        if md == "peak" or n == 1:
+            pk = packs[0]
+        elif md == "quiet":
+            pk = packs[(1 + cnt["quiet"]) % n]
+            cnt["quiet"] += 1
+        else:
+            pk = packs[cnt["drive"] % n]
+            cnt["drive"] += 1
+        out[s["name"]] = (pk, 0)
+    return out
+
+
+def style_mood(mood):
+    """语气参数（相机档 / 人物概率 / 字号基线 / 版心宽 / 幅度）按档案调整。
+
+    三条都有上限，理由是「别把参考片的编曲强加到另一首歌上」：
+    · 字号阶梯夹在 0.8~1.35：再大就把长句挤出画面；
+    · 人物出镜率取**均值**（编排默认与档案各半），不是照抄；
+    · 镜头档只在档案几乎不摇镜（cam_speed<0.15）时降一档，最多降到 1。
+    """
+    m = dict(MOOD[mood])
+    if not _STYLE:
+        return m
+    ladder = _STYLE["type"].get("size_ladder")
+    if ladder:
+        m["hK"] = round(m["hK"] * min(1.35, max(0.80, ladder)), 4)
+    pres = _STYLE["figure"].get("presence")
+    if pres is not None:
+        m["fig"] = round(min(0.85, max(0.15, 0.5 * m["fig"] + 0.5 * pres)), 3)
+    cam = _STYLE["motion"].get("cam_speed")
+    if cam is not None and cam < 0.15:
+        m["cam"] = max(1, m["cam"] - 1)
+    return m
+
+
+def style_layout_w(k, w):
+    """档案给的版面权重 → 乘数 0.6~2.2。
+
+    不做成直接权重：档案里 3 和 1 差三倍，直接乘会让高频版面彻底独占池子，
+    于是「同一份档案重渲八次还是同一套构图」—— 那正好违反了「不要模板化」。
+    """
+    if not _STYLE:
+        return w
+    lw = _STYLE["layouts"]
+    if not lw or k not in lw:
+        return w
+    return w * (0.6 + 0.53 * lw[k])
+
+
+def style_extra_layouts(mood):
+    """档案里权重 ≥2、但**不在**该语气默认池里的版面，补进候选。
+
+    这是「参考风格真的能改变构图」的实质通道：默认池永远抽不到 center/titleCard，
+    不做这一步，档案就只能换颜色和字号，构图形状一模一样。
+    """
+    if not _STYLE:
+        return []
+    lw = _STYLE["layouts"]
+    have = {k for k, _ in VOICE[mood]}
+    out = []
+    for k, w in lw.items():
+        if w >= 2.0 and k not in have and k in FIT:
+            out.append((k, round(w * 0.9, 2)))
+    return out
+
+
+def style_trans(mood):
+    """转场候选池按档案的族收窄。
+
+    语气池与档案族完全不重叠时（例如 peak 想要冲击、档案全给渐变），
+    用档案族等权，而不是悄悄退回默认 —— 否则「参考风格影响转场」是句空话。
+    """
+    base = TRANS_BY_MOOD[mood]
+    if not _STYLE or not _STYLE["trans_pool"]:
+        return base
+    want = set(_STYLE["trans_pool"])
+    keep = [(k, w) for k, w in base if k in want]
+    if not keep:
+        keep = [(k, 1.0) for k in _STYLE["trans_pool"] if k in VALID_TRANS]
+    have = {k for k, _ in keep}
+    for k in _STYLE["trans_pool"]:
+        if k not in have and k in VALID_TRANS:
+            keep.append((k, 0.8))
+    return keep
+
 
 # 节拍吸附（P1-6）：镜头边界与动效时长向节拍网格靠拢。
 def beat_snap(t, beat, tol):
@@ -416,7 +553,8 @@ def fig_reserve(fig, W=1920):
 def layout_params(layk, mood, fig, r, nwords, key=None, avoid=None):
     """给版面填参数。参数只做「位置与比例」，字号一律交给版面自己反解 ——
     字号写在编排稿里，等于把排版交给导演层，长句必然溢出。"""
-    m = MOOD[mood]
+    # 风格层只管「取值收窄」：无 --style 时 style_mood 返回 MOOD[mood] 的副本，逐字段相同。
+    m = style_mood(mood) if _STYLE else MOOD[mood]
     p = {"k": layk, "availW": round(m["availW"], 3)}
     frac = (avoid or {}).get("frac", 0.0)
     free_left = (avoid is None) or avoid.get("side") != "l"
@@ -1850,7 +1988,38 @@ def main():
                     help="挂点表 JSON（键=句号）。缺省用内置的 Innocence 那张")
     ap.add_argument("--imagery", default="",
                     help="逐句意象映射 JSON（--concept dawn 用），默认 docs/innocence-v2-imagery-map.json")
+    ap.add_argument("--style", default="",
+                    help="视觉风格档案 VSP（styles/*.vsp.json），只收窄取值与权重")
+    ap.add_argument("--style-pack", default="",
+                    help="覆盖档案建议的纸包（档案建议新包但还没写进 pv_scheme.js 时用）")
+    ap.add_argument("--style-strict", action="store_true",
+                    help="档案里出现不认识的键时直接失败（默认只告警）")
     a = ap.parse_args()
+    global _STYLE
+    if a.style:
+        if a.concept:
+            # 意象映射表是逐镜定稿（谁在哪一镜、字放哪、怎么转场都写死了）。
+            # 再叠一层风格层，只会出现「档案说要居中、映射表说靠左」这种无法裁决的冲突。
+            raise SystemExit("[style] --style 不能和 --concept 同时用：意象映射表是逐镜定稿，"
+                             "不接受风格层覆盖。想试风格请去掉 --concept/--imagery。")
+        import pv_style
+        _STYLE = pv_style.load(a.style,
+                               valid_layouts=set(FIT),
+                               valid_trans=set(VALID_TRANS),
+                               valid_packs=set(scheme_counts()),
+                               strict=a.style_strict)
+        if a.style_pack:
+            if a.style_pack not in scheme_counts():
+                raise SystemExit("[style] --style-pack %s 不存在（现有：%s）"
+                                 % (a.style_pack, ", ".join(sorted(scheme_counts()))))
+            _STYLE["packs"] = [a.style_pack] + [p for p in _STYLE["packs"] if p != a.style_pack]
+        print("[style] %s" % a.style)
+        print("[style] %s" % pv_style.describe(_STYLE))
+        # 已量但没接线的旋钮要明说 —— 否则看档案的人会以为「质感强度」已经在生效。
+        print("[style] 未接线（已量测、本版不生效）：texture.*（无标定映射，见 docs §5）、"
+              "frame.letterbox（引擎尚无黑边层，S5）")
+        for w in _STYLE["warnings"]:
+            print("[style] ! %s" % w)
 
     if a.live_spans:
         with open(a.live_spans, encoding="utf-8") as f:
@@ -1912,9 +2081,13 @@ def main():
     if a.concept == "dawn":
         return dawn_main(a, tdoc, ana, lines, secs, dur, w0)
 
-    print("[look] 段落 → 纸")
+    # 风格层只在抽卡路径生效（--concept 已在参数区挡掉）。
+    # SL 与 LOOK 同构：{段名: (pack, scheme0)}；无风格层时 SL=None，下面全部走原表。
+    SL = style_look(secs, mood_of) if _STYLE else None
+
+    print("[look] 段落 → 纸%s" % ("（风格层：%s）" % "/".join(_STYLE["packs"]) if SL else ""))
     for s in secs:
-        pk = LOOK.get(s["name"], ("noir", 0))
+        pk = (SL.get(s["name"]) if SL else None) or LOOK.get(s["name"], ("noir", 0))
         print("  %-3s %7.2f→%7.2f  %-8s scheme %d  %s"
               % (s["name"], s["t0"], s["t1"], pk[0], pk[1], mood_of(s["name"])))
 
@@ -1935,7 +2108,7 @@ def main():
     for i, l in enumerate(lines):
         sec = sec_at(l["t0"])
         mood = mood_of(sec["name"])
-        m = MOOD[mood]
+        m = style_mood(mood) if _STYLE else MOOD[mood]
         # 镜头首尾相接：起点提前 0.10s（人声起点略晚于字），终点顶到下一句
         t0 = max(0.0, l["t0"] - 0.10)
         nxt = max(0.0, lines[i + 1]["t0"] - 0.10) if i + 1 < len(lines) else dur
@@ -1944,7 +2117,7 @@ def main():
             t1 = t0 + 0.6
         r = rng(a.seed, 200 + i)
 
-        pack, sch0 = LOOK.get(sec["name"], ("noir", 0))
+        pack, sch0 = (SL.get(sec["name"]) if SL else None) or LOOK.get(sec["name"], ("noir", 0))
         # 段内轮转：每累计 SWITCH_EVERY 秒换同 pack 的下一套 scheme。
         # 旧写法是「过中点 且 sch==0 才换成 1」——于是只有 crimson 段能触发，
         # 而且 13 镜里只换后半段一次，纸还是读成连着的一整片。
@@ -1968,7 +2141,11 @@ def main():
             fig = fig_script(mood, r, pack)
 
         # ---- 版面：语气池 → 形态过滤 → 三重加权抽卡（P0-2）
-        pool = [(k, w) for k, w in VOICE[mood] if FIT[k](nw, n, cjk)]
+        pool = [(k, style_layout_w(k, w)) for k, w in VOICE[mood] if FIT[k](nw, n, cjk)]
+        if _STYLE:
+            # 档案推高的版面即使不在该语气的默认池里也允许出现 —— 否则档案只能改颜色和
+            # 字号，构图形状永远长一个样，「参考风格影响构图」无从谈起。
+            pool += [(k, w) for k, w in style_extra_layouts(mood) if FIT[k](nw, n, cjk)]
         if fig:
             safe = [(k, w) for k, w in pool if k in FIG_SAFE]
             if safe:
@@ -2008,6 +2185,14 @@ def main():
 
         # ---- 类型：只有三级（主字 / 次字 / 注记），字体由 pack 决定
         typ = {"face": fonts["face"], "body": fonts["body"], "squeeze": 1.0}
+        if _STYLE:
+            # track/lead 是版面函数直接读的字段（pv_typo 里的 st.track / st.lead），
+            # 引擎会把 sh.type 并进版面参数，所以写在这里就真的落到画面上。
+            _ty = _STYLE["type"]
+            if _ty.get("tracking") is not None:
+                typ["track"] = _ty["tracking"]
+            if _ty.get("leading") is not None:
+                typ["lead"] = _ty["leading"]
 
         # ---- 入场 / 保持 / 退场（P0-2 三重加权抽卡）
         # pAssemble 是 piece 级入场：字被拆成零件后各自飞回来拼成整体。
@@ -2057,11 +2242,16 @@ def main():
         hold = {"k": holdk, "amp": round(0.7 + 0.2 * m["cam"], 2)}
 
         # ---- 转场（P0-1）：这一镜「怎么进来」。片头卡不给转场（它是硬切进第一句的）。
-        transk = gacha(r, TRANS_BY_MOOD[mood], pers, "trans", recent_trans)
+        transk = gacha(r, style_trans(mood) if _STYLE else TRANS_BY_MOOD[mood],
+                       pers, "trans", recent_trans)
         recent_trans.append(transk)
         if len(recent_trans) > 6:
             recent_trans.pop(0)
         trans = {"k": transk}
+        if _STYLE and _STYLE["trans_dur"]:
+            # 档案实测的渐变跨度。不写这一项，引擎会退回每种转场的默认时长，
+            # 「时长」这一维就完全不受档案影响 —— 那等于风格只改了颜色。
+            trans["dur"] = _STYLE["trans_dur"]
 
         # ---- 相机
         poolc, alt = [], []
