@@ -1,0 +1,708 @@
+{
+ "id": "bv1juxc6seko",
+ "source": {
+  "kind": "file",
+  "ref": "_tmp/ref/bv1juxc6seko.mp4",
+  "title": "满月纪念曲|写给我第一个喜欢的女孩【原创pv】",
+  "uploader": "艾薇拉-Elvira",
+  "uploader_id": "3747564457298856",
+  "desc": "献给艾薇拉与衔光者的满月~\n原唱：封茗囧菌\n翻唱：艾薇拉Elvira\npv：@炸蛋-Egg",
+  "tags": [
+   "发现《写给我第一个喜欢的女孩的歌》",
+   "动画种草激励计划",
+   "虚拟偶像",
+   "可爱",
+   "翻唱",
+   "原创音乐",
+   "虚拟UP主",
+   "写给我第一个喜欢的女孩",
+   "新v",
+   "虚拟主播",
+   "私皮"
+  ],
+  "sidecar": true
+ },
+ "probe": {
+  "w": 1920,
+  "h": 1080,
+  "fps": 30.0,
+  "dur": 178.933,
+  "nb": 5367
+ },
+ "analysis": {
+  "shot_thr": 0.28,
+  "dense_shots": 19,
+  "dense_fps": 10,
+  "base_fps": 2
+ },
+ "frame": {
+  "letterbox": 0.0926,
+  "letterbox_lr": 0.0,
+  "crop": {
+   "w": 1920,
+   "h": 980,
+   "x": 0,
+   "y": 58,
+   "votes": 5258,
+   "total": 5365
+  },
+  "band_bottom": 0.0361,
+  "aspect_visible": 1.959,
+  "persistent_text_area": 0.8833,
+  "credit_band": 1.0
+ },
+ "palette": {
+  "bg": "#040508",
+  "fg": "#ececf0",
+  "accent": "#5a5897",
+  "dominant": "#ececf0",
+  "colors": [
+   {
+    "hex": "#ececf0",
+    "share": 0.2085
+   },
+   {
+    "hex": "#5a5897",
+    "share": 0.184
+   },
+   {
+    "hex": "#8483bb",
+    "share": 0.1719
+   },
+   {
+    "hex": "#b8b7d6",
+    "share": 0.1708
+   },
+   {
+    "hex": "#040508",
+    "share": 0.1382
+   },
+   {
+    "hex": "#33335c",
+    "share": 0.1266
+   }
+  ],
+  "lum": 0.5394,
+  "sat": 0.3233,
+  "sat_p95": 0.672,
+  "contrast": 0.2743
+ },
+ "type": {
+  "size_norm": 0.0889,
+  "lines_med": 2,
+  "area_med": 0.0619,
+  "align": "center-mid",
+  "text_frame_ratio": 0.827,
+  "vertical_ratio": 0.041,
+  "source": "ocr",
+  "align_hist": {
+   "left-top": 11,
+   "left-bottom": 11,
+   "left-mid": 14,
+   "center-mid": 100,
+   "right-mid": 2,
+   "center-top": 9,
+   "center-bottom": 16
+  }
+ },
+ "figure": {
+  "coverage_med": 0.0242,
+  "cx_med": 0.665,
+  "presence": 0.667,
+  "confidence": 0.55
+ },
+ "texture": {
+  "grain": 0.024,
+  "halftone": 0.13,
+  "scanline": 0.0,
+  "rgb_split_px": 0.0,
+  "bloom": 0.0144
+ },
+ "motion": {
+  "shot_len_med": 5.284,
+  "shot_len_p90": 10.85,
+  "cut_per_min": 10.06,
+  "cam_speed": 0.0,
+  "cam_speed_p90": 0.00625,
+  "zoom_rate": -0.00108,
+  "churn": 0.1636,
+  "density": 0.05
+ },
+ "trans": {
+  "n": 29,
+  "gradual_ratio": 0.724,
+  "flash_ratio": 0.0,
+  "span_s": 0.4,
+  "family": "gradual",
+  "pool": [
+   "dissolve",
+   "grad",
+   "mask",
+   "ink",
+   "iris",
+   "blinds"
+  ],
+  "list": [
+   {
+    "t": 1.067,
+    "kind": "cut",
+    "span_frames": 2,
+    "peak": 116.53
+   },
+   {
+    "t": 8.633,
+    "kind": "cut",
+    "span_frames": 1,
+    "peak": 73.52
+   },
+   {
+    "t": 14.767,
+    "kind": "gradual",
+    "span_frames": 7,
+    "peak": 37.24
+   },
+   {
+    "t": 20.3,
+    "kind": "gradual",
+    "span_frames": 6,
+    "peak": 37.12
+   },
+   {
+    "t": 25.6,
+    "kind": "gradual",
+    "span_frames": 6,
+    "peak": 35.8
+   },
+   {
+    "t": 31.3,
+    "kind": "gradual",
+    "span_frames": 4,
+    "peak": 51.66
+   },
+   {
+    "t": 36.067,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 65.49
+   },
+   {
+    "t": 37.967,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 45.16
+   },
+   {
+    "t": 41.4,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 51.22
+   },
+   {
+    "t": 43.3,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 42.19
+   },
+   {
+    "t": 46.633,
+    "kind": "cut",
+    "span_frames": 2,
+    "peak": 70.38
+   },
+   {
+    "t": 48.533,
+    "kind": "cut",
+    "span_frames": 1,
+    "peak": 59.69
+   },
+   {
+    "t": 52.067,
+    "kind": "gradual",
+    "span_frames": 4,
+    "peak": 36.74
+   },
+   {
+    "t": 56.933,
+    "kind": "cut",
+    "span_frames": 1,
+    "peak": 49.68
+   },
+   {
+    "t": 70.933,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 63.66
+   },
+   {
+    "t": 81.433,
+    "kind": "gradual",
+    "span_frames": 4,
+    "peak": 44.49
+   },
+   {
+    "t": 86.967,
+    "kind": "gradual",
+    "span_frames": 6,
+    "peak": 37.22
+   },
+   {
+    "t": 92.267,
+    "kind": "gradual",
+    "span_frames": 6,
+    "peak": 35.82
+   },
+   {
+    "t": 97.967,
+    "kind": "gradual",
+    "span_frames": 4,
+    "peak": 51.65
+   },
+   {
+    "t": 102.733,
+    "kind": "cut",
+    "span_frames": 1,
+    "peak": 80.73
+   },
+   {
+    "t": 124.067,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 52.87
+   },
+   {
+    "t": 125.967,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 45.6
+   },
+   {
+    "t": 129.4,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 51.3
+   },
+   {
+    "t": 131.3,
+    "kind": "gradual",
+    "span_frames": 3,
+    "peak": 42.24
+   },
+   {
+    "t": 134.633,
+    "kind": "cut",
+    "span_frames": 2,
+    "peak": 70.46
+   },
+   {
+    "t": 140.067,
+    "kind": "gradual",
+    "span_frames": 4,
+    "peak": 36.82
+   },
+   {
+    "t": 145.4,
+    "kind": "gradual",
+    "span_frames": 4,
+    "peak": 43.36
+   },
+   {
+    "t": 150.667,
+    "kind": "gradual",
+    "span_frames": 6,
+    "peak": 37.98
+   },
+   {
+    "t": 156.0,
+    "kind": "cut",
+    "span_frames": 1,
+    "peak": 59.66
+   }
+  ]
+ },
+ "shots": [
+  {
+   "i": 0,
+   "t0": 0.0,
+   "t1": 1.067,
+   "dur": 1.067,
+   "density": 0.05,
+   "fig": 0.015,
+   "txt": 0.0474
+  },
+  {
+   "i": 1,
+   "t0": 1.067,
+   "t1": 8.633,
+   "dur": 7.567,
+   "density": 0.05,
+   "fig": 0.023,
+   "txt": 0.0476
+  },
+  {
+   "i": 2,
+   "t0": 8.633,
+   "t1": 14.767,
+   "dur": 6.133,
+   "density": 0.05,
+   "fig": 0.022,
+   "txt": 0.0
+  },
+  {
+   "i": 3,
+   "t0": 14.767,
+   "t1": 20.3,
+   "dur": 5.533,
+   "density": 0.05,
+   "fig": 0.016,
+   "txt": 0.1106
+  },
+  {
+   "i": 4,
+   "t0": 20.3,
+   "t1": 25.6,
+   "dur": 5.3,
+   "density": 0.05,
+   "fig": 0.026,
+   "txt": 0.1013
+  },
+  {
+   "i": 5,
+   "t0": 25.6,
+   "t1": 31.3,
+   "dur": 5.7,
+   "density": 0.05,
+   "fig": 0.035,
+   "txt": 0.059
+  },
+  {
+   "i": 6,
+   "t0": 31.3,
+   "t1": 36.067,
+   "dur": 4.767,
+   "density": 0.05,
+   "fig": 0.029,
+   "txt": 0.0705
+  },
+  {
+   "i": 7,
+   "t0": 36.067,
+   "t1": 37.967,
+   "dur": 1.9,
+   "density": 0.05,
+   "fig": 0.033,
+   "txt": 0.0
+  },
+  {
+   "i": 8,
+   "t0": 37.967,
+   "t1": 41.4,
+   "dur": 3.433,
+   "density": 0.05,
+   "fig": 0.021,
+   "txt": 0.0045
+  },
+  {
+   "i": 9,
+   "t0": 41.4,
+   "t1": 43.3,
+   "dur": 1.9,
+   "density": 0.05,
+   "fig": 0.047,
+   "txt": 0.0
+  },
+  {
+   "i": 10,
+   "t0": 43.3,
+   "t1": 46.633,
+   "dur": 3.333,
+   "density": 0.05,
+   "fig": 0.018,
+   "txt": 0.0587
+  },
+  {
+   "i": 11,
+   "t0": 46.633,
+   "t1": 48.533,
+   "dur": 1.9,
+   "density": 0.05,
+   "fig": 0.028,
+   "txt": 0.0
+  },
+  {
+   "i": 12,
+   "t0": 48.533,
+   "t1": 52.067,
+   "dur": 3.533,
+   "density": 0.05,
+   "fig": 0.014,
+   "txt": 0.0
+  },
+  {
+   "i": 13,
+   "t0": 52.067,
+   "t1": 56.933,
+   "dur": 4.867,
+   "density": 0.05,
+   "fig": 0.027,
+   "txt": 0.0603
+  },
+  {
+   "i": 14,
+   "t0": 56.933,
+   "t1": 70.933,
+   "dur": 14.0,
+   "density": 0.05,
+   "fig": 0.024,
+   "txt": 0.0392
+  },
+  {
+   "i": 15,
+   "t0": 70.933,
+   "t1": 81.433,
+   "dur": 10.5,
+   "density": 0.05,
+   "fig": 0.025,
+   "txt": 0.1221
+  },
+  {
+   "i": 16,
+   "t0": 81.433,
+   "t1": 86.967,
+   "dur": 5.533,
+   "density": 0.05,
+   "fig": 0.016,
+   "txt": 0.098
+  },
+  {
+   "i": 17,
+   "t0": 86.967,
+   "t1": 92.267,
+   "dur": 5.3,
+   "density": 0.05,
+   "fig": 0.025,
+   "txt": 0.1073
+  },
+  {
+   "i": 18,
+   "t0": 92.267,
+   "t1": 97.967,
+   "dur": 5.7,
+   "density": 0.05,
+   "fig": 0.036,
+   "txt": 0.0572
+  },
+  {
+   "i": 19,
+   "t0": 97.967,
+   "t1": 102.733,
+   "dur": 4.767,
+   "density": 0.05,
+   "fig": 0.029,
+   "txt": 0.0701
+  },
+  {
+   "i": 20,
+   "t0": 102.733,
+   "t1": 124.067,
+   "dur": 21.333,
+   "density": 0.05,
+   "fig": 0.015,
+   "txt": 0.0
+  },
+  {
+   "i": 21,
+   "t0": 124.067,
+   "t1": 125.967,
+   "dur": 1.9,
+   "density": 0.05,
+   "fig": 0.033,
+   "txt": 0.0
+  },
+  {
+   "i": 22,
+   "t0": 125.967,
+   "t1": 129.4,
+   "dur": 3.433,
+   "density": 0.05,
+   "fig": 0.021,
+   "txt": 0.0
+  },
+  {
+   "i": 23,
+   "t0": 129.4,
+   "t1": 131.3,
+   "dur": 1.9,
+   "density": 0.05,
+   "fig": 0.047,
+   "txt": 0.0
+  },
+  {
+   "i": 24,
+   "t0": 131.3,
+   "t1": 134.633,
+   "dur": 3.333,
+   "density": 0.05,
+   "fig": 0.018,
+   "txt": 0.0587
+  },
+  {
+   "i": 25,
+   "t0": 134.633,
+   "t1": 140.067,
+   "dur": 5.433,
+   "density": 0.05,
+   "fig": 0.015,
+   "txt": 0.0
+  },
+  {
+   "i": 26,
+   "t0": 140.067,
+   "t1": 145.4,
+   "dur": 5.333,
+   "density": 0.05,
+   "fig": 0.027,
+   "txt": 0.0597
+  },
+  {
+   "i": 27,
+   "t0": 145.4,
+   "t1": 150.667,
+   "dur": 5.267,
+   "density": 0.05,
+   "fig": 0.017,
+   "txt": 0.0992
+  },
+  {
+   "i": 28,
+   "t0": 150.667,
+   "t1": 156.0,
+   "dur": 5.333,
+   "density": 0.05,
+   "fig": 0.027,
+   "txt": 0.1003
+  },
+  {
+   "i": 29,
+   "t0": 156.0,
+   "t1": 178.933,
+   "dur": 22.933,
+   "density": 0.05,
+   "fig": 0.022,
+   "txt": 0.0
+  }
+ ],
+ "metrics_doc": {
+  "lum": "亮度均值 /255",
+  "contrast": "亮度标准差 /255（同时用作「画面平不平」的判据）",
+  "sat": "HSV 饱和度均值（max-min)/max",
+  "edge": "Sobel 幅值 > p95 的像素占比（信息密度）",
+  "text_h": "疑似文字连通域高度中位数 /画高（=字号代理量）",
+  "text_lines": "疑似文字行数（按 y 重叠合并连通域）",
+  "text_area": "疑似文字总面积 /画面积",
+  "text_align": "文字包围盒中心相对画面的位置：left/center/right × top/mid/bottom",
+  "letterbox": "纯黑行/列占画高的比例（上下黑边之和）",
+  "grain": "高通残差在平坦区的标准差（胶片颗粒代理）",
+  "halftone": "径向频谱 1/8~1/2 奈奎斯特频段的峰值比（网点/排线）",
+  "scanline": "行均值序列的周期性峰（扫描线）",
+  "rgb_split": "R 与 B 列均值互相关的水平错位（像素，0=无套色错位）",
+  "bloom": "亮度 >240 的像素占比（光晕/泛光）",
+  "subject": "与画面主色距离 > 阈值的最大连通域面积占比（主体代理量）",
+  "subject_cx": "主体质心 x（0..1）",
+  "motion": "相邻帧灰度相位相关的位移模长 /画宽（相机运动代理）",
+  "sat_max": "饱和度 p95"
+ },
+ "engine": {
+  "pack": "violet",
+  "pack_rank": [
+   {
+    "pack": "huaxin",
+    "dist": 67.3
+   },
+   {
+    "pack": "paper",
+    "dist": 69.9
+   },
+   {
+    "pack": "hud",
+    "dist": 91.5
+   },
+   {
+    "pack": "noir",
+    "dist": 103.6
+   }
+  ],
+  "pack_proposal": {
+   "name": "violet",
+   "scheme": {
+    "bg": "#040508",
+    "fg": "#ececf0",
+    "accent": "#5a5897",
+    "sub": "#33335c",
+    "dim": "#2D2E31"
+   },
+   "why": "最近 pack=huaxin：底 8.6 / 字 6.0 / 强调 26.4（加权总分 67.3）；强调色差 26.4 ≥ 20",
+   "rank": [
+    {
+     "pack": "huaxin",
+     "dist": 67.3
+    },
+    {
+     "pack": "paper",
+     "dist": 69.9
+    },
+    {
+     "pack": "hud",
+     "dist": 91.5
+    }
+   ]
+  },
+  "layouts": {
+   "titleCard": 3,
+   "center": 2,
+   "scaleSteps": 2,
+   "cross": 1,
+   "block": 2
+  },
+  "trans_pool": [
+   "dissolve",
+   "grad",
+   "mask",
+   "ink",
+   "iris",
+   "blinds"
+  ],
+  "trans_dur": 0.4,
+  "type": {
+   "size_ladder": 1.196,
+   "tracking": 0.045,
+   "leading": 1.35,
+   "accent_word_ratio": 0.18,
+   "serif": false
+  },
+  "texture": {
+   "grain": 0.019,
+   "halftone": 0.104,
+   "scanline": 0.0,
+   "rgb_split": 0.0,
+   "bloom": 0.173
+  },
+  "figure": {
+   "presence": 0.667,
+   "coverage_target": 0.357,
+   "bias": "right",
+   "frameless_hint": true,
+   "confidence": 0.55
+  },
+  "frame": {
+   "letterbox": 0.0926,
+   "credit_bar": true,
+   "aspect_visible": 1.959
+  },
+  "motion": {
+   "cam_speed": 0.002,
+   "zoom_rate": -0.00108,
+   "churn": 0.1636,
+   "shot_len_target": 5.284
+  }
+ }
+}
