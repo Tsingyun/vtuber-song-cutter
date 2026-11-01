@@ -415,3 +415,74 @@ tools/pv_jz.py           JIZURA 离线出帧 → 帧序列（复刻 live 的契�
 之后不画则快照里没黑边（下一镜从 A 出来时黑边会跳进来）。
 实测：亮底（月白）上黑边清晰、文字未被切；纯黑底（夜巡）上黑边不可见 ——
 这不是 bug，近黑底加黑边本来就看不出来，参考片能读到黑边是因为它的画面区有插画。
+
+## 6. 交付清单（截至 2026-11-01）
+
+### 6.1 新增文件
+
+| 文件 | 作用 |
+|---|---|
+| `tools/pv_ref.py` | 参考视频 → 视觉风格档案（VSP）。`fetch/analyze/all/report/restyle/selftest` |
+| `tools/pv_style.py` | VSP 读取器：校验、裁剪到合法域、归一成权重；包不存在时硬失败 |
+| `tools/pv_jz.cjs` | JIZURA 离线预渲：逐帧 PNG + `jz.json` |
+| `tools/build_jz_bundle.mjs` | 从上游 `src/*.js` 重建 JIZURA bundle（`--check` 逐字节比对） |
+| `styles/bv1juxc6seko.vsp.json` / `.md` | 参考片档案（机器可读 + 人读版） |
+| `docs/refstyle-audit-and-plan.md` | 本文（审计、方案、落地记录、交付清单） |
+
+### 6.2 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `tools/pv_direct.py` | `--style/--style-pack/--style-strict`、`--jz/--jz-layer/--jz-blend/--jz-alpha`；`style_*` 五个应用点；`FIT` 补 center/titleCard；`FONTS` 补 violet/huaxin/dawn；`PERS` 补 violet；`meta.letterbox` 与 `meta.live` 自包含 |
+| `renderer/player/pv/pv_scheme.js` | 新增 `violet` 纸包（5 套）；`flat` 改为按包声明 |
+| `renderer/player/pv/pv_engine.js` | 新增 `drawJz()`（帧序列层，两个 z 挂点）、`drawLetterbox()` |
+| `renderer/pv/probe.html` | `res` 可配置（原来写死 1080） |
+| `.gitignore` | JIZURA bundle 改为入库（否则换机 clone 后该通道永久缺失） |
+
+### 6.3 调用关系
+
+```
+参考视频 URL/文件
+   └─ pv_ref.py analyze ──→ styles/<id>.vsp.json   （量测 + 映射，7 个旋钮）
+                                 │
+                                 ├─ pv_direct.py --style ──→ storyboard.json
+                                 │        └─ --jz ←── pv_jz.cjs（JIZURA 预渲 PNG 序列 + jz.json）
+                                 │
+                                 └─ pv_stills.cjs / render_song.cjs ──→ PNG / 成片
+                                          （pv_engine: drawPaper→bg→decor→jz(后)→fig(后)
+                                            →lyrics→fig(前)→jz(前)→decor(前)→post→letterbox→crossFade）
+```
+
+### 6.4 使用说明
+
+```bash
+# 1) 生成/更新风格档案（一支参考片一份，互不覆盖）
+python tools/pv_ref.py analyze "https://www.bilibili.com/video/BVxxxx" --verify
+
+# 2) 调映射（不重新量测，几秒出结果）
+python tools/pv_ref.py restyle styles/bv1juxc6seko.vsp.json
+
+# 3) 用档案生成编排稿（不给 --style 时行为与旧版逐字段一致）
+python tools/pv_direct.py --timing t.json --analysis a.json --out sb.json \
+       --style styles/bv1juxc6seko.vsp.json
+
+# 4) 可选：叠 JIZURA 层（先预渲，再挂上去）
+node tools/pv_jz.cjs --timing t.json --out _tmp/jz/j1 --start 90 --dur 30 --fps 6 --bpm 138.46
+python tools/pv_direct.py ... --jz _tmp/jz/j1/jz.json --jz-alpha 0.55 --out sb.json
+
+# 5) 抽帧自检 / 整片渲染
+node tools/pv_stills.cjs --sb sb.json --times 20,60,120 --out _tmp/pv/stills
+```
+
+### 6.5 已知问题（按影响排序）
+
+1. **人物与歌词的「真交互」还没做**：现在仍然是「按 FIG_SAFE 让人和字互不侵犯」，
+   即参考片里「歌词从人背后穿过 / 被文字局部遮挡」这类效果**尚未实现**。
+   缺的是一张带 alpha 的人像（立绘 PNG 或抠图），现有 live 序列是照片，没有中间层可插。
+2. **`texture.*` 未接线**：量测标度与 pack 的 `texture.grain` 之间没有标定样本。
+3. **整片未跑**：目前只验证到「4 秒 JIZURA 层 + 150 秒编排稿 + 单帧实渲」，
+   一首完整歌（≥6 分钟）的 pv_flash / pv_check / songcut.qc 四关还没跑。
+4. **JIZURA 的 `enabled` 分组没接参数**：现在它会把自带歌词层一起渲出来，
+   只能靠 `--jz-alpha` 压低；正确做法是关掉它的歌词分组、只留动效与装饰。
+5. 转场形态（溶解 vs 擦除）无法自动判别（见 S3 已知问题）。
+6. `violet` 包的拉丁字形偏软（用的是 Noto Sans SC 的拉丁）。
