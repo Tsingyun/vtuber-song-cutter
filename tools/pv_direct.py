@@ -123,6 +123,26 @@ FONTS = {
     "dawn": {"face": "frauncesItB", "body": "nunitoSemi"},
 }
 
+# 中文歌词的字体对（2026-11-02）：
+# FONTS 里每一档字面（heavy / mincho / grotesk / sansMed）都是**日文或拉丁**族。
+# 中文歌词落到它们身上时只能靠兜底，而兜底链恰好是缺字的：
+#   Dela Gothic One  对本片副歌 78 个去重字只覆盖 53 个（缺 欢 乐 转 车 语 应 动 沉 摆 节 衬 …）
+#   Zen Kaku / Zen Old Mincho 各覆盖 50 个
+# ⇒ 同一行里一半日文字形、一半兜底字形，骨架对不上。这不是选角审美，是缺字。
+# 所以中文不再「借」日文族的人格，而是用中文族自己承担同样的性格分工：
+#   黑体超粗（noir/crimson/hud） ↔ 宋体（paper/mono/huaxin）↔ 楷（dawn）
+# 纸包的性格不变（硬纸配黑、软纸配宋），变的只是由谁来写。
+FONTS_CN = {
+    "noir": {"face": "cnHeavy", "body": "cnSans"},
+    "crimson": {"face": "cnHeavy", "body": "cnSans"},
+    "paper": {"face": "cnSerifB", "body": "cnSerifLt"},
+    "hud": {"face": "cnHeavy", "body": "cnSans"},
+    "mono": {"face": "cnSerifB", "body": "cnSerifLt"},
+    "violet": {"face": "cnSansB", "body": "cnSans"},
+    "huaxin": {"face": "cnSerifB", "body": "cnSerifLt"},
+    "dawn": {"face": "cnKai", "body": "cnSansLt"},
+}
+
 # 语气 → 相机档 / 人物概率 / 版面尺寸基线
 # availW 是「版心能有多宽」。上限定在 0.66~0.72：再宽正文块就会横贯画面，
 # 从「一张版面」退化成「一条字幕」。
@@ -2261,12 +2281,17 @@ def main():
                 st[1] = (st[1] + 1) % nsc
                 st[0] = l["t0"]
             sch = st[1]
-        fonts = FONTS.get(pack, FONTS["noir"])
-
         words = [w["text"] for w in l["words"]]
         nw = len(words)
         n = len(l["text"])
         cjk = any("\u3040" <= ch <= "\u9fff" for ch in l["text"])
+        # 中文歌词走中文对；出现假名即判日文，仍用日文族（Zen 系列的假名骨架是它的本分）。
+        # 判据故意不用「含汉字」—— 日文歌词里也有汉字，用假名排除才干净。
+        _kana = any("\u3040" <= ch <= "\u30ff" for ch in l["text"])
+        _han = any("\u4e00" <= ch <= "\u9fff" for ch in l["text"])
+        _cn = _han and not _kana
+        _fset = FONTS_CN if _cn else FONTS
+        fonts = _fset.get(pack, _fset["noir"])
         key = key_index(words, kw)
 
         # ---- 人物：先决定有没有人，再决定版面（版面必须为人让位）
@@ -2638,14 +2663,25 @@ def main():
                     lum = _sch[int((s["pal"] or {}).get("idx") or 0) % len(_sch)]["lum"]
             except Exception:
                 lum = None
-            if lum is not None and lum < 0.5:
-                ja *= 0.14
+            # ---- 反相 + 混合模式必须跟着纸的明暗走（2026-11-02 修正）----
+            # JIZURA 预渲出来的帧是「透明底 + 白字」。原来的做法一律用 screen：
+            #   screen(白, 亮底) = 亮底  → 浅纸上**等于没画**，α 给到 1.0 也看不见；
+            #   screen(白, 暗底) = 浮出来 → 深纸上才显形，于是又怕它抢读，×0.14 压成暗纹。
+            # 两头都不对：浅底白给、深底太淡。真正要改的是「纸亮时字必须是黑的」。
+            #   浅纸：invert(1) 反成黑字 + multiply（墨印在纸上）→ 亮底才看得见；
+            #   深纸：白字 + screen（发光）→ 本来就是它该有的样子。
+            # α 不再按深浅打折，只按「墨比光实」微调一档，--jz-alpha 于是回到「存在强度」这个
+            # 单一含义，想更明显就调它，不必再去猜某个魔数。
+            j_blend, j_inv = "screen", False
+            if lum is not None and lum >= 0.5:
+                j_blend, j_inv = "multiply", True
+                ja *= 0.78
                 deep_fix += 1
             s["jz"] = {"seq": "jz", "tOff": round(-seq_t0, 3),
-                       "layer": a.jz_layer, "blend": a.jz_blend,
+                       "layer": a.jz_layer, "blend": j_blend, "inv": j_inv,
                        "a": round(ja, 3)}
         if deep_fix:
-            print("[jz] 深底 %d 镜：alpha ×0.14（screen 在深底会把整片字浮出来）" % deep_fix)
+            print("[jz] 浅底 %d 镜：反相成墨字 + multiply（白字 screen 在浅纸上不可见）" % deep_fix)
         print("[jz] %s  %d 帧 @%.2ffps  起点 %.2fs  覆盖 %d/%d 镜  layer=%s blend=%s"
               % (os.path.basename(os.path.dirname(a.jz)), jm["n"], jm["fps"],
                  seq_t0, len(hit), len(shots), a.jz_layer, a.jz_blend))

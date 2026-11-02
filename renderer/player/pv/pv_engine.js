@@ -474,6 +474,11 @@
     ctx.globalAlpha = clamp(a, 0, 1);
     // screen = JIZURA 原生 keyBg 通道（白字压黑底，screen 叠加即等于透明）
     if (j.blend && j.blend !== 'normal') ctx.globalCompositeOperation = j.blend;
+    /* inv：把预渲的白字反成黑字。
+       预渲帧只有一套（透明底 + 白字），而它在**浅纸上本来就不可见** ——
+       screen 白字压亮底等于没画。浅底镜头由 pv_direct 打 inv + multiply，
+       墨字印在纸上才读得出来。invert 只动 RGB 不动 alpha，透明区仍然透明。 */
+    if (j.inv) ctx.filter = 'invert(1)';
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(im, 0, 0, PV.W, PV.H);
     ctx.restore();

@@ -14068,3 +14068,29 @@
   font-display: block;
   src: url(smileysans/SmileySans-Oblique.woff2) format('woff2');
 }
+
+/* ---------------- 中文族：整包单文件（非 unicode-range 分片） ----------------
+   为什么单独一份而不是复用 fonts/fonts.css 里那套 'Noto Sans SC'：
+   那套是 408 个 unicode-range 分片，逐片比对下来**没有一片**覆盖 U+8C11「谑」
+   —— 它是「常用字表」切出来的，生僻字天然落空。日文字体族（Dela / Zen 系列）
+   就更不必说：Dela 对本片副歌 78 个去重字只覆盖 53 个，缺的全是高频简体字
+   （欢 乐 转 车 语 应 动 沉 摆 节 衬）。于是同一行歌词里一半走日文字形、
+   一半掉到兜底字体，字形骨架当场对不上 —— 这是「字体搭配不合理」的真身，
+   不是选角审美问题。
+
+   族名带 PV 后缀，刻意与分片族不同名：同名会被浏览器按声明顺序合并，
+   分片先命中就还是缺字。整包单文件不依赖 unicode-range，覆盖 30890 字。 */
+@font-face {
+  font-family: 'Noto Sans SC PV';
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url(notosanssc/w900.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans SC PV';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url(notosanssc/w700.woff2) format('woff2');
+}

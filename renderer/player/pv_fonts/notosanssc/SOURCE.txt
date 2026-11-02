@@ -1,0 +1,33 @@
+Noto Sans SC（思源黑体）
+======================
+
+来源：Google / Adobe 的 Noto Sans SC 可变字体，本机文件为
+      C:/Windows/Fonts/NotoSansSC-VF.ttf（wght 100–900，30890 字形）。
+      若需重新生成，用 fontTools 的 varLib.instancer 实例化到目标字重再转 woff2：
+
+          python - <<'EOF'
+          from fontTools.ttLib import TTFont
+          from fontTools.varLib.instancer import instantiateVariableFont
+          f = TTFont("C:/Windows/Fonts/NotoSansSC-VF.ttf")
+          inst = instantiateVariableFont(f, {"wght": 900}, inplace=True, updateFontNames=False)
+          inst.flavor = "woff2"
+          inst.save("w900.woff2")
+          EOF
+
+文件：
+  w900.woff2  思源黑 Black   3.9 MB   ← cnHeavy / cnSansB
+  w700.woff2  思源黑 Bold    4.2 MB   ← cnSans
+
+为什么是**整包单文件**，不是 unicode-range 分片
+--------------------------------------------
+播放器 fonts/fonts.css 里那份 'Noto Sans SC' 是按常用字表切的 408 个分片，
+逐片比对下来**没有一片**覆盖 U+8C11「谑」—— 分片子集本身就是「常用字表」，
+生僻字天然落空。本目录是整包，覆盖 30890 字。
+
+@font-face 的族名用的是 'Noto Sans SC PV'（带 PV 后缀），刻意与分片族不同名：
+同名会被浏览器按声明顺序合并，分片先命中就还是缺字。
+
+许可证
+------
+Noto Sans SC 以 SIL Open Font License 1.1 发布，允许商用、修改与再分发，
+保留本说明即可。许可证全文：https://scripts.sil.org/OFL

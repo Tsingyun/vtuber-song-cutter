@@ -14,15 +14,15 @@
      Dela Gothic One / Archivo Black / Anton 都只有一个字重（本身就是超粗），权重字段照填不误。
      CJK 兜底走播放器已有的 Noto Sans SC（同目录 fonts/），日文假名另有 Zen 系列覆盖。 */
   PV.FACES = {
-    heavy:     { family: '"Dela Gothic One", "Smiley Sans"', weight: 400, kind: 'gothic' },
-    grotesk:   { family: '"Archivo Black", "Smiley Sans"', weight: 400, kind: 'gothic' },
-    condensed: { family: '"Anton", "Smiley Sans"', weight: 400, kind: 'condensed' },
-    tall:      { family: '"Bebas Neue", "Smiley Sans"', weight: 400, kind: 'condensed' },
-    sans:      { family: '"Zen Kaku Gothic New", "Smiley Sans"', weight: 900, kind: 'gothic' },
-    sansMed:   { family: '"Zen Kaku Gothic New", "Smiley Sans"', weight: 700, kind: 'gothic' },
-    sansLt:    { family: '"Zen Kaku Gothic New", "Smiley Sans"', weight: 500, kind: 'gothic' },
-    mincho:    { family: '"Zen Old Mincho", "Noto Serif SC"', weight: 900, kind: 'serif' },
-    minchoLt:  { family: '"Zen Old Mincho", "Noto Serif SC"', weight: 700, kind: 'serif' },
+    heavy:     { family: '"Dela Gothic One"', weight: 400, kind: 'gothic' },
+    grotesk:   { family: '"Archivo Black"', weight: 400, kind: 'gothic' },
+    condensed: { family: '"Anton"', weight: 400, kind: 'condensed' },
+    tall:      { family: '"Bebas Neue"', weight: 400, kind: 'condensed' },
+    sans:      { family: '"Zen Kaku Gothic New"', weight: 900, kind: 'gothic' },
+    sansMed:   { family: '"Zen Kaku Gothic New"', weight: 700, kind: 'gothic' },
+    sansLt:    { family: '"Zen Kaku Gothic New"', weight: 500, kind: 'gothic' },
+    mincho:    { family: '"Zen Old Mincho"', weight: 900, kind: 'serif' },
+    minchoLt:  { family: '"Zen Old Mincho"', weight: 700, kind: 'serif' },
     /* Didone：细横粗竖的高对比衬线，大字号才显出「印刷」的骨。
        文字 PV 里「細明朝 × 極太ゴシック」的对撞靠它成立。 */
     didone:    { family: '"Bodoni Moda"', weight: 900, kind: 'serif' },
@@ -45,10 +45,19 @@
        全是日式骨架，中文歌里一眼就能看出来）。所以中文单独一组，cjk:true 让预热
        在纯拉丁片里跳过它们 —— 中文族是整包 10~20MB，没用到时白解码会拖慢首帧。
        全部 SIL OFL，商用无限制，许可证见 pv_fonts/<slug>/。 */
-    /* 黑体：思源黑体（播放器 fonts/ 里已有的 Noto Sans SC，这里只是给中文一个显式入口） */
-    cnSans:    { family: '"Noto Sans SC"', weight: 700, kind: 'gothic', cjk: true },
-    cnSansB:   { family: '"Noto Sans SC"', weight: 900, kind: 'gothic', cjk: true },
-    cnSansLt:  { family: '"Noto Sans SC"', weight: 400, kind: 'gothic', cjk: true },
+    /* 黑体：思源黑体**整包单文件**（pv_fonts/notosanssc/，族名带 PV 后缀）。
+       旧写法指向 'Noto Sans SC'，那是 fonts/fonts.css 的 408 个 unicode-range 分片，
+       实测无一片覆盖 U+8C11「谑」——「给中文一个显式入口」在这份字库里是空头支票。
+       换整包后覆盖 30890 字，副歌 78 个去重字全中。 */
+    cnSans:    { family: '"Noto Sans SC PV"', weight: 700, kind: 'gothic', cjk: true },
+    cnSansB:   { family: '"Noto Sans SC PV"', weight: 900, kind: 'gothic', cjk: true },
+    cnSansLt:  { family: '"Noto Sans SC PV"', weight: 400, kind: 'gothic', cjk: true },
+    /* 中文「超粗黑」与「斜切手写感」两把刀：
+       cnHeavy 是正统重音（noir / crimson 这类硬纸包的主字），
+       cnSlant 是得意黑的斜切味，只给「戏谑 / 诙谐」一类词做破格，
+       不参与轮转 —— 一参与就会变成全片字体在跳。 */
+    cnHeavy:   { family: '"Noto Sans SC PV"', weight: 900, kind: 'gothic', cjk: true },
+    cnSlant:   { family: '"Smiley Sans"', weight: 400, kind: 'gothic', cjk: true },
     /* 宋体：思源宋体。中文最正文的衬线，主歌叙述用 */
     cnSerif:   { family: '"Noto Serif SC"', weight: 700, kind: 'serif', cjk: true },
     cnSerifB:  { family: '"Noto Serif SC"', weight: 900, kind: 'serif', cjk: true },
