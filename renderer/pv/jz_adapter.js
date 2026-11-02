@@ -105,7 +105,10 @@
       if (P.canvas.width !== w || P.canvas.height !== h) { P.canvas.width = w; P.canvas.height = h; }
       P.ctx.setTransform(1, 0, 0, 1, 0, 0);
       P.ctx.clearRect(0, 0, w, h);
-      P.R.frame(P.ctx, P.plan, t, optsFor(mode, 1));
+      /* 缩放必须按 canvas 实际宽度算。写死 1 时：res>1080 的离屏 canvas（比如 4K）
+         只会在左上角画出 plan.W×plan.H 那一块，右下 3/4 留黑 —— 而且不报错。
+         以前只有 1080 输出（w/plan.W == 1）所以一直没暴露。 */
+      P.R.frame(P.ctx, P.plan, t, optsFor(mode, P.canvas.width / P.plan.W));
       return P.canvas;
     },
 

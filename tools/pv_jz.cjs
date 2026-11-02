@@ -29,6 +29,28 @@ const res = Number(argOf('res', '1080'));
 const style = argOf('style', 'noir');
 const accent = argOf('accent', '');
 const seed = Number(argOf('seed', '20261027'));
+/* 2026-11-02 晚：接上官方 theme 与配色子集。
+ *   --theme  <lyricpv|kinetic|wa|horror|pop|ballad>  走 J.omakase（会换掉 --style，见 RULES §117.3）
+ *   --schemes <dark|light|0|0,1|all>                 缺省 dark（= 原有行为）；'all' = 不限制
+ *   --deny   <a,b,c>                                 按 layout 名关掉（中文长句下读不清的版式）
+ *   --theme-seed <n>                                 omakase 的随机种子，默认 0x9e3779b9
+ * 三个都不传时，输出与改动前逐字节一致。 */
+const theme = argOf('theme', '');
+const themeSeed = Number(argOf('theme-seed', '2654435769'));
+const deny = (argOf('deny', '') || '').split(',').map(s => s.trim()).filter(Boolean);
+let schemes = 'dark';
+const schemesArg = argOf('schemes', '');
+if (schemesArg) {
+  if (schemesArg === 'dark' || schemesArg === 'light') schemes = schemesArg;
+  else if (schemesArg === 'all') schemes = null;
+  else {
+    const idx = schemesArg.split(',').map(x => parseInt(x, 10));
+    if (idx.some(n => !Number.isFinite(n) || n < 0)) {
+      console.error('--schemes 只接受 dark | light | all | 逗号分隔的索引'); process.exit(2);
+    }
+    schemes = idx;
+  }
+}
 /* 2026-11-02：新增「整帧」输出。
  * 原来只出透明 PNG，JIZURA 只能当一层贴图（背景、装饰、转场全由我们的引擎出）。
  * 出整帧时它自己就是画面：背景平涂 + 纸纹 + 三趟色散 + post 全都在引擎内部完成，
@@ -53,11 +75,18 @@ const mmss = s => {
   return String(m).padStart(2, '0') + ':' + sec.toFixed(2).padStart(5, '0');
 };
 const lines = (tdoc.lines || []).filter(l => l.t1 > start + 0.05 && l.t0 < start + dur - 0.05);
-if (!lines.length) { console.error('窗口内没有歌词行'); process.exit(3); }
-const lrc = lines.map(l => {
-  const t = Math.max(0, (l.t0 - start));
-  return '[' + mmss(t) + ']' + String(l.text || '').trim();
-}).join('\n');
+if (!lines.length && !argOf('lrc', '')) { console.error('窗口内没有歌词行'); process.exit(3); }
+/* --lrc <file>：直接用给好的 LRC，不从 timing.json 重建。
+ * 为什么需要：timing.json 的 lines 里没有间奏、没有段落空行，还带着制作人员行；
+ * 而 JIZURA 的分镜止于最后一句歌词（尾部会纯黑，§115.3），多样性又靠段落空行（§116.2）。
+ * 这些都得在 LRC 层面表达，所以允许外部传入。传了就不做时间平移，按绝对时间用。 */
+const lrcFile = argOf('lrc', '');
+const lrc = lrcFile
+  ? fs.readFileSync(path.resolve(ROOT, lrcFile), 'utf8').replace(/\r/g, '')
+  : lines.map(l => {
+      const t = Math.max(0, (l.t0 - start));
+      return '[' + mmss(t) + ']' + String(l.text || '').trim();
+    }).join('\n');
 
 /* 拍点：由 bpm 推等间距网格（bpm 是实测的，网格是推导的 —— 这一点写进输出 JSON 的 note）。
    不传 beats 会让 JIZURA 用自己的一致性检测，和我们的时间轴未必同步。 */
@@ -81,8 +110,11 @@ if (bpm > 0) {
   const sum = await page.evaluate(async cfg => window.__init(cfg), {
     dur, beats, bpm, lrc, style, res, seed,
     accent: accent || undefined,
-    title: (tdoc.meta && tdoc.meta.title) || '', artist: (tdoc.meta && tdoc.meta.artist) || '',
-    lang: 'auto',
+    title: tdoc.meta && tdoc.meta.title || argOf('title', ''),
+    artist: tdoc.meta && tdoc.meta.artist || argOf('artist', ''),
+    lang: argOf('lang', 'auto'),
+    theme: theme || undefined, themeSeed, deny,
+    schemes: schemes === 'dark' && !schemesArg ? undefined : schemes,
   });
 
   const n = Math.max(1, Math.round(dur * fps));
