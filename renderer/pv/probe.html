@@ -62,6 +62,18 @@ window.__init = async (cfg) => {
     proj.enabled.layout = Object.assign({}, proj.enabled.layout);
     for (const k of cfg.deny) proj.enabled.layout[k] = false;
   }
+  /* 每句一镜（cfg.single）：
+     JIZURA 默认把一句切成 nC = round(D / lerp(1.3, 0.5, density)) 个镜头，每个 0.5~1.3s，
+     且每个镜头都各自从空白入场 —— 一句 8 秒的歌词会变成 6 个闪烁的碎块，1.35 秒的短句
+     则整段都在做入场动画（用户原话：「十几秒一个场景、中间空框、第一句不完整」）。
+     官方解法是 per-line override 的 `single: true`（引擎 3003 行 `if (ov.single || kime) nC = 1`）。
+     这里用 Proxy 是因为它按 li 索引取一行一个对象，不必预先知道行数；addPlan 只做
+     `project.overrides[li]` 的读取，不展开也不序列化，Proxy 安全。 */
+  if (cfg.single) {
+    proj.overrides = new Proxy({}, {
+      get: (t, k) => (typeof k === 'string' && /^\d+$/.test(k)) ? { single: true } : t[k],
+    });
+  }
   const sum = await JZ.addPlan('main', proj);
   window.__CUTS = JZ.cutsOf('main');
   return sum;

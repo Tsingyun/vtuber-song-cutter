@@ -34,10 +34,13 @@ const seed = Number(argOf('seed', '20261027'));
  *   --schemes <dark|light|0|0,1|all>                 缺省 dark（= 原有行为）；'all' = 不限制
  *   --deny   <a,b,c>                                 按 layout 名关掉（中文长句下读不清的版式）
  *   --theme-seed <n>                                 omakase 的随机种子，默认 0x9e3779b9
+ *   --single                                         一句一镜（不再按 0.5~1.3s 切碎）
  * 三个都不传时，输出与改动前逐字节一致。 */
 const theme = argOf('theme', '');
 const themeSeed = Number(argOf('theme-seed', '2654435769'));
 const deny = (argOf('deny', '') || '').split(',').map(s => s.trim()).filter(Boolean);
+/* --single：一句歌词一个镜头（引擎 nC=1）。不给就还是官方默认的多镜头快切。 */
+const single = process.argv.includes('--single');
 let schemes = 'dark';
 const schemesArg = argOf('schemes', '');
 if (schemesArg) {
@@ -113,7 +116,7 @@ if (bpm > 0) {
     title: tdoc.meta && tdoc.meta.title || argOf('title', ''),
     artist: tdoc.meta && tdoc.meta.artist || argOf('artist', ''),
     lang: argOf('lang', 'auto'),
-    theme: theme || undefined, themeSeed, deny,
+    theme: theme || undefined, themeSeed, deny, single,
     schemes: schemes === 'dark' && !schemesArg ? undefined : schemes,
   });
 
