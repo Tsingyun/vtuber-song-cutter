@@ -127,7 +127,27 @@ def main():
     ap.add_argument("--reuse-sb", action="store_true")
     ap.add_argument("--outdir", default="", help="缺省 cuts/<date>/<song>/")
     ap.add_argument("--keep-silent", action="store_true", help="保留无音轨中间片")
+    # ---- 风格（唯一真源 songcut/style.py）----
+    # pv_one 是「手书正门」，只出 B 风格；A 风格没有编排稿，走 song_cutter.py --style A。
+    ap.add_argument("--style", default="B",
+                    help="风格名（B/手书/lettering）；pv_one 只支持 B，A 请走 song_cutter.py")
+    ap.add_argument("--jz", default="", help="JIZURA 帧序列的 jz.json（tools/pv_jz.cjs 产出）")
+    ap.add_argument("--fig-spans", default="", help="人物挂点表 JSON（键=窗口内句号）")
+    ap.add_argument("--no-arc", action="store_true", help="关掉风格弧线（默认按风格开）")
     a = ap.parse_args()
+
+    from songcut import style as STYLE_SRC
+    try:
+        ST = STYLE_SRC.resolve(a.style)
+    except STYLE_SRC.StyleError as e:
+        raise SystemExit(str(e))
+    if not ST["pv"]:
+        raise SystemExit("pv_one 只出 B 风格（手书）；A 风格（唱片）没有编排稿，"
+                         "请用 song_cutter.py --style A")
+    use_arc = bool(ST["arc"]) and not a.no_arc
+    log("风格 %s（%s）｜版式 %s｜弧线 %s｜人物 %s｜JIZURA %s" % (
+        ST["name"], ST["en"], ST["page"], "开" if use_arc else "关",
+        "有" if a.live_json else "无", "有" if a.jz else "无"))
 
     dur = round(a.end - a.start, 3)
     if dur <= 1:
@@ -196,6 +216,12 @@ def main():
             cmd += ["--imagery", a.imagery]
         if a.live_json:
             cmd += ["--live-json", a.live_json]
+        if a.jz:
+            cmd += ["--jz", a.jz, "--jz-layer", "behind", "--jz-alpha", "0.40"]
+        if a.fig_spans:
+            cmd += ["--fig-spans", a.fig_spans]
+        if use_arc:
+            cmd += ["--arc"]
         dt, out = run(cmd, quiet=True)
         stages["direct"] = round(dt, 1)
         for line in out.strip().splitlines():
@@ -209,7 +235,7 @@ def main():
     silent = os.path.join(work, "video.mp4")
     job = {
         "playerDir": os.path.join(ROOT, "renderer/player").replace("\\", "/"),
-        "page": "index_pv.html",
+        "page": ST["page"],
         "audio": audio.replace("\\", "/"),
         "title": a.song, "artist": a.artist, "vocal": a.vocal,
         "storyboard": None, "pvDur": dur, "live": None,
@@ -283,6 +309,7 @@ def main():
     ok, fails = SPEC.check(sp)
     man = {
         "date": a.date, "song": a.song, "artist": a.artist, "vocal": a.vocal,
+        "style": "%s %s" % (ST["key"], ST["name"]), "arc": use_arc,
         "src": src, "win": [a.start, a.end], "dur": dur, "seed": seed,
         "fps": a.fps, "res": a.res, "koma": a.koma, "bitrate": bitrate, "jq": a.jq,
         "pages": pages, "out": out_mp4,

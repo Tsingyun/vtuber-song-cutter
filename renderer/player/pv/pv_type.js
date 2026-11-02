@@ -14,15 +14,15 @@
      Dela Gothic One / Archivo Black / Anton 都只有一个字重（本身就是超粗），权重字段照填不误。
      CJK 兜底走播放器已有的 Noto Sans SC（同目录 fonts/），日文假名另有 Zen 系列覆盖。 */
   PV.FACES = {
-    heavy:     { family: '"Dela Gothic One"', weight: 400, kind: 'gothic' },
-    grotesk:   { family: '"Archivo Black"', weight: 400, kind: 'gothic' },
-    condensed: { family: '"Anton"', weight: 400, kind: 'condensed' },
-    tall:      { family: '"Bebas Neue"', weight: 400, kind: 'condensed' },
-    sans:      { family: '"Zen Kaku Gothic New"', weight: 900, kind: 'gothic' },
-    sansMed:   { family: '"Zen Kaku Gothic New"', weight: 700, kind: 'gothic' },
-    sansLt:    { family: '"Zen Kaku Gothic New"', weight: 500, kind: 'gothic' },
-    mincho:    { family: '"Zen Old Mincho"', weight: 900, kind: 'serif' },
-    minchoLt:  { family: '"Zen Old Mincho"', weight: 700, kind: 'serif' },
+    heavy:     { family: '"Dela Gothic One", "Smiley Sans"', weight: 400, kind: 'gothic' },
+    grotesk:   { family: '"Archivo Black", "Smiley Sans"', weight: 400, kind: 'gothic' },
+    condensed: { family: '"Anton", "Smiley Sans"', weight: 400, kind: 'condensed' },
+    tall:      { family: '"Bebas Neue", "Smiley Sans"', weight: 400, kind: 'condensed' },
+    sans:      { family: '"Zen Kaku Gothic New", "Smiley Sans"', weight: 900, kind: 'gothic' },
+    sansMed:   { family: '"Zen Kaku Gothic New", "Smiley Sans"', weight: 700, kind: 'gothic' },
+    sansLt:    { family: '"Zen Kaku Gothic New", "Smiley Sans"', weight: 500, kind: 'gothic' },
+    mincho:    { family: '"Zen Old Mincho", "Noto Serif SC"', weight: 900, kind: 'serif' },
+    minchoLt:  { family: '"Zen Old Mincho", "Noto Serif SC"', weight: 700, kind: 'serif' },
     /* Didone：细横粗竖的高对比衬线，大字号才显出「印刷」的骨。
        文字 PV 里「細明朝 × 極太ゴシック」的对撞靠它成立。 */
     didone:    { family: '"Bodoni Moda"', weight: 900, kind: 'serif' },
