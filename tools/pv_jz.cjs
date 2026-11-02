@@ -29,6 +29,19 @@ const res = Number(argOf('res', '1080'));
 const style = argOf('style', 'noir');
 const accent = argOf('accent', '');
 const seed = Number(argOf('seed', '20261027'));
+/* 2026-11-02：新增「整帧」输出。
+ * 原来只出透明 PNG，JIZURA 只能当一层贴图（背景、装饰、转场全由我们的引擎出）。
+ * 出整帧时它自己就是画面：背景平涂 + 纸纹 + 三趟色散 + post 全都在引擎内部完成，
+ * 我们这边只负责把帧按时序列贴上去。`normal` = 带背景，`transparent` = 只要字。 */
+const mode = argOf('mode', 'transparent');
+const fmt = argOf('fmt', 'png');
+const quality = Number(argOf('q', '92'));
+if (mode !== 'transparent' && mode !== 'normal') {
+  console.error('--mode 只接受 transparent | normal'); process.exit(2);
+}
+if (fmt !== 'png' && fmt !== 'jpg') { console.error('--fmt 只接受 png | jpg'); process.exit(2); }
+const MIME = fmt === 'png' ? 'image/png' : 'image/jpeg';
+const DATAHDR = 'data:' + MIME + ';base64,';
 
 if (!timingPath) { console.error('缺 --timing'); process.exit(2); }
 const tdoc = JSON.parse(fs.readFileSync(path.resolve(ROOT, timingPath), 'utf8'));
@@ -76,20 +89,22 @@ if (bpm > 0) {
   const t0 = Date.now();
   for (let i = 0; i < n; i++) {
     const t = i / fps;
-    const url = await page.evaluate(tt => window.__shot(tt, 'transparent'), t);
-    if (!url || url.indexOf('data:image/png;base64,') !== 0) {
-      console.error('[jz] 第 %d 帧没拿到 PNG', i); process.exit(4);
+    const url = await page.evaluate(a => window.__shot(a.t, a.mode, a.mime, a.q),
+      { t, mode, mime: MIME, q: quality / 100 });
+    if (!url || url.indexOf(DATAHDR) !== 0) {
+      console.error('[jz] 第 %d 帧没拿到 %s', i, fmt.toUpperCase()); process.exit(4);
     }
-    const buf = Buffer.from(url.slice(22), 'base64');
-    fs.writeFileSync(path.join(outDir, 'j_' + String(i + 1).padStart(5, '0') + '.png'), buf);
+    const buf = Buffer.from(url.slice(DATAHDR.length), 'base64');
+    fs.writeFileSync(path.join(outDir, 'j_' + String(i + 1).padStart(5, '0') + '.' + fmt), buf);
   }
   await browser.close();
 
   const meta = {
     kind: 'jizura-seq', dir: outDir.replace(/\\/g, '/'), n, fps,
-    w: sum.W || res, h: sum.H || res, pattern: 'j_%05d.png',
-    mode: 'transparent',
-    source: { timing: timingPath, start, dur, style, bpm, res, seed, lines: lines.length },
+    w: sum.W || res, h: sum.H || res, pattern: 'j_%05d.' + fmt,
+    mode,
+    source: { timing: timingPath, start, dur, style, bpm, res, seed, lines: lines.length,
+              mode, fmt, q: quality },
     plan: sum,
     note: 'beats 由 bpm 推等间距网格（非 onset 检测）；歌词时间来自 timing.json，窗口内已平移',
     ms: Date.now() - t0,

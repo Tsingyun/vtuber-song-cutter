@@ -43,7 +43,10 @@ window.__init = async (cfg) => {
   window.__CUTS = JZ.cutsOf('main');
   return sum;
 };
-window.__shot = (t, mode) => JZ.renderTo('main', t, mode || 'transparent').toDataURL('image/png');
+/* mode: transparent | normal | back | front；mime/q 让调用方决定 PNG 还是 JPEG。
+   缺省仍是 transparent + PNG —— pv_jz 的原有行为一字不变。 */
+window.__shot = (t, mode, mime, q) =>
+  JZ.renderTo('main', t, mode || 'transparent').toDataURL(mime || 'image/png', q);
 window.__cuts = () => window.__CUTS;
 window.__parts = () => JZ.parts();
 </script>

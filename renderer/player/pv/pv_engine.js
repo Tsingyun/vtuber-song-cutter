@@ -1140,6 +1140,16 @@
   PV.renderAt = function (ctx, t) {
     const sb = ST.sb;
     const S = ST.S;
+    /* ---- jzOnly：整幅画面由 JIZURA 一帧一帧给，本引擎退化为「合成器」----
+       2026-11-02 新增。设 meta.jzOnly=true 后，这里只剩三件事：
+         · 把 JIZURA 的整帧序列贴上去（shot.jz，α 由编排稿给）
+         · 按原编排稿画人物（位置/reveal/纸化全走原参数，一个字都不改）
+         · 其余视觉层（纸纹、背景图形、装饰、相机、主歌词、后期、转场、色温）
+           **一律不画** —— 它们属于另一套实现，同时出现就是两套语法在打架。
+       为什么要一个开关而不是在 job 里逐个字段置空：后者是二十处魔法，
+       少关一处就多一层「不知从哪来的」画面，而且下一次还得重记一遍。
+       开关的语义只有一句：这一版，画面归 JIZURA。 */
+    const JZO = !!(sb && sb.meta && sb.meta.jzOnly);
     /* ---- 两拍格（JIZURA 的 koma）：把动画时间量化到 1/KOMA 秒的栅格上 ----
        这是「日本文字 PV 味道」最主要的结构来源，也是逆向时得到的第一条结论。
        传统有限动画每秒只画 8~12 张，中间的运动靠重复，而不是逐帧插值。
@@ -1168,6 +1178,7 @@
     ctx.fillRect(0, 0, PV.W, PV.H);
 
     if (!shot) {                                   // 片头/片尾之外：只有纸底
+      if (JZO) return;                             // jzOnly：没有纸底这回事，帧序列自己就是画面
       drawPaper(ctx, t, null);
       drawBG(ctx, sb.meta && sb.meta.bgl, t, 0, S);
       PV.drawGrain(ctx, 0, 0, PV.W, PV.H, 0.5, ST.dpr);
@@ -1176,7 +1187,13 @@
     const en = shot._en == null ? 0.5 : shot._en;
 
     // 相机：整帧运动（pv_cam.js）。每个镜头都有一台在动的机器 —— 静止的镜头连起来就是幻灯片。
-    const cam = (PV.camAt ? PV.camAt(shot, t) : { x: 0, y: 0, s: 1, sx: 1, sy: 1, rot: 0, skx: 0 });
+    /* jzOnly 必须给**严格中性**的相机，不能只写 cam.k='none'：
+       pv_cam 的 camAt 会给所有手法叠加一层「基线微动」（±0.75%W / 0.13°），
+       那是为了让我们自己的构图不至于变成静止幻灯片。JIZURA 的帧里已经有它的
+       camera 在动，再叠一层就是两套运镜，而且帧会被平移 3% 放大去兜露边。 */
+    const cam = JZO
+      ? { x: 0, y: 0, s: 1, sx: 1, sy: 1, rot: 0, skx: 0 }
+      : (PV.camAt ? PV.camAt(shot, t) : { x: 0, y: 0, s: 1, sx: 1, sy: 1, rot: 0, skx: 0 });
 
     ctx.save();
     if (cam.x || cam.y || cam.rot || cam.skx || cam.s !== 1 || cam.sx !== 1 || cam.sy !== 1) {
@@ -1187,9 +1204,11 @@
       ctx.translate(-PV.W / 2, -PV.H / 2);
     }
 
-    drawPaper(ctx, t, shot);
-    drawBG(ctx, shot.bgl, t, shot.t0, shot._S);
-    drawDecor(ctx, shot.bg, t, shot.t0, shot._S);
+    if (!JZO) {
+      drawPaper(ctx, t, shot);
+      drawBG(ctx, shot.bgl, t, shot.t0, shot._S);
+      drawDecor(ctx, shot.bg, t, shot.t0, shot._S);
+    }
 
     /* JIZURA 层（后）：位置在背景之上、人物与文字之下 —— 对应「后景文字」这一层。
        放在文字之前是刻意的：我们的歌词永远压得住它，不会出现「两层字打架却说不清谁在前」。 */
@@ -1203,8 +1222,11 @@
       if (shot.fig.layer !== 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S, shot);
     }
 
-    // 文字
-    drawLyrics(ctx, shot, t);
+    /* 文字：jzOnly 时整层不画。
+       注意编排稿里的 lines / layout / _lay 全部**保留不动** —— 人物位置、让位、
+       reveal 都依赖 _lay.bbox，清掉歌词数据会连带把人物挪位，那就不是
+       「只移除主歌词」而是「重新排了一版」。 */
+    if (!JZO) drawLyrics(ctx, shot, t);
 
     // 人物（前）：「文字从她身前过」只在 layer=front 的镜头成立
     if (shot.fig && shot.fig.layer === 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S, shot);
@@ -1214,12 +1236,12 @@
     if (shot.jz && shot.jz.layer === 'front') drawJz(ctx, shot, t);
 
     // 前景装饰
-    drawDecor(ctx, shot.decor, t, shot.t0, shot._S);
+    if (!JZO) drawDecor(ctx, shot.decor, t, shot.t0, shot._S);
 
     ctx.restore();
 
     // 后期（不受相机影响）
-    drawPost(ctx, shot.post, t, en);
+    if (!JZO) drawPost(ctx, shot.post, t, en);
     /* 转场放在**画框饰件之后**：暗角/颗粒/角落标记都是「贴在整幅画面上的」，
        必须齐了之后再把上一镜整幅盖回去。顺序错一步就多跳一次亮度 ——
        先转场后暗角时，切点帧 = A + 新镜的暗角（两层暗角），实测差 0.77；
@@ -1231,33 +1253,33 @@
        实测四角 155 vs 中心 236，一整片奶油底被压成脏灰。 */
     /* 绿幕/黑幕导出时连暗角和颗粒都不要：抠像要的是纯色，一点灰阶都是脏边。 */
     const kb = shot.keyBg || ST.keyBg;
-    if (!kb && !((shot._S || S).flat) && !(shot.post || []).some(f => f.k === 'vignette')) {
+    if (!JZO && !kb && !((shot._S || S).flat) && !(shot.post || []).some(f => f.k === 'vignette')) {
       /* 默认暗角：让画面四周沉下去，是「电影感」最便宜也最有效的一步 */
       /* 暗角 0.40 / r0 0.46：原来是 0.60，四角直接压成纯黑 ——
          背景纹理全部被吃掉，等于白做。 */
       PV.FX.vignette(ctx, { a: 0.40, r0: PV.H * 0.46, r1: PV.H * 1.10 }, { S });
     }
-    if (!kb) PV.drawGrain(ctx, 0, 0, PV.W, PV.H,
+    if (!JZO && !kb) PV.drawGrain(ctx, 0, 0, PV.W, PV.H,
       PV.arcGrain ? PV.arcGrain(t, (shot._S || S).flat ? 0.30 : 0.55)
                   : ((shot._S || S).flat ? 0.30 : 0.55), ST.dpr);
 
     /* 角落极淡标记：歌名/来源改成片头标题卡承载后，全片只留这一行。
        压在画面右下角、alpha 0.16 —— 存在但不抢戏，观众要看得到、平时看不见。 */
-    const mark = sb.meta && sb.meta.mark;
+    const mark = JZO ? '' : (sb.meta && sb.meta.mark);
     if (mark) {
       PV.label(ctx, mark, PV.W - 64, PV.H - 52, 15, S.ink, 0.17, 500, 'right', 0.16);
     }
     ctx.globalAlpha = 1;
     /* 切间过渡（TRANS 分组）：把上一镜快照按转场几何让掉，露出这一镜。
        p=0 时整幅盖 A、p=1 时什么都不画（契约见 pv_trans.js 文件头）。 */
-    crossFade(ctx, shot, t);
+    if (!JZO) crossFade(ctx, shot, t);
     /* ---- 风格弧线的逐帧色温层（pv_arc.js）----
        画在转场**之后**：这一层说的是「整幅画面此刻的温度」，不是「某个镜头的温度」。
        画在转场之前，A（上一镜快照）会带着旧色温从底下透出来，转场期间出现
        「一半暖一半冷」的横向割裂 —— 而这条割裂正好落在观众最注意的那 0.4 秒里。
 
        绿幕/黑幕导出时跳过：抠像要纯色，任何一层薄色都是脏边。 */
-    if (!kb && PV.drawArcTone) PV.drawArcTone(ctx, t);
+    if (!JZO && !kb && PV.drawArcTone) PV.drawArcTone(ctx, t);
     /* ---- 上下黑边（letterbox）----
        参考片 BV1jUxC6SEko 的有效画面是 1920×980 @ y=58，上下共 9.3% 是纯黑边；
        它属于**构图**（画幅之内才是画面），不是后期加的相框。
@@ -1265,7 +1287,7 @@
          · 之前画 → 转场时会被上一镜的内容盖住，黑边闪一下；
          · 之后不画 → 快照里没黑边，下一镜从 A 淡出时黑边会「跳」进来。
        单边上限 5%：再宽就会切掉 cropGiant/fullTrack 的字头，那是缺陷不是构图。 */
-    drawLetterbox(ctx, shot);
+    if (!JZO) drawLetterbox(ctx, shot);
     /* 存 A：**屏幕上真正的那一帧**（含暗角/颗粒/角落标记/黑边），且必须在 crossFade
        之后 —— 拍的是「这一帧最终长什么样」，不是「镜头内容长什么样」。 */
     saveCross(ctx, shot, t);
