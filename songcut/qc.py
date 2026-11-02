@@ -72,6 +72,12 @@ TH = {
     "sil_warn_s": 2.5,
     "sil_head_allow_s": 2.5,            # 片头允许静音区（head_pad 之外再放宽）
     "sil_tail_allow_s": 2.5,            # 片尾允许静音区（淡出）
+    # A07 出点残余人声：静音之后又冒出声音。2026-11-01《带我走》实测漏检：
+    # 尾奏衰减到 -180dB 静音 2.5s 后，片尾 2.4s 混入一句 -18dB 的说话（比尾奏响 10 倍）。
+    "tail_voice_win": 10.0,             # 只检查片尾最后 N 秒
+    "tail_voice_gap_s": 1.0,            # 前方需有 ≥ N 秒静音，才认为「又冒出来」
+    "tail_voice_db": -45.0,             # 高于此电平算「有声」（与 sil_db 一致）
+    "tail_voice_hold_s": 0.5,           # 有声需持续 ≥ N 秒（排除单点噪点）
     "clip_amp": 0.995,                  # 满量程比例（削波）
     "clip_block_n": 200,                # 削波样本数 BLOCK 阈值
     "clip_warn_n": 1,
@@ -311,6 +317,37 @@ def check_audio(x, sr, ctx, want_dur=None, head_pad=0.0, tag=""):
                            {"阈值": TH["sil_block_s"], "片头豁免": round(head_ok, 2),
                             "片尾豁免": TH["sil_tail_allow_s"]},
                            "片段中间出现长静音 → 切点落在说话段/伴奏间隙，回调 cut_start/cut_end"))
+
+        # A07 出点残余人声：片尾「静音 → 又出声」= 切进了她说话/环境声。
+        # 2026-11-01《带我走》实测：尾奏衰减到 -180dB 静音 2.5s，片尾又冒出 -18dB 说话，
+        # A04 只统计静音段数量、L07 只看歌词覆盖率，两者都放行 ⇒ 单独立一条。
+        k0 = int(max(0.0, dur - TH["tail_voice_win"]) * sr / hop)
+        hits, run_sil, i = [], 0, k0
+        while i < len(db):
+            if silent[i]:
+                run_sil += 1
+            else:
+                if (run_sil * hop / float(sr) >= TH["tail_voice_gap_s"]
+                        and db[i] > TH["tail_voice_db"]):
+                    j = i
+                    while j + 1 < len(db) and db[j + 1] > TH["tail_voice_db"]:
+                        j += 1
+                    if (j - i + 1) * hop / float(sr) >= TH["tail_voice_hold_s"]:
+                        hits.append((i * hop / float(sr), (j * hop + wl) / float(sr),
+                                     float(db[i:j + 1].max())))
+                        i = j
+                run_sil = 0
+            i += 1
+        if hits:
+            sev, ok = WARN, True
+            det7 = "；".join("%s~%s 峰值 %.0fdB" % (fmt_t(a), fmt_t(b), m) for a, b, m in hits[:3])
+        else:
+            sev, ok = PASS, True
+            det7 = "片尾 %.0fs 内静音后无回升" % TH["tail_voice_win"]
+        out.append(Finding("A07", "音频", "出点无残余声音", sev, ok, det7,
+                           {"检查窗口": TH["tail_voice_win"], "前置静音": TH["tail_voice_gap_s"],
+                            "有声阈值": TH["tail_voice_db"], "持续": TH["tail_voice_hold_s"]},
+                           "片尾静音后又出声 → 切进了说话/环境声，把 cut_end 落到静音区内"))
 
     # A05 爆音 / 削波
     amp = np.abs(x)
