@@ -81,8 +81,9 @@ TH = {
     # 画面
     "black_block": 6.0,                 # 帧平均亮度（0~255）
     "black_warn": 14.0,
-    "freeze_mad": 0.01,                 # 重复帧判据：灰度小图平均绝对差（实测正常片 0.002~0.84）
-    "freeze_block_ratio": 0.34,         # 重复帧窗口占比 ≥ 1/3 → BLOCK（正常片间奏实测 0%~17%）
+    "freeze_mad": 0.002,                # 「近同帧」阈值：灰度小图 MAD。标定见下 freeze_frac
+    "freeze_frac": 0.70,                # 窗口内近同帧占比 ≥ 此值 → 该窗冻结
+    "freeze_block_ratio": 0.34,         # 冻结窗口占比 ≥ 1/3 → BLOCK
     "flicker_abs": 0.8,                 # 孤立跳变绝对下限（灰度小图 MAD，实测片头动态约 0.6~0.84）
     "flicker_med_mult": 4.0,            # 且 > 本窗中位数的 N 倍（自适应，避免半静态段误报）
     "flicker_global_mult": 20.0,        # 整窗剧烈抖动：窗口帧差中位 > 全片基准的 N 倍（仅作参考，不判 BLOCK）
@@ -409,8 +410,12 @@ def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=Fa
             elif mv < TH["black_warn"]:
                 black.append((s + k, float(mv), "偏暗"))
         d = np.abs(np.diff(g, axis=0)).mean(axis=(1, 2))
-        # 卡顿：整个窗口每一对都「几乎不动」才算静止（间奏/静态背景的短时静止属正常）
-        if len(d) and bool((d < TH["freeze_mad"]).all()):
+        # 卡顿：整窗「近同帧」占比达阈值才算冻结。
+        # 2026-11-01 标定（4K 成片实拍 + 构造同帧复制样本，见 RULES）：
+        #   真卡死：MAD 中位 0.0001~0.0003，近同帧占比 0.87（同帧重复编码后仍有 0~0.0056 的量化抖动）
+        #   真静止镜头（纸纹+颗粒）：MAD 中位 0.005~0.008，占比 ≤0.05
+        # 旧判据 (d < 0.01).all() 落在两者之间 ⇒ 把静止纸纹镜头误判成卡死（实测 5/12 窗误报）。
+        if len(d) and float((d < TH["freeze_mad"]).mean()) >= TH["freeze_frac"]:
             freeze_runs.append(s)
         per_win.append((s, d, mean))
 
@@ -484,12 +489,14 @@ def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=Fa
     else:
         sev, ok = PASS, True
     out.append(Finding("V04", "画面", "无重复帧(卡顿)", sev, ok,
-                       "整窗逐像素重复 %d/%d 处（%.0f%%）%s"
+                       "冻结窗口 %d/%d 处（%.0f%%）%s"
                        % (len(freeze_runs), nw, ratio * 100,
                           ("；起点帧 %s" % freeze_runs[:6] if freeze_runs else "")),
-                       {"重复帧判据MAD": TH["freeze_mad"], "BLOCK占比": TH["freeze_block_ratio"],
-                        "重复窗口起点帧": freeze_runs[:8],
-                        "说明": "半静态画面（间奏/尾奏）本就近似不变，此处只判「逐像素重复」"},
+                       {"近同帧MAD阈值": TH["freeze_mad"], "近同帧占比阈值": TH["freeze_frac"],
+                        "BLOCK占比": TH["freeze_block_ratio"],
+                        "冻结窗口起点帧": freeze_runs[:8],
+                        "说明": "判「帧间逐像素近同帧」而非「小差异」：静止纸纹镜头 MAD 中位约 0.007，"
+                                "同帧复制约 0.0002，旧阈值 0.01 会把前者误判为卡死"},
                        "占比过半 → 渲染卡死/素材未加载，画面被同一帧复制填充；单窗多为片尾，需人工确认"))
 
     if stab or len(flick) >= TH["flicker_block_n"]:
