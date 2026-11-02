@@ -48,6 +48,7 @@ from songcut import wave_refine                       # noqa: E402  波形边界
 from songcut import decor_pick                        # noqa: E402  标题装饰方案自动匹配
 from songcut import timeline_sync                     # noqa: E402  切入点检测 + 时间轴同步
 from songcut import spec as SPEC                     # noqa: E402  成片规格唯一真源（RULES §86）
+from songcut import style as STYLE_SRC               # noqa: E402  风格 A/B 的唯一真源（RULES §112）
 try:
     from songcut import qc as QC                       # noqa: E402  成片自检（PASS/WARN/BLOCK 判定化）
 except Exception as _qc_e:                             # numpy 缺失等 → 自检降级，不阻断主流程
@@ -73,6 +74,15 @@ _RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
 # 播放器页面：同目录下可并存多版（index.html = 明纸版，index_v10.html = 深夜电台版）。
 # 优先级：--player-page > 环境变量 SONGCUT_PLAYER_PAGE > index.html（保持历史行为）。
 PLAYER_PAGE = os.environ.get("SONGCUT_PLAYER_PAGE") or "index.html"
+# 风格：A=唱片（index.html）/ B=手书（index_pv.html + 风格弧线 + 人物挂点 + JIZURA）。
+# --style 是高层入口：一个名字同时决定版式与三个可选层，不必在命令行里手拼
+# --player-page/--arc/--live/--jz（漏一个就静默降级，这正是 11-01 的事故原因）。
+# 默认 A —— 保持历史行为；要出 B 必须由人明确说一句（见 songcut/style.py）。
+STYLE = STYLE_SRC.resolve(None)
+# 三个可选层的运行时状态（由 --style / 底层参数在 main 里赋值）
+ARC_ENABLED = False
+LIVE_JSON = ""
+JZ_JSON = ""
 
 # 画面底部注释行的字数上限：只放得下一句短句（中文 ≈40 字）
 NOTE_MAX_CHARS = 40
@@ -1895,6 +1905,28 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                   "--ffmpeg", ffmpeg]
         if seg.get("pv_reuse"):
             _pvcmd.append("--reuse")
+        # 风格层：弧线 / 人物 / JIZURA。素材按 cuts/<date>/<歌名>/{live,jz}/ 约定自动探测，
+        # 显式参数优先。缺素材时**逐层降级并打印原因** —— 不允许静默少一层（11-01 教训）。
+        _auto_live, _auto_jz = STYLE_SRC.asset_paths(out_dir, seg["title_guess"])
+        _live = LIVE_JSON or (_auto_live if STYLE["live"] else "")
+        _jz = JZ_JSON or (_auto_jz if STYLE["jz"] else "")
+        if ARC_ENABLED:
+            _pvcmd.append("--arc")
+        if _live:
+            _pvcmd += ["--live", _live]
+        elif STYLE["live"]:
+            log("  ⚠ 风格 %s（%s）缺人物层：未找到 %s，本片无人物"
+                % (STYLE["key"], STYLE["name"], _auto_live or
+                   os.path.join(out_dir, seg["title_guess"], "live", "live.json")))
+        if _jz:
+            _pvcmd += ["--jz", _jz]
+        elif STYLE["jz"]:
+            log("  ⚠ 风格 %s（%s）缺 JIZURA 层：未找到 %s，本片无动态排版"
+                % (STYLE["key"], STYLE["name"], _auto_jz or
+                   os.path.join(out_dir, seg["title_guess"], "jz", "jz.json")))
+        log("  风格 %s（%s）｜版式 %s｜弧线 %s｜人物 %s｜JIZURA %s"
+            % (STYLE["key"], STYLE["name"], PLAYER_PAGE,
+               "开" if ARC_ENABLED else "关", "有" if _live else "无", "有" if _jz else "无"))
         log("  文字 PV 编排：音乐分析 → 逐词时间轴 → 编排稿（首次约 1~2 min）")
         if subprocess.call(_pvcmd) == 0:
             try:
@@ -2102,17 +2134,43 @@ def main():
     ap.add_argument("--scheme", type=int, default=None,
                     help="手动指定标题装饰方案 0~4（流光渐变/描边镂空/霓虹柔光/色块高亮/双色错位），"
                          "缺省则由歌曲意境自动匹配")
+    ap.add_argument("--style", default=None,
+                    help="成片风格：A=唱片 / B=手书（也可写 唱片/record/手书/lettering）。"
+                         "B 会自动切到 index_pv.html 并开启风格弧线、人物挂点、JIZURA；"
+                         "缺对应素材时逐层降级并打印原因。可选：" + STYLE_SRC.describe_all())
     ap.add_argument("--player-page", default=None,
                     help="播放器页面（renderer/player/ 下的文件名，默认 index.html）。"
                          "index_v10.html = 深夜电台版；index_pv.html = 术力口文字 PV 版"
                          "（会自动生成编排稿 storyboard；可用 --player-page 或环境变量 "
                          "SONGCUT_PLAYER_PAGE 指定）")
+    ap.add_argument("--arc", action="store_true",
+                    help="风格弧线（逐句调制配色/字距/转场）。--style B 已默认开启；"
+                         "此处供 --player-page index_pv.html 手动组合时使用")
+    ap.add_argument("--live", default="", help="人物挂点 live.json；不给则按 "
+                                               "cuts/<date>/<歌名>/live/live.json 自动探测")
+    ap.add_argument("--jz", default="", help="JIZURA 序列 jz.json；不给则按 "
+                                             "cuts/<date>/<歌名>/jz/jz.json 自动探测")
     args = ap.parse_args()
 
     global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC
-    global OUT_PAGES, AUTO_PAGES, GATE_IGNORE, GATE_ALLOW_NO_LRC, PLAYER_PAGE
-    if getattr(args, "player_page", None):
+    global OUT_PAGES, AUTO_PAGES, GATE_IGNORE, GATE_ALLOW_NO_LRC, PLAYER_PAGE, STYLE
+    global ARC_ENABLED, LIVE_JSON, JZ_JSON
+    if getattr(args, "style", None) and getattr(args, "player_page", None):
+        raise SystemExit("--style 与 --player-page 只能二选一："
+                         "--style 是高层入口（一个名字管版式 + 三个可选层），"
+                         "--player-page 是底层逃生门。混用会让风格名与实际版式不一致。")
+    if getattr(args, "style", None):
+        try:
+            STYLE = STYLE_SRC.resolve(args.style)
+        except STYLE_SRC.StyleError as e:
+            raise SystemExit(str(e))
+        PLAYER_PAGE = STYLE["page"]
+    elif getattr(args, "player_page", None):
         PLAYER_PAGE = args.player_page
+    # 弧线：--style B 自带；显式 --arc 用于手拼底层参数时补开。
+    ARC_ENABLED = bool(getattr(args, "arc", False) or STYLE["arc"])
+    LIVE_JSON = getattr(args, "live", "") or ""
+    JZ_JSON = getattr(args, "jz", "") or ""
     _pp = os.path.join(_PLAYER_DIR, PLAYER_PAGE)
     if not os.path.exists(_pp):
         raise SystemExit("播放器页面不存在：%s（可选：%s）" % (

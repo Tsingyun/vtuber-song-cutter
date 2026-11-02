@@ -55,6 +55,9 @@ def main():
     a.add_argument("--date", default="")
     a.add_argument("--source", default="")
     a.add_argument("--live", default="", help="prepare_live.py 的 live.json（缺省=不用人物层）")
+    a.add_argument("--jz", default="", help="tools/pv_jz.cjs 渲出的 jz.json（缺省=不用 JIZURA 层）")
+    a.add_argument("--arc", action="store_true",
+                   help="风格弧线（按歌词意境 + 曲风能量逐句调制）；缺省关闭，关闭时编排稿与旧版逐字段相同")
     a.add_argument("--reuse", action="store_true", help="复用已有 analysis/timing/storyboard（只补缺的）")
     a.add_argument("--ffmpeg", default=os.environ.get("SONGCUT_FFMPEG") or "D:/ffmpeg/bin/ffmpeg.exe")
     args = a.parse_args()
@@ -97,6 +100,10 @@ def main():
                "--date", args.date, "--source", args.source, "--lrc", args.lrc]
         if args.live:
             cmd += ["--live", args.live]
+        if args.jz:
+            cmd += ["--jz", args.jz]
+        if args.arc:
+            cmd += ["--arc"]
         steps.append((cmd, "direct"))
 
     for cmd, what in steps:
