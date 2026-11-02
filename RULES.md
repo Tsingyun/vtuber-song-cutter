@@ -1793,3 +1793,139 @@ layout 去重数 6 / 7 / 6 / 6 / 6 —— 几乎没动。因为 `STYLES[k].bias.
 
 副歌只有 9 行、34 秒，是"一部到底"的合理场景；但正片 3 分钟以上、
 段落分明时，不写空行等于把 JIZURA 最擅长的事关掉了。
+
+## 117. JIZURA 的标签体系：情绪有，曲风没有；自动分配有，按行没有（2026-11-02）
+
+问「能不能按曲风 / 歌词意境自动分配动效」，逐层查下来的结论是：
+**情绪标签和自动分配都是官方现成的，曲风标签和按行粒度都得自己做。**
+
+### 117.1 三层标签，从细到粗
+
+| 层 | 数量 | 挂在什么上 | 覆盖率 |
+|---|---|---|---|
+| 部件 tags | 8 个 mood 名 | 每个部件一个 `tags[]` 数组 | **856/862**（99.3%），每个 1~6 个，主体 2~3 个 |
+| MOODS | 8 个 | 每组部件的名单 + fx 区间 + style 名单 + noHold | — |
+| THEMES | 6 个 | mood 的组合预设（= 意境套餐） | — |
+
+8 个 mood 的可用部件数（`J.taggedWith(g, mood)` 实测）：
+
+| mood | layout | hold | decor | treat | bg | cam | trans |
+|---|---|---|---|---|---|---|---|
+| glitch | 37 | 14 | 30 | 13 | 12 | 15 | 9 |
+| calm | 66 | 23 | 58 | 14 | 38 | 15 | 6 |
+| pop | 103 | 26 | 58 | 39 | 31 | 19 | 19 |
+| graphic | 119 | 14 | 71 | 39 | 32 | 20 | 16 |
+| editorial | 86 | 11 | 57 | 31 | 27 | 13 | 9 |
+| emotional | 82 | 22 | 61 | 25 | 39 | 25 | 9 |
+| horror | 17 | 4 | 7 | 4 | 4 | 2 | 2 |
+| chaos | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+`chaos`（全部入り）是全空——它的语义就是"不筛"，实现上走 `prefer = null` 分支。
+
+6 个 theme：`lyricpv`（editorial/graphic/emotional）、`kinetic`（pop/graphic/glitch）、
+`wa`（calm/emotional/editorial）、`horror`、`pop`、`ballad`（calm/emotional）。
+
+**没有 genre 标签**。没有摇滚/电子/民谣/古风这种分类，也没有 bpm 档位、
+没有调性、没有"悲/燃/甜"这类意境词。8 个 mood 是**视觉气质**词
+（glitch 故障感、editorial 版式感、emotional 情绪感），不是音乐分类。
+
+### 117.2 `J.omakase(project, rnd, themeId)` 就是官方的自动分配
+
+签名在 3743 行附近，是公开 API。它一次掷出 mood + style + fx + enabled +
+fonts + colors + seed，返回一个可以直接喂给 `J.plan` 的 project。
+
+同一段副歌（9 行 / 34.6s / unify=true）跑 6 个 theme 的实测：
+
+| theme | mood | style | layout 可用 | 实际主版式 |
+|---|---|---|---|---|
+| （无） | pop | vapor | 114 | stampSheet×9 sliceStack×8 arcTop×5 |
+| lyricpv | graphic | newsprint | 128 | footnote×10 kaleido×8 magnets×6 |
+| kinetic | graphic | newsprint | 125 | staircase×9 wave×9 tyCropGiant×8 |
+| wa | emotional | sumi | 99 | filmstrip×13 center×7 condensed×3 |
+| pop | pop | vapor | 114 | stampSheet×9 sliceStack×8 arcTop×5 |
+| ballad | calm | forest | 79 | pendulum×10 accordion×8 subtitleBar×6 |
+
+版式家族**完全不重叠**，配色/字体/纸感也全换。这就是"按意境分配"该有的粒度，
+而且是开箱的、不用自己写。
+
+### 117.3 三个必须知道的坑
+
+**坑一：`omakase` 只返回 8 个字段。**
+`{ mood, style, fx, enabled, fonts, colors, overrides, seed }` —— lyrics / title /
+fps / res / aspect / lang 全丢。直接 `J.plan(J.omakase(p))` 会得到 0 个分镜。
+必须 `Object.assign({}, p, J.omakase(p, rnd, theme))`。
+
+**坑二：它永远换掉你指定的 style。**
+`pool = [...].filter(k => k !== project.style)` —— 传 `style:'noir'` 进去，
+出来是 vapor / newsprint / sumi / forest，**noir 一次都不会出现**。
+所以「指定 style」和「用 omakase」是互斥的两条路：要 omakase 就别指望保住 noir。
+
+**坑三：它丢弃所有非 lock 的 per-line override。**
+```js
+for (const [i,o] of Object.entries(project.overrides||{}))
+  if (o.lock) overrides[i] = o; else if (o.cutTime) overrides[i] = { cutTime: o.cutTime };
+```
+顺序必须是**先 omakase、再合并 override**，反过来会被清空。
+
+### 117.4 mood 不进 plan，它只生成 enabled 白名单
+
+`J.plan()` 里通篇没有 `mood`。mood 的全部实质就是这一行：
+
+```js
+enabled[g][k] = prefer.has(k) || rnd() < (M.sprinkle || 0.22);
+```
+
+也就是说 mood = "把不相关部件以 22% 概率关掉"。它不留痕、不可查询、不可按行切换。
+想「第一段 calm、第二段 glitch」，官方没有现成接口——enabled 是 project 级的。
+
+### 117.5 真正的按行 / 按 cut 入口是 overrides
+
+```js
+project.overrides[li] = {
+  layout, enter, exit, hold, cam, bg, decor:[], treat,   // 整行生效
+  cutLayouts: { 0:'huge', 1:'stack' },                   // 按第 k 个 cut 只换 layout
+  cutTech:    { 0:{ layout:'huge', enter:'zoom' } },     // 按第 k 个 cut 换多个字段
+  cutQuiet, cutTime: { 1: 0.8 }, lock, lockedCuts, lockedSeed, seed,
+};
+```
+
+**关键闸门（3053 行）**：
+
+```js
+const UU = U && !ovAny ? U : null;   // per-line settings always win over 統一感
+```
+
+`ovAny` = 这一行出现了白名单（`lock, lockedSeed, seed, cutTech, cutLayouts,
+cutQuiet, cutTime`）以外的任何键。
+
+- 给了 `layout/enter/exit/hold/cam/bg/decor/treat` 任一 ⇒ **整行退出 unify**
+  （不参与段落调色板、不做重复行复用、不做方向交替）
+- 只给 `cutTech/cutLayouts/cutQuiet/cutTime/lock/seed` ⇒ **unify 照常生效**
+
+实测 20 个 seed × 4 行指派 4 个不同 layout，命中 **20/20**：
+override 是硬契约，不是"大概率"。因为它走的是 `UU = null`，不是靠概率赢。
+
+### 117.6 顺带发现：官方本来就有「中央留空」
+
+`project.centerFree` + `centerDir`（'tb' | 'lr'），走 `J.sideZones(W,H,dir)`：
+
+```js
+J.sideZones(1920, 1080, 'tb') → left 691×1080 | right 691×1080
+```
+
+每行歌词被 `splitHalf()` 拆成两半分置左右（或上下）两带，中央整块留给人物。
+这正是 §115 我们手工做的人物避让——官方有现成机制，只是带子宽度固定
+（横屏 36%），不如我们的遮挡量量化灵活。以后要「省事版避让」可以直接用。
+
+### 117.7 自行实现的限制清单
+
+1. **曲风判别得自己做**——没有 genre 标签。音频侧有 bpm/能量，语义侧得靠人工或 LLM。
+2. **mood 不是运行时参数**——必须自己翻译成 `enabled` 白名单或 override。
+3. **enabled 是 project 级**——想按段换 mood，只能拆段各 plan 一次再拼序列。
+4. **override 会让整行退出 unify**——除非只用 `cutTech/cutLayouts`。
+5. **12 个基础 style 没有 `moods` 字段**（noir/crimson/caution/magenta/paper/hud/
+   mint/specimen/transit/blueprint/rouge/mono）。mood→style 只能靠 `MOODS[k].styles`
+   手工列举，别指望反查。
+6. **`tags` 是全局注册表**——运行时 `push` 会污染同进程所有 plan，要隔离。
+7. **一行多 cut 时 override 是整行生效**（除 `cutTech`）。
+8. **段落锚点仍是 LRC 空行**——没有空行就没有"按段分配"的位置（承接 §116.2）。
