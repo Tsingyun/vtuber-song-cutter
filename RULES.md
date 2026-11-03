@@ -2152,3 +2152,15 @@ python tools/pv_figcomp.py --spec fig_spec.json --jz jz_v4 \
 | **正确做法** | ① 人物层走 `songcut/figart.py` 的素材库（默认 `C:/Users/Tsing/Pictures/管人立绘/岁己立绘`，可用 `SUI_ART_DIR` 覆盖），只读、不复制、不改原图；② 选图看两条可量指标：胸部高度带上的 `cuts`（实体↔透明交界数）与 `mass`（实心占比，理想 ≈0.55），`op > 0.96`（没有真透明）直接排除；③ 编排稿写 `shots[i].fig.art = {src,w,h0,h,a,shadow,at}`，与 `seq` 互斥（挂立绘时 `pop` 掉 `seq/tOff/wDur/win`）；④ 引擎 `drawArt` 做**纯 alpha 合成**（无框、无遮罩、无羽化），只加一道座影与 `bob/zoom` 动势，全部是 `t` 的纯函数；⑤ 几何：立绘**左缘** = **字形** bbox 的 62%，`splitAt` 同值成对出现。 |
 | **判据** | ① 不传 `--fig-art` 时编排稿逐字段与旧版相同（旧 job 重渲 MD5 不变）；② `mvgraph` 对没有透明区的立绘报 `art.opaque`（error），不是 warn；③ 抽帧必须能指出「哪几个字在她前面、哪几个在她后面」；④ 同一 t 双渲字节一致；⑤ 换图后长宽比按源图反推，不许出现拉伸。 |
 | **适用场景** | 需要「文字穿过人物」的句子、需要干净轮廓的人物层、以及任何「抠像边缘不好看」的场合。**不要**为了省事把立绘当 live 序列用（它没有口型/手势），也不要把 live 序列塞进 `art`（它没有 alpha 镂空）。 |
+
+---
+
+## 123. 「整合」以能跑为准：上游引擎必须真的出帧（2026-11-04）
+
+| 项 | 内容 |
+|---|---|
+| **背景** | 任务书要求「与 Vocaloid-Style MV Pipeline 深度整合」。第一版把整合做成了**概念对齐**：九类图层、统一时间轴、统一读口都到位，`docs/pv-text-engine.md` 里还写着「是 skill / 模板，不是引擎……代码未复用」。于是成片里没有一行代码来自它，审片的人看不出关系——因为确实没关系。技术借口是「它的入口是 `renderFrame(t)`（秒），我们是 `renderFrame(i)`（帧号）」，但这条不成立：我们的 `PV.renderAt(ctx, t)` 同样是秒的函数，出帧同样是 Playwright 抓 canvas。 |
+| **错误表现** | ① 交付说明里宣称「已整合」，实际 `grep -rn "_ref/vocaloid-style-mv-pipeline"` 在代码里零命中；② 反过来，真接的时候会被模板的**空 assets/** 卡住：`kanjiSlam` 预设写死 `assets/char/lookup_tear.png`、`afterimage` 写死 `REF_master.png`，模板仓库只有 `.gitkeep` → `window.ready` reject → 整页白屏，报错停在校验资源那一行，跟场景毫无关系；③ 把上游的 `lyric:'backfront'` 当成「场景 C」 → 一行字永远不可能前后分家（它两趟都画进同一张 text canvas，人物在 `fg` 层整体压在上面）；④ 并发浏览器（`--workers N` 或多进程）会在开头一百多帧后**整段停住**，进程还活着、分段 mp4 不再增长，看起来像「慢」，实际是死。 |
+| **正确做法** | ① 翻译层 `tools/pv_to_z.py`：storyboard + lrc → `engine/timeline.js` 的 `Z.SHOTS`（场景、plan、转场、post 全按我们的 tier/section 决定），产物落在派生目录 `_tmp/mvg/zrun`，`_ref/` 只读；② 出片 `tools/pv_z_render.py`：**逐段串行**单 worker + 断点续渲（`chunk_XX.mp4` 存在即跳过）+ 我们自己的 ffmpeg 拼接混音；③ 素材缺口按上游 demo 的做法显式关掉（`char:null, bg:null`），不要伪造同名文件；④ 「人物压到文字层上」用 `illust` 的 `chars[].front:true`，这是上游的既有能力，不用改它代码；⑤ 长尾镜（>10s 的器乐尾）切 7 秒 `typeCard` 尾卡，别把 28 秒套 `afterimage`（那是给 2 秒残影写的）。 |
+| **判据** | ① `grep` 能指出翻译层与出片工具的位置，且 `zrun/engine/timeline.js` 由脚本生成、非手改；② 抽帧必须同时看到三样：JIZURA 版式层、我们选的立绘、上游的 LUT/bloom/颗粒质感；③ 文档要说清**哪部分是上游画上去的**，不许把上游能力写成我们的；④ 两套引擎的差别要写明（`backfront` ≠ 场景 C），不许用「已支持」含糊过去。 |
+| **适用场景** | 需要上游的画面质感 / 版式部件时；评估「某个上游项目能不能用」时。**不要**把「读过文档、抄了思路」记成「已整合」—— 判据永远是能不能出帧，不是文档里写没写。 |

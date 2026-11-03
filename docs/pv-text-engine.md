@@ -138,7 +138,7 @@ node _tmp/pv/scan.cjs
 | 项目 | 能不能用 | 结论 |
 |---|---|---|
 | **JIZURA**（`852wa/JIZURA`，v0.9.0，38MB） | 引擎可跑，风格不可控 | 把文字 PV 拆成 **10 组 / 860 部件 / 27 样式**（`layout / enter / hold / exit / decor / treat / bg / cam / fx / trans`），每 cut 独立选一件。自动分镜质量随随机波动（`jz_20` 读作 PPT）。**借鉴其分层与具体手法**（见第 9 节），引擎自建。bundle 留在 `renderer/pv/vendor/`（已 gitignore），可作可选通道 |
-| **Vocaloid-Style MV Pipeline** | 是 skill / 模板，不是引擎 | `jizura_adapter.js` + `06-jizura.md` 有参考价值（把编排拆成可配置步骤的思路）。代码未复用 |
+| **Vocaloid-Style MV Pipeline** | 是 skill / 模板，不是引擎 | 自带一套完整的 Canvas2D + WebGL2 引擎（8 个场景 / JIZURA 版式层 / LUT 后期），但模板工程的 `assets/` 是空的。**2026-11-04 起改为运行时接入**：`tools/pv_to_z.py` 把我们的 storyboard 翻成它的 `Z.SHOTS`，由它的 `main.js` 出帧、`pv_z_render.py` 分段渲染混音，见 [`docs/z-runtime.md`](z-runtime.md)。它的 `lyric:'backfront'` **不等于**场景 C（两趟都画进同一张 text canvas），所以两条渲染腿并存 |
 | **Phrasync** | 不可复用 | 依赖形态与本项目差异过大 |
 
 **没有为了用开源而重构现有系统**：现有切点/音频/歌词/时间轴/编码链全部沿用，只在
