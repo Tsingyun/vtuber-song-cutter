@@ -35,10 +35,8 @@
     # 只出 1080p 试片：--res 1
 """
 import argparse
-import glob
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -46,11 +44,14 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from songcut import pvlink as PL                       # noqa: E402  歌切产物的唯一接入层
+
 PY = sys.executable
-FFMPEG = os.environ.get("SONGCUT_FFMPEG") or "D:/ffmpeg/bin/ffmpeg.exe"
-FFPROBE = os.environ.get("SONGCUT_FFPROBE") or "D:/ffmpeg/bin/ffprobe.exe"
-NODE = os.environ.get("SONGCUT_NODE") or r"C:/Users/Tsing/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
-NODE_PATH = os.environ.get("SONGCUT_NODE_PATH") or r"C:/Users/Tsing/.workbuddy/binaries/node/workspace/node_modules"
+_RT = PL.runtime()          # ffmpeg/ffprobe/node 的环境变量 → config → 内置探测，只有一份
+FFMPEG = _RT["ffmpeg"]
+FFPROBE = _RT["ffprobe"]
+NODE = _RT["node"]
+NODE_PATH = _RT["node_path"]
 
 
 def log(msg):
@@ -76,20 +77,12 @@ def probe_dur(path):
 
 
 def resolve_src(date, explicit):
-    if explicit:
-        return os.path.abspath(explicit)
-    from songcut import config as CFG
-    root = CFG.expand(CFG.get("recording_root") or "")
-    if not root:
-        raise SystemExit("没有 --src，config.json 里也没配 recording_root")
-    cands = []
-    for pat in ("%s/*.mp4", "%s/**/*.mp4"):
-        cands += glob.glob(os.path.join(root, date, "*.mp4"), recursive=True)
-        cands += glob.glob(os.path.join(root, date, "@*"), recursive=True)
-    cands = [c for c in cands if c.lower().endswith(".mp4") and os.path.getsize(c) > 10 << 20]
-    if not cands:
-        raise SystemExit("在 %s/%s 下找不到 mp4" % (root, date))
-    return max(cands, key=os.path.getsize)
+    """定位当天录播。统一走 pvlink → song_cutter.find_video（排除 .part、多场取最长）。
+
+    以前这里是 glob + 取最大文件，压缩中断留下的 `<name>_compressed.mp4.part.mp4`
+    体积同样很大，会被选中，然后在 ffprobe 处整条链崩掉。
+    """
+    return PL.source(date, explicit)
 
 
 def fetch_lrc(song, artist, dur, work):
@@ -104,15 +97,36 @@ def fetch_lrc(song, artist, dur, work):
     return p, info
 
 
+def lrc_from_segments(bundle, work):
+    """把歌切侧定稿的歌词（含人工剔行）落到 work/lyric.lrc。
+
+    为什么不再自己抓：segments 里的 `lrc_drop_lines` 是**人逐行核过**的专辑介绍语与
+    制作名单（《小丑的品格》剔 5 行、《带我走》剔 14 行）。PV 侧重抓一份再自己数行，
+    等于把已经核过的东西重做一遍，且大概率数错 —— 数错就是让制作名单上台唱。
+    """
+    text = (bundle.get("lrc") or {}).get("text")
+    if not text:
+        return "", {}
+    p = os.path.join(work, "lyric.lrc")
+    with open(p, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    return p, {}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True, help="直播日期 YYYY-MM-DD（用于定位录播与命名）")
-    ap.add_argument("--song", required=True)
+    ap.add_argument("--song", default="", help="歌名；--from-segments 时可省（该场只有一首时）")
     ap.add_argument("--artist", default="", help="原唱（画面标原唱，见 RULES 铁律 1）")
     ap.add_argument("--vocal", default="")
-    ap.add_argument("--src", default="", help="显式指定录播 mp4（缺省按日期 glob）")
-    ap.add_argument("--start", type=float, required=True, help="成片起点（源视频绝对秒）")
-    ap.add_argument("--end", type=float, required=True, help="成片终点")
+    ap.add_argument("--src", default="", help="显式指定录播 mp4（缺省按日期定位）")
+    ap.add_argument("--start", type=float, default=None, help="成片起点（源视频绝对秒）")
+    ap.add_argument("--end", type=float, default=None, help="成片终点")
+    ap.add_argument("--from-segments", action="store_true",
+                    help="切点/原唱/歌词/源全部取自歌切侧 segments（推荐：不再手抄切点）")
+    ap.add_argument("--seq", type=int, default=None, help="--from-segments 时按序号取（重唱/多场）")
+    ap.add_argument("--online", action="store_true",
+                    help="--from-segments 时，歌词缓存未命中才联网补一份")
     ap.add_argument("--lrc", default="", help="LRC 路径（缺省联网取）")
     ap.add_argument("--concept", default="dawn", choices=["", "dawn"])
     ap.add_argument("--imagery", default="", help="意象映射 JSON（--concept dawn 用）")
@@ -134,7 +148,32 @@ def main():
     ap.add_argument("--jz", default="", help="JIZURA 帧序列的 jz.json（tools/pv_jz.cjs 产出）")
     ap.add_argument("--fig-spans", default="", help="人物挂点表 JSON（键=窗口内句号）")
     ap.add_argument("--no-arc", action="store_true", help="关掉风格弧线（默认按风格开）")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="只解析素材来源（切点/源/歌词）并打印，不抽音频不渲染")
     a = ap.parse_args()
+
+    # ---- ⓪ 素材来源：--from-segments ⇒ 切点/原唱/歌词全部取自歌切侧定稿 ----
+    # 为什么默认不这么做：手抄切点这条老路要留着（人工核定的临时窗口、试片段落）。
+    # 但只要歌切侧已经有 segments，就不该再抄一遍 —— 抄错一次，成片会安静地错一整首。
+    seg = None
+    if a.from_segments:
+        try:
+            seg = PL.bundle(a.date, a.song, a.seq, online=a.online, with_source=True)
+        except PL.PvLinkError as e:
+            raise SystemExit(str(e))
+        a.song = a.song or seg["title"]
+        a.artist = a.artist or seg["artist"]
+        a.start, a.end = seg["window"]["start"], seg["window"]["end"]
+        a.src = a.src or (seg["source"].get("path") or "")
+        log("歌切产物：%s 第 %s 首（%s）｜窗口 %.2f → %.2f（%s，%.1fs）"
+            % (os.path.basename(seg["segments"] or "?"), seg["seq"], seg["match"],
+               a.start, a.end, seg["window"]["source"], seg["window"]["dur"]))
+        for m in seg["missing"]:
+            log("  ⚠ " + m)
+    if not a.song:
+        raise SystemExit("缺 --song（或加 --from-segments 从歌切产物取）")
+    if a.start is None or a.end is None:
+        raise SystemExit("缺 --start/--end（或加 --from-segments 从歌切产物取）")
 
     from songcut import style as STYLE_SRC
     try:
@@ -158,6 +197,26 @@ def main():
     work = os.path.join(outdir, "_work")
     os.makedirs(work, exist_ok=True)
     stages, t_all = {}, time.time()
+
+    if a.dry_run:
+        # 只解析「这片要用什么素材」，不抽音频、不渲染。验收接入层时用它，
+        # 避免每次都等一遍 4K。缺什么也会照实列出来（missing）。
+        plan = {"date": a.date, "song": a.song, "artist": a.artist,
+                "window": [a.start, a.end], "dur": dur, "src": a.src or None,
+                "style": "%s %s" % (ST["key"], ST["name"]), "arc": use_arc,
+                "outdir": outdir, "lrc": a.lrc or None,
+                "from_segments": bool(seg),
+                "link": ({"segments": seg["segments"], "seq": seg["seq"],
+                          "match": seg["match"], "window_source": seg["window"]["source"],
+                          "lrc_source": seg["lrc"]["source"]} if seg else None),
+                "missing": (seg or {}).get("missing") or []}
+        if not plan["src"]:
+            try:
+                plan["src"] = resolve_src(a.date, "")
+            except Exception as e:          # 源没了也要如实报，不假装能跑
+                plan["src_error"] = str(e).splitlines()[0]
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0
 
     # ---- ① 源
     src = resolve_src(a.date, a.src)
@@ -187,6 +246,10 @@ def main():
     linfo = {}                     # --lrc 直给时没有元数据，manifest 要能容错
     if a.lrc:
         lrc = os.path.abspath(a.lrc)
+    elif seg and (seg["lrc"] or {}).get("text"):
+        lrc, linfo = lrc_from_segments(seg, work)
+        log("歌词：歌切侧缓存 %d 行（已按核定的行号剔掉 %d 行）"
+            % (seg["lrc"]["lines"], len(seg["lrc"]["dropped"])))
     else:
         lrc, linfo = fetch_lrc(a.song, a.artist, dur, work)
         log("歌词：%s（原唱 %s）" % (os.path.basename(lrc), linfo.get("artist") or "?"))
@@ -317,6 +380,18 @@ def main():
         "stages_s": stages, "total_s": round(time.time() - t_all, 1),
         "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    # 溯源：这一片到底是从哪条 segments 的第几首、按什么方式匹配来的。
+    # 没有这段，事后无法回答「成片窗口是谁定的」（手抄还是定稿），只能靠回忆。
+    if seg:
+        man["link"] = {
+            "segments": os.path.abspath(seg["segments"]) if seg.get("segments") else None,
+            "seq": seg["seq"], "match": seg["match"],
+            "window_source": seg["window"]["source"],
+            "lrc_source": seg["lrc"]["source"],
+            "lrc_dropped": len(seg["lrc"]["dropped"]),
+            "cover": seg["cover"]["path"],
+            "missing_at_start": seg["missing"],
+        }
     mp = os.path.join(outdir, "manifest.json")
     # songs[] 是 songcut.qc 的入口格式（`_pick_entry` 按 mp4 绝对路径匹配）。
     # 此前 pv_one 只写扁平字段，QC 一条都读不到 —— 于是「一条命令出片」的最后
@@ -327,8 +402,10 @@ def main():
         "cut_start": float(a.start), "cut_end": float(a.end), "dur": float(dur),
         # 原唱官方时长：D01 拿它判「成片有没有被切短」。取不到就留空，
         # QC 会明确写「缺 orig_duration_s，跳过」而不是误判。
-        "orig_duration_s": (round(linfo["netease_duration_ms"] / 1000.0, 3)
-                            if linfo.get("netease_duration_ms") else None),
+        # 来自 segments 时优先用 segments 的值（人工核定过的那个，见 RULES 铁律）。
+        "orig_duration_s": (seg.get("orig_duration_s") if (seg and seg.get("orig_duration_s"))
+                            else (round(linfo["netease_duration_ms"] / 1000.0, 3)
+                                  if linfo.get("netease_duration_ms") else None)),
         "timeline_offset_s": 0.0,
         "lrc_path": os.path.abspath(lrc), "lrc_src_path": os.path.abspath(lrc),
         "pipeline": "pv_one/%dK%ds-koma%d" % (a.res, a.fps, a.koma),

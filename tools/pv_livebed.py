@@ -21,14 +21,22 @@ import argparse
 import os
 import subprocess
 
+import sys
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-ROOT = r"D:\岁己歌切"
-LIVE = ("D:/录播/25788785-岁己SUI/2026-11-01/"
-        "录制-25788785-20261101-200101-798-陪你这个猪过周一！聊聊先影之刃零后_compressed.mp4")
-OFFSET = 8543.0            # 成片 0 点对应的录播时间（= cut_start - head_pad）
-FFMPEG = "D:/ffmpeg/bin/ffmpeg.exe"
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+from songcut import pvlink as PL   # noqa: E402  ffmpeg 与录播源的唯一接入层
+
+# 这里原本写死了某一场录播的绝对路径与偏移（含主播本机目录），
+# 既是隐私泄漏，也让这个工具只能在那一场上用。改为必填参数 + pvlink 兜底。
+LIVE = ""
+OFFSET = 0.0               # 成片 0 点对应的录播时间（= cut_start - head_pad）
+FFMPEG = PL.runtime()["ffmpeg"]
 
 W, H = 3840, 2160
 FPS = 30

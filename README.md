@@ -350,6 +350,8 @@ python -m songcut.qc --mp4 成片.mp4 --src-audio 录播.mp4 --src-ss 5814
 - [`docs/architecture.md`](docs/architecture.md) —— 架构与依赖解耦方案
 - [`docs/dependencies.md`](docs/dependencies.md) —— 链路逐环依赖分析、去 ASR 可行性
 - [`docs/transcript-pipeline.md`](docs/transcript-pipeline.md) —— 转写接入设计（上游优先）
+- [`docs/integration-pvlink.md`](docs/integration-pvlink.md) —— 歌切产物与文字 PV 的接入层
+  （`songcut/pvlink.py`：切点/原唱/歌词/录播源/画框几何的唯一读口）
 
 ## 许可
 

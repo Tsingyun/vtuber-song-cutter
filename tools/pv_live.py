@@ -29,14 +29,16 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 
 from pv_direct import LIVE_SPANS  # noqa: E402  时间窗与画法的唯一真源
+from songcut import pvlink as PL   # noqa: E402  画框几何/录播源的唯一接入层
 
-# 裁切框（1920×1080 源坐标）。不是拍脑袋定的 —— 这一版录播的版面实测：
-#   左侧聊天栏右缘 x≈590；右下礼物卡左缘 x≈1370；顶部弹幕在 y<40。
-# head 取 620..1340 × 0..720（脸中心实测 965,372，居中偏上）；
-# body 取 592..1340 × 0..997（3:4 竖幅，左右刚好把两处 UI 关在框外）。
-HEAD = dict(x=620, y=0, s=720)
-BODY = dict(x=592, y=0, w=748, h=997)
-FACE = dict(x=965, y=372)      # 脸中心（源坐标），写进 face 供圆窗对齐
+# 裁切框不再写死在两个文件里（RULES §94 的判据）。
+# 这套值来自 `songcut/pvlink.GEOMETRY_PRESETS["pv"]`，与 tools/prepare_live.py 的
+# 历史默认是**两套不同取景**（头窗 720 vs 640、偏移 0/0 vs 52/645），这里只用 pv 那套。
+_G = PL.geometry("pv")
+HEAD = dict(_G["head"])
+BODY = dict(_G["body"])
+FACE = dict(_G["face"])
+WIDE = dict(_G["wide"])
 
 
 def run(cmd):
@@ -73,7 +75,7 @@ def one(span_idx, fig, src, cut_start, out_root, force, geo=None, fps=None):
         except (ValueError, OSError):
             pass
 
-    G = geo or {"head": HEAD, "body": BODY, "face": FACE}
+    G = geo or {"head": HEAD, "body": BODY, "face": FACE, "wide": WIDE}
     F = fps or {"head": 30, "body": 30, "wide": 24}
     # 单个挂点可以带 fps：96s 的间奏按 10fps 抽是 960 帧（解码后约 2GB），
     # 5fps 只有 481 帧、慢推镜下看不出差别，却决定 4K 渲染会不会 OOM。
@@ -152,12 +154,9 @@ def main():
 
     src = a.src
     if not src:
-        cfg = json.load(open(os.path.join(ROOT, "config.json"), encoding="utf-8"))
-        d = os.path.join(cfg["recording_root"], a.date)
-        cand = [f for f in sorted(os.listdir(d)) if f.endswith(".mp4")]
-        if not cand:
-            raise SystemExit("[live] %s 下没有 mp4" % d)
-        src = os.path.join(d, cand[0])
+        # 以前是 sorted(os.listdir())[0]：压缩中断留下的 .part 残件也以 .mp4 结尾，
+        # 会被选成源，然后整段抽帧全空。统一交给 pvlink（复用 song_cutter.find_video）。
+        src = PL.source(a.date)
     print("[live] 源 %s" % os.path.basename(src))
 
     os.makedirs(a.out, exist_ok=True)

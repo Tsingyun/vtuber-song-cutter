@@ -18,11 +18,12 @@ lyrics_sync       DTW 精同步（需原曲参考音频）
 verify_sync       同步质量验收
 vocal_activity    人声活动分析（VAD 兜底）
 transcript_hub    转写源编排（盘点 / 定位 / 健康检查 / 降级）
+pvlink            歌切产物 → 文字 PV 的接入层（segments/歌词缓存/画框几何/运行时，只读）
 """
 
 __all__ = [
     "config",
     "lyrics_fetch", "lyric_align", "ctc_align", "wave_refine", "decor_pick",
     "timeline_sync", "onset_v2", "lyrics_sync", "verify_sync",
-    "vocal_activity", "transcript_hub",
+    "vocal_activity", "transcript_hub", "pvlink",
 ]

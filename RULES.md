@@ -2116,3 +2116,15 @@ python tools/pv_figcomp.py --spec fig_spec.json --jz jz_v4 \
 只压到边缘 1 个字 —— 那是用户明确要的「侧幅遮挡」，保留。
 
 `split` 不做竖位搜索：它本来就是通高的，搜了也不是侧幅了。
+
+---
+
+## 120. 两条链之间只许有一个接入层：`segments` 是唯一事实，`songcut/pvlink.py` 是唯一读口（2026-11-03）
+
+| 项 | 内容 |
+|---|---|
+| **背景** | 歌切链与文字 PV 链共用一个仓库，但 PV 侧从来没读过歌切侧的定稿。于是同一份事实存在两处：切点靠人从 `segments` 手抄进 `--start/--end`；原唱靠手填 `--artist`；歌词由 `pv_one` 自己联网再抓一份（于是 `lrc_drop_lines` 里人工剔掉的专辑介绍与制作名单又回来了）；录播源 `pv_live` 取 `sorted(os.listdir())[0]`（压缩中断的 `.part.mp4` 也会被选中）；ffmpeg 路径在 17 个 `tools/*` 里各写一份；人物画框在 `prepare_live.py`（640 / 645,52）与 `pv_live.py`（720 / 620,0）各有一套。 |
+| **错误表现** | 全部是**不报错的错**：抄错一位切点 → 整首偏移或掐掉前奏；重抓歌词 → 制作名单上台唱；选到 `.part` 残件 → `ffprobe Invalid data` 或整段人物为空；画框两套 → 单独跑与经 `pv_live` 跑取景不一致，没人知道该信哪套。 |
+| **正确做法** | ① 新增 `songcut/pvlink.py` 作为唯一读口：`bundle(日期, 歌名)` 一次给全窗口/原唱/歌词/封面/源/素材就绪度，且 `window.source`（`cut_abs`/`rough`）与 `lrc.source`（`cache`/`online`/`none`）**必须显式**；② `pv_one --from-segments` 直接吃 `segments`，不再手抄；③ 歌词按 `fetch_title`（演唱版本）查 `_media_cache`，`lrc_drop_lines` 按**非空行**序号剔，没命中的行号进 `drop_missing` 并把 `ready` 打 false；④ 录播源统一走 `song_cutter.find_video`（排除 `.part`、多场取最长、回退根目录）；⑤ 运行时与画框几何各只留一份（`runtime()` / `GEOMETRY_PRESETS`）。 |
+| **判据** | ① `grep -rn "sorted(os.listdir" tools/` 只允许出现在与「取样/诊断」无关的地方，源解析不得再出现；② 新写的工具里不许出现 `D:/ffmpeg/bin` 字面（存量 17 处逐步下降，不许新增）；③ `python tools/pvlink.py show --date X --song Y` 的 `missing` 必须能解释「为什么这片不能起跑」；④ 任何「工具链多处读同一份配置」的新常量，先 `grep` 它在几处出现过（§94 的老坑）。 |
+| **适用场景** | 新增 PV 侧工具 / 改切点来源 / 改人物画框 / 换机器换盘 / 只想「看某天切了哪几首」时。**不要**为了省事在 PV 侧复制切点判定或认歌逻辑 —— 那会造出第二套真相。 |
