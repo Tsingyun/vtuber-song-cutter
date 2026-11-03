@@ -54,8 +54,10 @@ from songcut import pvlink as PL
 
 VERSION = 1
 
-# 八类图层（任务书 §3.2）。引擎目前实际产出的类型见 ENGINE_CAPS。
-LAYER_TYPES = ("bg", "bg3d", "footage", "lyric", "text", "fx", "fg", "trans")
+# 九类图层（任务书 §3.2 的八类 + 2026-11-03 增加的 art）。
+#   footage = 实拍序列（录播抽帧）；art = 单张透明立绘。
+# 两者在叠放次序上占同一格（都是「人」），互斥出现 —— 一镜里不会既贴立绘又抽帧。
+LAYER_TYPES = ("bg", "bg3d", "footage", "art", "lyric", "text", "fx", "fg", "trans")
 
 # 叠放次序基准。**与 pv_engine 的实际绘制顺序一致**（图先画、字后画，
 # 人物 layer 默认在歌词之下；JIZURA 走 --jz-layer behind 时才沉到最底）。
@@ -64,12 +66,23 @@ Z = {"bg": 0, "bg3d": 5, "lyric_behind": 10, "footage": 20, "lyric": 30,
 
 # 引擎能力：哪些「描述上成立」的东西渲染侧其实还做不到。
 # 写在这里而不是散在文档里 —— 校验器要据此把「希望」和「已完成」分开报。
+# 2026-11-03 晚：五项全部落地（pv_engine 对应实现见注释），保留这张表是因为
+# **它必须能随引擎回退**：任何一项被改回不支持时，校验器要立刻把「描述成立但画不出来」
+# 报成 error，而不是让编排稿安静地描述一个不存在的能力。
 ENGINE_CAPS = {
-    "lyric_split": False,       # 同一句拆成人物前/后两层（任务书场景 C）：引擎按行整行画
-    "footage_camera_space": False,   # 人物参与镜头变换：人物是屏幕空间（SAFE 边距）
-    "bg3d": False,              # Blender 三维层：管线里还没有这条入口
-    "fg": False,                # 独立前景遮挡层：目前只有装饰件与后期
-    "per_layer_post": False,    # 分层后期（引擎是整帧 post）
+    # 同一句拆成人物前/后两层（任务书场景 C）：drawLyrics(tier) 两趟 + pickTier 按阅读序切
+    "lyric_split": True,
+    # 人物参与镜头变换：fig.camGain / camSpace（0=屏幕空间固定，1=跟随，中间=视差）
+    "footage_camera_space": True,
+    # Blender / 任何 DCC 出的图片序列作三维层：shot.bg3d（消费侧只认目录+帧数+帧率+摆放）
+    "bg3d": True,
+    # 独立前景遮挡层：由 decor(over) 的实心件（block/tape/band）承载，压在歌词之上
+    "fg": True,
+    # 分层后期：shot.grade.bg 把背景层组合进离屏一次套滤镜，人物/歌词/前景各自不套
+    "per_layer_post": True,
+    # 立绘层：一张透明 PNG 直接 alpha 合成进画面（drawArt），文字分两趟画时
+    # 会从发缝/羽毛间隙里透出来 —— 场景 C 的交错由此成立（2026-11-03）。
+    "fig_art": True,
 }
 
 TOL = 0.05                      # 时间比较容差（秒）
@@ -149,6 +162,62 @@ def _bg_layers(sh):
                    extra={"items": items})]
 
 
+def _bg3d_layers(sh):
+    """三维场景层（Blender / 任何 DCC 的图片序列）。
+
+    消费侧只认「目录 + 帧数 + 帧率 + 摆放 + 缓慢推移」，产出侧是谁不重要 ——
+    所以这一层可以在**没有装 Blender 的机器上**照常校验：目录不存在/帧数不对是
+    error，装没装三维软件不是。
+    """
+    b = sh.get("bg3d")
+    if not isinstance(b, dict) or not b.get("dir"):
+        return []
+    d = str(b.get("dir")).replace("\\", "/")
+    return [_layer("bg3d:%d" % sh["i"], "bg3d", "scene-3d", sh["t0"], sh["t1"], Z["bg3d"],
+                   source="seq:" + d,
+                   blend=str(b.get("blend") or "source-over"),
+                   alpha=float(b.get("a", 1.0) or 1.0),
+                   extra={"dir": d, "n": b.get("n"), "fps": b.get("fps"),
+                          "fit": b.get("fit"), "rect": [b.get("x"), b.get("y"),
+                                                        b.get("w"), b.get("h")],
+                          "zoom": [b.get("zoom0"), b.get("zoom1")],
+                          "seq": b.get("seq")})]
+
+
+def _art_layer(sh):
+    """立绘层（透明 PNG，2026-11-03 改向）。
+
+    与 footage 的差别不只是「静态 vs 序列」：立绘有**真实 alpha**，
+    文字从身后画时会从发缝、羽毛间隙里透出来 —— 场景 C 的「同一行字前后交错」
+    靠的就是这个，而不是把人整体压半透明（压淡只会读作「没挡住」）。
+    几何不进图（rect=None + geom="engine"）：位置由引擎按版面实测 bbox 定，
+    导演层算不出字号反解出来的字宽。
+    """
+    fig = sh.get("fig")
+    art = (fig or {}).get("art")
+    if not isinstance(art, dict) or not art.get("src"):
+        return []
+    gain = fig.get("camGain")
+    if gain is None:
+        gain = 0.0 if fig.get("camSpace") == "screen" else 1.0
+    return [_layer(
+        "art:%d" % sh["i"], "art", "fig-art",
+        sh["t0"], sh["t1"], Z["footage"],
+        source=str(art["src"]).replace("\\", "/"),
+        mask="alpha",
+        alpha=float(art.get("a", 1.0) or 1.0),
+        camera_space=float(gain) > 0.0,
+        extra={
+            "mode": "art",
+            "layer": fig.get("layer") or "split",
+            "splitAt": fig.get("splitAt"),
+            "camGain": round(float(gain), 3),
+            "h": art.get("h"), "x": art.get("x"), "y": art.get("y"),
+            "shadow": art.get("shadow"), "flip": art.get("flip"),
+            "w": art.get("w"), "h0": art.get("h0"),
+        })]
+
+
 def _footage_layer(sh, live, fps):
     """真实录播人物层。字段原样带出编排稿的显式参数，几何留给引擎算。"""
     fig = sh.get("fig")
@@ -161,6 +230,10 @@ def _footage_layer(sh, live, fps):
     if mode == "soft":
         mask = "feather-rect"
     ent = (live or {}).get(seq) or {}
+    # 镜头耦合：camGain 优先，其次 camSpace（screen=0 / scene=1），都没有=完全跟随（引擎默认）
+    gain = fig.get("camGain")
+    if gain is None:
+        gain = 0.0 if fig.get("camSpace") == "screen" else 1.0
     return [_layer(
         "footage:%d" % sh["i"], "footage", "sui-live",
         sh["t0"], sh["t1"], Z["footage"],
@@ -168,9 +241,12 @@ def _footage_layer(sh, live, fps):
         mask=mask,
         alpha=float(fig.get("a", 1.0)),
         scale=float(fig.get("scale", 1.0) or 1.0),
-        camera_space=bool(fig.get("cam")),      # 只有显式声明才认为参与镜头
+        camera_space=float(gain) > 0.0,
         extra={
             "mode": mode,
+            "layer": fig.get("layer") or "avoid",
+            "splitAt": fig.get("splitAt"),
+            "camGain": round(float(gain), 3),
             "side": fig.get("side"), "at": fig.get("at"), "y": fig.get("y"),
             "w": fig.get("w"), "h": fig.get("h"), "wf": fig.get("wf"),
             "hf": fig.get("hf"), "wRatio": fig.get("wRatio"),
@@ -187,30 +263,45 @@ def _footage_layer(sh, live, fps):
 
 
 def _lyric_layers(sh, lines, jz_behind=False):
-    """歌词层：一句一镜一层。line=-1 的 breath 镜没有词，不出层。"""
+    """歌词层：一句一镜一层。line=-1 的 breath 镜没有词，不出层。
+
+    fig.layer='split' 时**出两层**：后段（tier=behind，沉到人物之下）与前段
+    （tier=front，压在人物之上）。这是任务书场景 C 在场景图里的表示 ——
+    它不是「一句话画两遍」的渲染技巧，而是两个真实存在于不同深度的图层。
+    """
     if sh.get("kind") != "line":
         return []
     li = sh.get("line")
     if not isinstance(li, int) or li < 0 or li >= len(lines):
         return []
     ln = lines[li]
-    lay = _layer(
-        "lyric:%d" % sh["i"], "lyric", "line-%03d" % li,
-        sh["t0"], sh["t1"],
-        Z["lyric_behind"] if jz_behind else Z["lyric"],
-        source="timing:line",
-        extra={"text": ln.get("text") or "",
-               "words": ln.get("words") or [],
-               "t_speech": [ln.get("t0"), ln.get("t1")],
-               "layout": sh.get("layout"), "enter": sh.get("enter"),
-               "hold": sh.get("hold"), "exit": sh.get("exit")},
-    )
+    fig = sh.get("fig") if isinstance(sh.get("fig"), dict) else {}
+    split = fig.get("layer") == "split"
+    extra = {"text": ln.get("text") or "",
+             "words": ln.get("words") or [],
+             "t_speech": [ln.get("t0"), ln.get("t1")],
+             "layout": sh.get("layout"), "enter": sh.get("enter"),
+             "hold": sh.get("hold"), "exit": sh.get("exit")}
     # 词级时间必须落在层区间内，否则「字还没到就已经在画」或「层没了词还在动」
     if ln.get("t0") is not None and ln.get("t1") is not None:
-        lay["extra"]["span_ok"] = (
+        extra["span_ok"] = (
             float(ln["t0"]) >= float(sh["t0"]) - TOL_LYRIC
             and float(ln["t1"]) <= float(sh["t1"]) + TOL_LYRIC)
-    return [lay]
+    if not split:
+        return [_layer("lyric:%d" % sh["i"], "lyric", "line-%03d" % li,
+                       sh["t0"], sh["t1"],
+                       Z["lyric_behind"] if jz_behind else Z["lyric"],
+                       source="timing:line", extra=extra)]
+    at = fig.get("splitAt")
+    at = 0.5 if at is None else float(at)
+    back = dict(extra, tier="behind", splitAt=at)
+    front = dict(extra, tier="front", splitAt=at)
+    return [
+        _layer("lyric:%d:back" % sh["i"], "lyric", "line-%03d-back" % li,
+               sh["t0"], sh["t1"], Z["lyric_behind"], source="timing:line", extra=back),
+        _layer("lyric:%d" % sh["i"], "lyric", "line-%03d" % li,
+               sh["t0"], sh["t1"], Z["lyric"], source="timing:line", extra=front),
+    ]
 
 
 def _text_layers(sh):
@@ -223,14 +314,36 @@ def _text_layers(sh):
 
 
 def _fx_layers(sh):
-    """特效层（整帧后期）：post 列表。分层应用目前不支持，如实标出。"""
+    """特效层：整帧后期（post 列表）。它作用于整幅画面，与分层后期不是一回事。"""
     post = sh.get("post") or []
     if not post:
         return []
     return [_layer("fx:%d" % sh["i"], "fx", "post", sh["t0"], sh["t1"], Z["fx"],
                    source="post:" + "+".join(str(p.get("k") or "?") for p in post),
                    blend="whole-frame",
-                   extra={"items": post, "per_layer": ENGINE_CAPS["per_layer_post"]})]
+                   extra={"items": post, "scope": "whole-frame"})]
+
+
+def _grade_layers(sh):
+    """分层后期（shot.grade）：背景层组与人物层各自一套滤镜。
+
+    任务书 §5.3 要的是「背景可以有明显的模糊与色彩变化、人物保留原始画质、
+    歌词保持清晰、前景特效单独处理」—— 那就必须承认它们**不是**同一个图层，
+    所以在场景图里就该是分别的两层，而不是一个整帧 post。
+    """
+    g = sh.get("grade")
+    if not isinstance(g, dict) or not g:
+        return []
+    out = []
+    for tgt in ("bg", "fig"):
+        v = g.get(tgt)
+        if not v:
+            continue
+        out.append(_layer("grade:%d:%s" % (sh["i"], tgt), "fx", "grade-" + tgt,
+                          sh["t0"], sh["t1"], Z["fx"],
+                          source="filter:" + str(v), blend="layer-group",
+                          extra={"target": tgt, "filter": str(v)}))
+    return out
 
 
 def _trans_layer(sh):
@@ -256,10 +369,13 @@ def layers_of(sb, live=None, fps=None):
     out = []
     for sh in (sb.get("shots") or []):
         out += _bg_layers(sh)
+        out += _bg3d_layers(sh)
+        out += _art_layer(sh)
         out += _footage_layer(sh, live, fps)
         out += _lyric_layers(sh, lines, jz_behind)
         out += _text_layers(sh)
         out += _fx_layers(sh)
+        out += _grade_layers(sh)
         out += _trans_layer(sh)
     for lay in out:
         lay["frame0"] = frame_of(lay["t0"], fps)
@@ -303,6 +419,32 @@ def _footage_frame_span(lay):
             "clamped": i0 < 0 or i1 > int(n) - 1,
             "short_head": max(0, -i0),
             "short_tail": max(0, i1 - (int(n) - 1))}
+
+
+def _has_alpha(path):
+    """True=有透明像素 / False=满幅不透明 / None=读不出来。结果按路径+大小缓存。"""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (path, st.st_mtime, st.st_size)
+    if key in _ALPHA_CACHE:
+        return _ALPHA_CACHE[key]
+    try:
+        from PIL import Image
+        im = Image.open(path)
+        if im.mode not in ("RGBA", "LA", "PA"):
+            im = im.convert("RGBA")
+        al = im.getchannel("A")
+        lo, hi = al.getextrema()
+        r = bool(lo < 200)
+    except Exception:
+        r = None
+    _ALPHA_CACHE[key] = r
+    return r
+
+
+_ALPHA_CACHE = {}
 
 
 def build(date, song="", storyboard="", live_json="", seq=None, fps=None,
@@ -464,6 +606,31 @@ def validate(g, sb=None):
                 warn("footage.low_coverage",
                      "%s 只有 %.0f%% 的区间能取到新帧" % (lay["id"], cov * 100), lay["t0"])
 
+    # ③.5 立绘层：文件在不在、带不带真透明、高度占比是否合理
+    #
+    # 「带真透明」不是洁癖：立绘如果是**满幅不透明**的 JPG 式图片，压上去就是一整块
+    # 方形色块，文字从身后穿过时读作「被纸盖住」，穿插彻底不成立。这一条要报 error
+    # 而不是 warn —— 它不会崩，只会让画面变成贴纸，最难发现。
+    for lay in [l for l in g["layers"] if l["type"] == "art"]:
+        src = lay["source"]
+        if not os.path.isfile(src):
+            err("art.src_missing", "%s 立绘文件不存在：%s" % (lay["id"], src), lay["t0"])
+            continue
+        ex = lay["extra"] or {}
+        hh = float(ex.get("h") or 0.94)
+        if not (0.20 <= hh <= 1.60):
+            err("art.scale", "%s 立绘高度占比 %.2f 越界（0.20~1.60）" % (lay["id"], hh), lay["t0"])
+        if (ex.get("layer") or "split") == "split":
+            sa = float(ex.get("splitAt") if ex.get("splitAt") is not None else 0.5)
+            if not (0.02 <= sa <= 0.98):
+                err("art.split", "%s splitAt=%.2f 越界（0.02~0.98）" % (lay["id"], sa), lay["t0"])
+        ok = _has_alpha(src)
+        if ok is False:
+            err("art.opaque", "%s 立绘没有透明区（%s）：压上去是一块色块，文字穿不过去"
+                % (lay["id"], os.path.basename(src)), lay["t0"])
+        elif ok is None:
+            warn("art.alpha_unknown", "%s 读不到像素，无法确认是否带透明" % lay["id"], lay["t0"])
+
     # ④ 人物层的 tOff 与窗口约定：窗口起点应比镜头起点早 2.0s
     for lay in foot:
         off = float((lay["extra"] or {}).get("tOff") or 0.0)
@@ -485,16 +652,22 @@ def validate(g, sb=None):
                      % (a["id"], b["id"], a["z"], b["t0"],
                         min(a["t1"], b["t1"])), b["t0"])
 
-    # ⑥ 歌词：词级时间必须被层区间包住
+    # ⑥ 歌词：词级时间必须被层区间包住；分层歌词要有对应的人物层
     for lay in [l for l in g["layers"] if l["type"] == "lyric"]:
         if lay["extra"].get("span_ok") is False:
             t0, t1 = lay["extra"]["t_speech"]
             warn("lyric.span", "%s 词级 %.2f~%.2f 超出层 %.2f~%.2f"
                  % (lay["id"], t0, t1, lay["t0"], lay["t1"]), lay["t0"])
-        if lay["extra"].get("split"):
+        if lay["extra"].get("tier") and not ENGINE_CAPS["lyric_split"]:
             err("lyric.split_unsupported",
                 "%s 请求把同一句拆到人物前后两层，但引擎按行整行画（caps.lyric_split=False）"
                 % lay["id"], lay["t0"])
+        if lay["extra"].get("tier"):
+            at = lay["extra"].get("splitAt")
+            if at is None or not (0.02 <= float(at) <= 0.98):
+                err("lyric.split_at",
+                    "%s 的 splitAt=%s 越界（必须 0.02~0.98，否则会切出空段）"
+                    % (lay["id"], at), lay["t0"])
 
     # ⑦ 能力缺口：描述里有这类层但引擎不画（不报错，因为可能只是还没接）
     for typ, cap in (("bg3d", "bg3d"), ("fg", "fg")):
@@ -505,6 +678,31 @@ def validate(g, sb=None):
     if nc and not ENGINE_CAPS["footage_camera_space"]:
         warn("cap.footage_camera_space",
              "%d 个人物层声明参与镜头运动，但引擎按屏幕空间画（不会跟着推镜）" % nc)
+    # 人物层与歌词层的镜头耦合必须自洽：camGain=0（屏幕空间）时它不该被描述成场景层
+    for lay in foot:
+        g2 = lay["extra"].get("camGain")
+        if g2 is not None and not (0.0 <= float(g2) <= 1.0):
+            err("footage.cam_gain", "%s 的 camGain=%s 越界（0~1）" % (lay["id"], g2), lay["t0"])
+
+    # ⑧ 三维层：目录/帧数/帧率必须可核实 —— 不装 Blender 也能报出「这一层没素材」
+    for lay in [l for l in g["layers"] if l["type"] == "bg3d"]:
+        d = lay["extra"].get("dir") or ""
+        n = lay["extra"].get("n")
+        fps = lay["extra"].get("fps")
+        if not d or not os.path.isdir(d):
+            err("bg3d.dir_missing", "%s 的三维序列目录不存在：%s" % (lay["id"], d), lay["t0"])
+            continue
+        real = len([f for f in os.listdir(d)
+                    if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))])
+        if not n or int(n) <= 0:
+            err("bg3d.frames_missing", "%s 没写帧数（目录里实际 %d 帧）" % (lay["id"], real),
+                lay["t0"])
+        elif real < int(n):
+            err("bg3d.frames_missing",
+                "%s 声明 %d 帧，目录里只有 %d 帧" % (lay["id"], int(n), real), lay["t0"])
+        if not fps or float(fps) <= 0:
+            err("bg3d.fps_missing", "%s 没写帧率（取不到帧就无法按时间定位）" % lay["id"],
+                lay["t0"])
 
     if not ck:
         info("ok", "时间轴与图层一致：%d 层 / %.2fs / %d 帧"

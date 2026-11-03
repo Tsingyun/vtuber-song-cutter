@@ -177,6 +177,30 @@ def cmd_pv_one(a):
     return subprocess.call(cmd, cwd=ROOT)
 
 
+def cmd_art(a):
+    """立绘素材库：盘点 / 列表 / 挑图。真正读目录的只有 songcut/figart.py。"""
+    from songcut import figart
+    if a.action in ("doctor", "dir"):
+        d = figart.doctor()
+        print(json.dumps(d, ensure_ascii=False, indent=1))
+        return 0
+    rows = figart.lib(a.kind, min_w=a.min_w)
+    rows = rows[:a.top] if a.top else rows
+    if a.action == "pick":
+        r = figart.pick(a.kind or "bust", min_w=a.min_w)
+        if not r:
+            print("[art] 没有可用的立绘")
+            return 3
+        print(r["path"])
+        return 0
+    for r in rows:
+        print("#%-4d %.3f cuts=%-5.1f mass=%.2f %-5s %5dx%-5d %s"
+              % (r.get("idx", -1), r["score"], r["cuts"], r["mass"], r["kind"],
+                 r["w"], r["h"], r["name"]))
+    print("（共 %d 张；# 号可直接给 pv_one --fig-art \"#12\"）" % len(rows))
+    return 0
+
+
 def cmd_geom(a):
     g = PL.geometry(a.preset)
     if a.json:
@@ -331,6 +355,14 @@ def main():
     p = sub.add_parser("style", help="各场素材的 live/jz 就绪情况")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_style)
+
+    p = sub.add_parser("art", help="立绘素材库（doctor/list/pick）")
+    p.add_argument("action", nargs="?", default="list",
+                   choices=["doctor", "dir", "list", "pick"])
+    p.add_argument("--kind", default="", choices=["", "bust", "slim", "wide"])
+    p.add_argument("--min-w", type=int, default=0)
+    p.add_argument("--top", type=int, default=25)
+    p.set_defaults(fn=cmd_art)
 
     p = sub.add_parser("graph", help="统一时间轴 + 图层描述（MV 场景图）")
     p.add_argument("--date", required=True)

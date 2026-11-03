@@ -23,6 +23,13 @@ import sys
 
 import numpy as np
 
+# 立绘素材库在 songcut/ 下（与 pvlink 同一个包）。直接 `python tools/pv_direct.py`
+# 运行时 sys.path[0] 是 tools/，包不在搜索路径里 —— 必须自己把仓库根加进去。
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 # ----------------------------------------------------------------- 版式词汇
 # 每个版面能接什么句子，是**形态约束**，不是审美偏好：
 #   keySplit   挑一个词撑到 0.5H，其余缩到 0.27 倍 —— 词太多就挤成一排小字
@@ -577,6 +584,10 @@ def fig_reserve(fig, W=1920):
     形态（12/34 处），等于「一开人物就崩」。
     """
     md = fig.get("mode")
+    if fig.get("art"):
+        # 立绘是「贴在画面上的人」，不是「占掉一侧的窗」：字要穿过她才有穿插，
+        # 给她让位等于把字全挤到另一边，交叉永远不会发生。
+        return 0
     if md == "wash":
         return 0
     if md == "disc":
@@ -788,6 +799,9 @@ def _check_live_spans(shots, expect=None):
         f = sh.get("fig")
         if not f:
             continue
+        if f.get("art"):
+            # 立绘不取帧，没有「窗口」这回事；拿 tOff 去核算窗口起点只会报假错。
+            continue
         off = float(f.get("tOff") or 0)
         if sh.get("line", 0) < 0:
             # 拆镜产生的 breath 镜：它不属于任何一句，t0 必然偏离 win.start。
@@ -809,6 +823,10 @@ def _check_live_spans(shots, expect=None):
     if bad:
         raise SystemExit("[live] 挂点与镜头时间对不上（键错位？）：\n  " + "\n  ".join(bad))
     exp = len(_SPANS) if expect is None else int(expect)
+    # 被立绘顶掉的挂点不再取帧，也不该再计入「挂上了几处」—— 否则换了立绘就报
+    # 「只挂上 5 处，表里有 6 处」，而画面其实是对的。
+    exp -= sum(1 for sh in shots
+               if (sh.get("fig") or {}).get("art", {}).get("fromSpan"))
     if len(seen) != exp:
         raise SystemExit("[live] 只挂上 %d 处，挂点表有 %d 处"
                          "（某段的 seq 没在 live.json 里？）" % (len(seen), exp))
@@ -1266,6 +1284,22 @@ def _fig_from_spans(i, w0=0.0):
     """
     f = dict(_FIG_SPANS[i])
     start, wdur = f.pop("win")
+    # 表里可写 split / cam 两个语义字段，在这里翻成引擎字段（apply_layer_semantics 复核）：
+    #   split → layer='split' + splitAt（0 视为默认 0.5）
+    #   cam   → camGain（0=屏幕空间固定，1=完全跟随镜头，中间=视差）
+    # 表是给手写的，字段越少越好；引擎字段名留在编排稿里，不往表里渗。
+    _sp = f.pop("split", None)
+    if _sp is not None:
+        f["layer"] = "split"
+        f["splitAt"] = 0.5 if float(_sp) <= 0 else round(float(_sp), 3)
+    _cg = f.pop("cam", None)
+    if _cg is not None:
+        f["camGain"] = round(float(_cg), 3)
+    # 分层镜头：人物必须落在**字会经过的地方**。贴边时字从旁边过去，
+    # 同一行字前后分层就永远看不出来（这一步和引擎的 tier 两趟画是两件事，
+    # 少任何一件都不成立）。0.44W 是版心右侧三分之一处：一行字够得到，两行会压一角。
+    if f.get("layer") == "split" and "x" not in f:
+        f["x"] = 0.44
     # 轻量表只写 mode/seq/win（tools/pv_spans.py 的产物）。几何不能靠表里再抄一份，
     # 用 fig_script 的固定几何补齐 —— 不补就 KeyError（fig_reserve 直接读 fig["r"]，
     # 实测第一句 disc 就崩）。完整表（dawn 那种逐句定稿）字段齐全，这里不动它。
@@ -2038,8 +2072,14 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
         "lines": lines,
         "shots": shots,
     }
+    # 图层语义（任务书 §3.3/§4.5/§5.3/§5.4）在**写盘前**统一落到编排稿上：
+    # 编排稿必须自包含 —— 换入口渲染时不能因为「少传一个参数」就丢掉这一层。
+    _lay = apply_layer_semantics(shots, a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(sb, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    if any(_lay.values()):
+        print("[layer] 歌词分层 %d 镜｜人物镜头耦合 %d 镜｜三维层 %d 镜｜分层后期 %d 镜｜立绘 %d 镜"
+              % (_lay["split"], _lay["cam"], _lay["bg3d"], _lay["grade"], _lay.get("art", 0)))
 
     # ---- 闸门：挂点与镜头时间必须对得上（只在挂了 live 时才有意义；
     #      没传 --live-json 的抽卡测试不该被这条挡住）
@@ -2081,6 +2121,186 @@ def dawn_main(a, tdoc, ana, lines, secs, dur, w0):
     print("[beat] 动效时长吸半拍  bpm=%.1f  一拍=%.3fs" % (ana.get("bpm") or 0, beat))
     print("[out] %s  %.0fKB" % (a.out, os.path.getsize(a.out) / 1024.0))
     return 0
+
+
+# ── 图层语义（任务书 §3.3 场景 C / §4.5 / §5.3 / §5.4） ─────────────────────
+# 统一原则：全部写成编排稿里的**可选字段**，渲染器按字段执行。不带字段时，
+# 引擎行为与旧版逐字一致 —— 这是「不为了新架构破坏旧成片」的落地方式：
+# 新能力不是另开一条渲染路径，而是在同一条路径上多认几个字段。
+_B3D_EXT = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _count_frames(d):
+    if not os.path.isdir(d):
+        return 0
+    return sum(1 for f in os.listdir(d) if f.lower().endswith(_B3D_EXT))
+
+
+def _pick_shots(shots, spec):
+    """all / 逗号分隔镜头号。镜头号用 s["i"]（编排稿里就是它）。"""
+    spec = (spec or "all").strip().lower()
+    if spec in ("", "all"):
+        return list(shots)
+    want = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            want.append(int(part))
+        except ValueError:
+            continue
+    return [s for s in shots if s.get("i") in want]
+
+
+def _floats(spec, n, dflt):
+    out = list(dflt)
+    for k, part in enumerate((spec or "").split(",")[:n]):
+        try:
+            out[k] = float(part)
+        except ValueError:
+            pass
+    return out
+
+
+def apply_layer_semantics(shots, a):
+    """把图层语义写进编排稿。返回计数，主流程只负责打印，不改判定。
+
+    人物侧（fig）：
+      layer   avoid（字避开人，现状）| front（人压在字前）| split（同一行拆前后两段）
+      splitAt 0~1：前段在人前、后段在人后（与任务书场景 C 的叠放次序一致）
+      camGain 0=屏幕空间固定（镜头推近时窗口不跟着放大）| 1=完全跟随镜头 | 中间=视差
+    场景侧（shot）：
+      bg3d  三维场景层（图片序列目录 + 帧数 + 帧率 + 摆放 + 缓慢推移）
+      grade 分层后期：bg 给背景层组、fig 给人物层；歌词与前景不在其中（任务书 §5.3）
+    """
+    n_split = n_cam = n_b3 = n_gr = 0
+    ART_SPLIT = 0.62      # 与 pv_engine.js 里立绘「左缘 = 文字块 62%」成对出现
+
+    # ---- 立绘：把「人物穿插」从「抠录播」换成「贴立绘」（2026-11-03 改向）
+    #
+    # 为什么：录播截图是 16:9，裁成竖幅后发丝/袖口的边缘早被码率糊成半透明，
+    # 抠出来一圈毛边；而且每帧姿势都在动，抠像结果在帧间跳 —— 成片里读作
+    # 「一张会抖的人形贴纸」。立绘本来就有 alpha，边缘是画师切好的。
+    #
+    # 穿插之所以成立，靠的是**她身上本来就有洞**：发缝、羽毛间隙、手臂与身体
+    # 之间的空档。文字从身后画，就会从这些洞里露出来 —— 不是把她整体压淡。
+    #
+    # 落点：只动「已经标了 split 的镜头」（--fig-art-shots split）。
+    # 分层的镜头本来就是「字要穿过她」的那几句，立绘正好补上缺的那个人。
+    n_art = 0
+    _spec = (getattr(a, "fig_art", "") or "").strip()
+    if _spec:
+        from songcut import figart
+        _path = figart.resolve(_spec, kind="bust")
+        _rec = figart.info(_path)
+        _sel = (getattr(a, "fig_art_shots", "split") or "split").strip().lower()
+        if _sel in ("split", "front", "behind"):
+            picked = [s for s in shots if (s.get("fig") or {}).get("layer") == _sel]
+        else:
+            picked = _pick_shots(shots, _sel)
+        _ah = float(getattr(a, "fig_art_h", 0.88) or 0.88)
+        _ax = float(getattr(a, "fig_art_x", -1.0))
+        _sp = float(getattr(a, "fig_art_split", -1.0))
+        for s in picked:
+            f = s.get("fig")
+            if not f:
+                f = s["fig"] = {"layer": "split", "splitAt": 0.5}
+            art = {"src": _rec["path"], "w": _rec["w"], "h0": _rec["h"],
+                   "h": _ah, "a": float(getattr(a, "fig_art_alpha", 1.0) or 1.0),
+                   "shadow": float(getattr(a, "fig_art_shadow", 0.22) or 0.0),
+                   "at": float(getattr(a, "fig_art_at", 0.0) or 0.0)}
+            if _ax >= 0:
+                art["x"] = round(_ax, 3)
+            else:
+                # 不给 x：引擎按版面实测 bbox 把立绘摆到文字块的中右部，
+                # 让切分点落在她身上。导演层算不出字实际多宽（字号是版面反解的）。
+                art.pop("x", None)
+            if _sp >= 0:
+                f["layer"] = "split"
+                f["splitAt"] = ART_SPLIT if _sp <= 0 else round(min(0.98, max(0.02, _sp)), 3)
+            elif abs(float(f.get("splitAt") if f.get("splitAt") is not None else 0.5) - 0.5) < 1e-6:
+                # 表里没单独定切点（只是「分层」这个语义）= 交给立绘的默认切点。
+                # 引擎把立绘的**左缘**摆到文字块 62% 处，切点也必须在 62%：
+                # 两边差 12% 时，切点落在她身体左边 —— 结果没有任何字真的沉到她身后，
+                # 「分层」字段全对却看不出交错。
+                f["splitAt"] = ART_SPLIT
+            # 立绘是静态图，live 序列那套字段全部作废 —— 留着会让
+            # _check_live_spans 拿 tOff 去核算「窗口起点」，报一堆假错。
+            art["fromSpan"] = bool(f.get("seq"))
+            # 表里给 live 窗留的 x=0.44 是「圆窗/竖幅贴边」那套几何，立绘不适用：
+            # 留着它，引擎就永远按 0.44 摆，按版面 bbox 自动定位的那一段等于没写
+            # （实测：两版切点 0.5 / 0.62 渲染出的 PNG 字节完全相同，就是这个原因）。
+            if _ax < 0:
+                f.pop("x", None)
+            for k in ("seq", "tOff", "wDur", "win", "t0", "t1", "bp"):
+                f.pop(k, None)
+            f["art"] = art
+            f.setdefault("layer", "split")
+            f.setdefault("splitAt", 0.5)
+            # 覆盖估算：立绘按高度占比 × 长宽比 × 不透明白占比，比 live 的 0.28 准得多
+            f["cov"] = round(min(1.0, _ah * (_rec["w"] / max(1.0, _rec["h"])) * _rec["op"]), 3)
+            n_art += 1
+        if picked:
+            print("[art] %s → %d 镜｜%dx%d｜可切边界 %.1f｜实心 %.2f"
+                  % (os.path.basename(_rec["path"]), n_art, _rec["w"], _rec["h"],
+                     _rec.get("cuts", 0), _rec.get("mass", 0)))
+        else:
+            print("[art] 没有匹配的镜头（--fig-art-shots %s），立绘未挂上" % _sel)
+
+    # ---- 人物：图层语义（表里已写了 layer/splitAt/camGain 的，原样保留）
+    for s in shots:
+        f = s.get("fig")
+        if not f:
+            continue
+        if f.get("splitAt") is not None and f.get("layer") != "split":
+            f["layer"] = "split"
+        if f.get("layer") == "split":
+            v = float(f.get("splitAt") if f.get("splitAt") is not None else 0.5)
+            f["splitAt"] = round(min(0.98, max(0.02, v)), 3)
+            n_split += 1
+        if f.get("camGain") is not None:
+            f["camGain"] = round(min(1.0, max(0.0, float(f["camGain"]))), 3)
+            n_cam += 1
+
+    # ---- 三维场景层：一个目录可以铺全部镜头（远景/环境镜头），也可以只给某几镜
+    b3dir = (getattr(a, "bg3d", "") or "").strip()
+    if b3dir:
+        b3dir = os.path.abspath(b3dir)
+        nfr = _count_frames(b3dir)
+        if nfr <= 0:
+            raise SystemExit("[bg3d] %s 里没有图片帧（%s）" % (b3dir, "/".join(_B3D_EXT)))
+        fps = float(getattr(a, "bg3d_fps", 24.0) or 24.0)
+        if fps <= 0:
+            raise SystemExit("[bg3d] 帧率必须 > 0（当前 %s）" % fps)
+        x, y, w, h = _floats(getattr(a, "bg3d_rect", ""), 4, [0.0, 0.0, 1.0, 1.0])
+        z0, z1 = _floats(getattr(a, "bg3d_zoom", ""), 2, [1.0, 0.0])
+        # 同一目录共用一个序列名：否则每个镜头都注册一遍同一批图，解码白做几遍
+        seqname = "b3d_%08x" % (abs(hash((b3dir.lower(), fps))) & 0xFFFFFFFF)
+        for s in _pick_shots(shots, getattr(a, "bg3d_shots", "all")):
+            s["bg3d"] = {
+                "seq": seqname, "dir": b3dir.replace("\\", "/"), "n": nfr, "fps": fps,
+                "x": x, "y": y, "w": w, "h": h,
+                "fit": getattr(a, "bg3d_fit", "cover") or "cover",
+                "a": float(getattr(a, "bg3d_alpha", 1.0) or 1.0),
+                "zoom0": z0, "zoom1": z1,
+            }
+            n_b3 += 1
+
+    # ---- 分层后期：背景整组套滤镜（人物/歌词另算，缺省不处理=保留原始画质）
+    gb = (getattr(a, "grade_bg", "") or "").strip()
+    gf = (getattr(a, "grade_fig", "") or "").strip()
+    if gb or gf:
+        for s in _pick_shots(shots, getattr(a, "grade_shots", "all")):
+            g = {}
+            if gb:
+                g["bg"] = gb
+            if gf:
+                g["fig"] = gf
+            s["grade"] = g
+            n_gr += 1
+
+    return {"split": n_split, "cam": n_cam, "bg3d": n_b3, "grade": n_gr, "art": n_art}
 
 
 def main():
@@ -2134,6 +2354,36 @@ def main():
                          "（默认关闭；关闭时编排稿逐字段与旧版相同）")
     ap.add_argument("--arc-dump", default="",
                     help="把弧线的关键帧与逐句判据写成 JSON（检查用）")
+    # ---- 图层语义（都是可选；不传时编排稿与旧版逐字段相同）
+    ap.add_argument("--bg3d", default="",
+                    help="三维场景层：图片序列目录（Blender / 任何 DCC 的产物都用这一条入口）")
+    ap.add_argument("--bg3d-fps", type=float, default=24.0, help="该序列的帧率")
+    ap.add_argument("--bg3d-shots", default="all", help="all 或逗号分隔镜头号")
+    ap.add_argument("--bg3d-rect", default="0,0,1,1", help="摆放 x,y,w,h（画面占比）")
+    ap.add_argument("--bg3d-fit", default="cover", choices=["cover", "contain"])
+    ap.add_argument("--bg3d-alpha", type=float, default=1.0)
+    ap.add_argument("--bg3d-zoom", default="1,0.06",
+                    help="镜头内缓慢推移 zoom0,zoom1（固定机位的三维场景也不至于读成贴图）")
+    ap.add_argument("--grade-bg", default="",
+                    help='背景层组的分层后期，如 "blur(6px) saturate(1.15)"')
+    ap.add_argument("--grade-fig", default="",
+                    help="人物层滤镜（缺省不处理＝保留原始画质）")
+    ap.add_argument("--grade-shots", default="all", help="all 或逗号分隔镜头号")
+    # ---- 立绘（2026-11-03 改向）：不再从录播抠人，改用素材库的透明 PNG
+    ap.add_argument("--fig-art", default="",
+                    help="立绘：auto / #序号 / 文件名 / 子串。素材在 C:\\Users\\Tsing\\Pictures\\"
+                         "管人立绘\\岁己立绘（可用环境变量 SUI_ART_DIR 换）")
+    ap.add_argument("--fig-art-shots", default="split",
+                    help="split（默认：只给已经标了分层的镜头）| all | 逗号分隔镜头号")
+    ap.add_argument("--fig-art-h", type=float, default=0.88, help="立绘画布高度占比")
+    ap.add_argument("--fig-art-x", type=float, default=-1.0,
+                    help="横向中心占比（缺省 -1：按切分点自动落到文字块上）")
+    ap.add_argument("--fig-art-alpha", type=float, default=1.0)
+    ap.add_argument("--fig-art-shadow", type=float, default=0.22,
+                    help="座影不透明度（0=不画；0.18~0.3 让立绘「站在纸里」而不是浮着）")
+    ap.add_argument("--fig-art-at", type=float, default=0.0, help="镜内多少秒后才出现")
+    ap.add_argument("--fig-art-split", type=float, default=-1.0,
+                    help="顺带把选中的镜头标成分层（splitAt）；<0 表示不动图层语义")
     a = ap.parse_args()
     global _STYLE, _ARC
     if a.style:
@@ -2404,14 +2654,28 @@ def main():
         if not pool:
             pool = [("block", 1)]
         pers = PERS.get(pack, PERS_DEFAULT)
-        layk = gacha(r, pool, pers, "layout", recent_lay)
+        _pool = pool
+        if fig and fig.get("layer") == "split":
+            # 分层镜头的字必须**真的横穿画面**：窄版心（0.52W 那种）排在左侧根本够不到
+            # 人物，于是「同一行字一半在人前一半在人后」永远看不出来。
+            # 只在「排得开」的版心里抽，宽度在下面再抬一次。
+            _wide = [kv for kv in pool
+                     if kv[0] in ("block", "cropGiant", "cross", "keySplit", "fullTrack")]
+            _pool = _wide or [("block", 1)]
+        layk = gacha(r, _pool, pers, "layout", recent_lay)
         recent_lay.append(layk)
         if len(recent_lay) > 6:
             recent_lay.pop(0)
 
         # 人占掉多宽 → 版心从哪儿起。人太宽时先缩人（字是主角，人不能让版心消失）
         avoid = None
-        if fig:
+        if fig and (fig.get("layer") in ("split", "front") or fig.get("art")):
+            # 字要**穿过**人物（分层交错 / 压在人物后面）：版心就不能为它让位。
+            # 让位之后字全挤在另一侧、跟人物根本不重叠，于是「分层」画得再对也看不出来
+            # —— 这一条实测踩过：split 字段全对、引擎也真的分两趟画了，
+            # 但成片里那几句字始终在人物旁边，因为没有一处字真的越过她。
+            avoid = None
+        elif fig:
             res = fig_reserve(fig)
             for _ in range(4):
                 if res <= 1920 * 0.40:
@@ -2427,6 +2691,11 @@ def main():
             # 它的 frac 恒为 0，版心不会因此变窄。
             avoid = {"side": fig.get("side", "r"), "frac": round(res / 1920.0, 3)}
         lay = layout_params(layk, mood, fig, r, nw, key, avoid)
+        if fig and fig.get("layer") == "split" and lay.get("availW") is not None:
+            # 版心抬到 0.80W 起：让字真的走过人物所在的横向区间（分层才有对象可交错）
+            lay["availW"] = round(max(float(lay["availW"]), 0.80), 3)
+            if lay["k"] in ("block", "cropGiant"):
+                lay["x"] = 0.055
 
         # ---- 类型：只有三级（主字 / 次字 / 注记），字体由 pack 决定
         typ = {"face": fonts["face"], "body": fonts["body"], "squeeze": 1.0}
@@ -2574,6 +2843,11 @@ def main():
                 # 版面参数必须按回访的 layk 重算 —— 否则引擎读到的还是抽签那个
                 # 版面（lay 是个 dict，里面自带 k），「回访」等于没发生。
                 lay = layout_params(layk, mood, fig, r, nw, key, avoid)
+        if fig and fig.get("layer") == "split" and lay.get("availW") is not None:
+            # 版心抬到 0.80W 起：让字真的走过人物所在的横向区间（分层才有对象可交错）
+            lay["availW"] = round(max(float(lay["availW"]), 0.80), 3)
+            if lay["k"] in ("block", "cropGiant"):
+                lay["x"] = 0.055
                 ent = {"k": entk}
                 if entk == "slam":
                     ent.update(dur=0.22, stagger=0.0, lead=0.02)
@@ -2797,8 +3071,14 @@ def main():
         "lines": lines,
         "shots": shots,
     }
+    # 图层语义（任务书 §3.3/§4.5/§5.3/§5.4）在**写盘前**统一落到编排稿上：
+    # 编排稿必须自包含 —— 换入口渲染时不能因为「少传一个参数」就丢掉这一层。
+    _lay = apply_layer_semantics(shots, a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(sb, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    if any(_lay.values()):
+        print("[layer] 歌词分层 %d 镜｜人物镜头耦合 %d 镜｜三维层 %d 镜｜分层后期 %d 镜｜立绘 %d 镜"
+              % (_lay["split"], _lay["cam"], _lay["bg3d"], _lay["grade"], _lay.get("art", 0)))
 
     # ---- 核对
     from collections import Counter

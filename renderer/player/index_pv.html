@@ -176,9 +176,9 @@ window.__frame = async (i, opts) => {
     const pend = PV.ensureWindow ? PV.ensureWindow(qt) : null;
     if (pend) {
       await pend; FIG_SHOTS++;
-      // console.log 只认 %d/%s/%f，不认 %.1f —— 写 %.1f 会把格式串原样打出来、
-      // 参数追加在后面（实测 "人物装载第 %d 镜 @%.1fs 1 10.25"），没法读。
-      if (FIG_SHOTS % 6 === 1) console.log('[pv] 人物装载第 %d 镜 @%ss', FIG_SHOTS, qt.toFixed(1));
+      // 模板串而不是格式串：console.log 的 %d/%s 在 CDP 转文本时也会被原样留下，
+      // 日志里出现过 "人物装载第 %d 镜 @%ss 25 142.0"，读不出来。
+      if (FIG_SHOTS % 6 === 1) console.log(`[pv] 人物装载第 ${FIG_SHOTS} 镜 @${qt.toFixed(1)}s`);
     }
   }
   applyScale();

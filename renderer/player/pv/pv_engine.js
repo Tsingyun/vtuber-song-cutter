@@ -68,6 +68,43 @@
     };
     return ST.seq[name];
   }
+  /* ---------------- 立绘：单张透明 PNG ----------------
+     为什么不从录播里抠人了（2026-11-03 改向）：直播画面是 16:9、发丝和袖口
+     早被码率糊成半透明，抠出来一圈毛边；而且每一帧姿势不同，抠像在帧间跳，
+     成片里读作「贴了一张抖动的人形」。立绘本来就有 alpha、边缘是画师切好的。
+
+     关键：**穿插效果靠的是她身上本来就有洞**（发缝、羽毛间隙、手臂与身体之间的空档），
+     不是靠把她压半透明。所以立绘层必须是「整块不透明 + 真实镂空」，
+     文字从身后画时会在这些洞里露出来 —— 这才是场景 C 的「同一行字前后交错」。 */
+  const _art = {};
+  function artURL(src) {
+    const s = String(src || '').replace(/\\/g, '/');
+    if (/^(file:|data:|https?:|\.?\/)/.test(s) && !/^[A-Za-z]:\//.test(s)) return s;
+    return 'file:///' + s;
+  }
+  async function loadArt(src, info) {
+    const key = String(src || '');
+    if (!key) return null;
+    if (_art[key]) return _art[key];
+    const im = new Image();
+    im.decoding = 'sync';
+    const rec = { img: im, w: (info && info.w) || 1, h: (info && info.h) || 1, ok: false, src: key };
+    _art[key] = rec;
+    im.src = artURL(key);
+    await new Promise(res => {
+      if (im.decode) im.decode().then(res, res);
+      else { im.onload = res; im.onerror = res; }
+    });
+    if (im.naturalWidth) { rec.w = im.naturalWidth; rec.h = im.naturalHeight; rec.ok = true; }
+    /* 装载失败必须出声：getFrame 那套「取不到就当空」让人物整片消失过两次，
+       立绘走同一条死路 —— 一张图没读出，全片该有人的地方就全是空纸。 */
+    else if (typeof console !== 'undefined') console.log('[pv] 立绘装载失败 ' + key);
+    return rec;
+  }
+  function artRec(fig) {
+    return (fig && fig.art && _art[String(fig.art.src || '')]) || null;
+  }
+
   const seqPath = (s, i) => 'file:///' + s.dir + '/' + (s.pattern.indexOf('%') >= 0
     ? s.pattern.replace(/%0(\d)d/, (_, n) => String(i + 1).padStart(+n, '0'))
     : s.pattern.replace('{}', String(i + 1)));
@@ -115,6 +152,9 @@
     const want = {};
     if (sh && sh.fig && sh.fig.seq && ST.seq[sh.fig.seq]) {
       want[sh.fig.seq] = spanOf(sh, sh.fig.seq, sh.fig.tOff);
+    }
+    if (sh && sh.bg3d && sh.bg3d.seq && ST.seq[sh.bg3d.seq]) {
+      want[sh.bg3d.seq] = spanOf(sh, sh.bg3d.seq, sh.bg3d.tOff);
     }
     /* JIZURA 帧序列层同样按镜头滑窗装载：漏掉这条时 drawJz 取不到图会静默不画，
        表现是「这一段本该有动态文字层，但画面里什么都没有」，零报错。 */
@@ -182,9 +222,56 @@
      侧位面板族（arch 拱窗 / pill 胶囊 / soft 羽化面 / diag 斜切带）由 w·h 推位置，
      split 纵向分屏全高出画、strip 横向满幅条上下出血 —— 版面层据此让位。
      一切仍以 1920×1080 设计坐标描述，4K 渲染由外层 setTransform 统一放大。 */
-  function placeFigure(fig, bbox) {
+  function placeFigure(fig, bbox, gbox) {
     const sc = fig.scale || 1;
     const mode = fig.mode || 'disc';
+    /* 显式横坐标（任务书 §4.4「自定义位置」）：0~1 的画面占比。
+       不给就沿用各族原来的贴边规则 —— 旧编排稿一个字段都不带，行为逐像素不变。
+       为什么要它：分层歌词要求人物落在「字会经过的地方」；贴边时字从旁边过去，
+       同一行字前后分层就看不出来（实测：字段全对、引擎也分两趟画了，画面里没交错）。 */
+    let xWant = fig.x == null ? null : Number(fig.x) * PV.W;
+    /* 分层镜头且没显式给 x：按**版面实测 bbox** 把人物摆到文字块的中右部，
+       让切分点正好落在人物身上 —— 否则只有后半段被挡，前半段够不到人，
+       「同一行字一半在人前一半在人后」永远不成立。
+       用 bbox 而不是猜宽度：字号是版面反解的，导演层算不出字实际有多宽。 */
+    const _bw = (bbox && bbox[2] > bbox[0]) ? (bbox[2] - bbox[0]) : 0;
+    const _splitX = (fig.layer === 'split' && xWant == null && _bw > 8)
+      ? bbox[0] + _bw * 0.58 : null;
+
+    /* 立绘画框：没有「窗」，就是一张按 alpha 直接抠进画面的透明图。
+       art.h 是画布高度占比（默认 0.94，人物从底部出血），art.x 是横向中心占比。
+       宽度由**源图真实长宽比**反推 —— 写死比例的话，换一张立绘就横向拉伸，
+       而拉伸的立绘一眼假（和「从录播抠人」是同一种失败）。 */
+    if (fig.art) {
+      const rec = artRec(fig);
+      const iw = (rec && rec.ok) ? rec.w : (fig.art.w || 1000);
+      const ih = (rec && rec.ok) ? rec.h : (fig.art.h0 || 1000);
+      const ah = PV.H * (fig.art.h == null ? 0.88 : Number(fig.art.h)) * sc;
+      const aw = ah * (iw / Math.max(1, ih)) * (Number(fig.art.wRatio) || 1);
+      /* 横向落点，三种来源（优先级从高到低）：
+         ① art.x 显式给（导演层想让立绘站哪儿就站哪儿）；
+         ② 分层镜 + 有版面 bbox：把她的**左缘**摆在文字块的 62% 处 ——
+            于是句子前面一大截在她身前、尾巴沉到她身后，从她的羽翼/发缝里再透出来。
+            贴在文字块正中会把她的脸压在一整行字底下，读作「字糊在脸上」；
+            完全贴边又永远不会交错（实测过：字段全对、引擎也真的分两趟画了，画面没交错）。
+         ③ 都不是：画布正中。
+         用「左缘」而不是「中心」：立绘宽高比因图而异，按中心摆的话，
+         换一张更宽的图，她的身体就会整体右移、把切点甩到字外面去。 */
+      /* 横向落点用**字形**的 bbox（gbox），不是版面 bbox：
+         版面 bbox 把规则线、索引、注记也算进去了，右侧常比最后一个字多出几百像素。
+         用版面 bbox 定位时，实测「她的左缘」落在最后一个字外面 —— 字根本没有穿过去，
+         只有一个字的边角被啃掉。 */
+      const B = (gbox && gbox[2] > gbox[0]) ? gbox : bbox;
+      const bw2 = (B && B[2] > B[0]) ? (B[2] - B[0]) : 0;
+      let axc;
+      if (fig.art.x != null) axc = Number(fig.art.x);
+      else if (xWant != null) axc = Number(fig.x);
+      else if (fig.layer === 'split' && bw2 > 8) axc = (B[0] + bw2 * 0.62 + aw / 2) / PV.W;
+      else axc = 0.5;
+      axc = clamp(axc, -0.10, 1.10);
+      const by = (fig.art.y == null ? 1.02 : Number(fig.art.y)) * PV.H;
+      return { kind: 'art', shape: 'alpha', mode: 'art', x: axc * PV.W - aw / 2, y: by - ah, w: aw, h: ah };
+    }
 
     /* 满幅淡底：整帧铺满，不占版面（长句专用，字照常全宽） */
     if (mode === 'wash') {
@@ -215,7 +302,8 @@
       else if (mode === 'soft') { w = PV.W * (fig.wf || 0.48); h = PV.H * (fig.hf || 0.68); }
       else { h = (fig.h || 640) * sc; w = h * (fig.wRatio || 0.62); }
       const yc = (fig.y != null ? fig.y : 0.5) * PV.H;
-      const x = fig.side === 'l' ? SAFE.m : PV.W - SAFE.m - w;
+      const x = xWant != null ? xWant
+        : (fig.side === 'l' ? SAFE.m : PV.W - SAFE.m - w);
       const shape = mode === 'arch' ? 'arch'
         : (mode === 'pill' ? 'pill' : (mode === 'diag' ? 'poly' : 'round'));
       return { kind: 'panel', shape, mode, x, y: yc - h / 2, w, h,
@@ -232,7 +320,8 @@
       const w = h * (fig.wRatio || 0.752);
       const y = (fig.y != null ? fig.y : 0.30) * PV.H;
       let x;
-      if (mode === 'crop') x = fig.side === 'r' ? PV.W - w * 0.54 : -w * 0.46;
+      if (xWant != null) x = xWant;
+      else if (mode === 'crop') x = fig.side === 'r' ? PV.W - w * 0.54 : -w * 0.46;
       else if (mode === 'ghost') x = fig.side === 'r' ? PV.W - w - 26 : 26;
       else if (fig.fixed) x = fig.side === 'r' ? PV.W - w - 24 : 24;
       else x = fig.side === 'r' ? PV.W - SAFE.m - w : SAFE.m;
@@ -242,7 +331,7 @@
     const r = (fig.r || 168) * sc;
     if (fig.fixed) {
       // 满幅构图（密排墙等）没有空白可避：按 side 定点，让字直接从人身上过
-      const x = fig.side === 'r' ? PV.W - r - 40 : r + 40;
+      const x = xWant != null ? xWant : (fig.side === 'r' ? PV.W - r - 40 : r + 40);
       const y = (fig.y != null ? fig.y : 0.44) * PV.H;
       return { x, y, r, kind: 'disc', mode };
     }
@@ -265,6 +354,59 @@
       if (score > bestScore) { bestScore = score; best = y; }
     }
     return { x, y: best, r, kind: 'disc', mode };
+  }
+
+  /* ---------------- 相机变换复用（人物图层要能「跟着镜头走」或「钉在屏幕上」） ----------------
+     主循环里那段 translate/rotate/scale 是**整帧**的相机。人物要参与镜头运动，
+     就不能只是「也在那段变换里」——那样只有 0 或 1 两个选择。这里把同一段变换
+     参数化成 gain：gain=1 与主循环逐像素等价（默认路径，旧成片不变），
+     gain=0 是屏幕空间固定（镜头推近时窗口不跟着放大），中间值是视差。
+     用 setTransform 复位到「设计坐标 × 输出倍率」再叠，因为主循环此刻的
+     ctx 已经在相机空间里，直接乘会叠两遍。 */
+  function applyCam(ctx, cam, gain) {
+    const sc = PV.SCALE || 1;
+    ctx.setTransform(sc, 0, 0, sc, 0, 0);
+    const g = clamp(gain == null ? 1 : gain, 0, 1);
+    if (!cam || g <= 0) return;
+    const X = cam.x || 0, Y = cam.y || 0, R = cam.rot || 0, K = cam.skx || 0;
+    const SX = (cam.s == null ? 1 : cam.s) * (cam.sx == null ? 1 : cam.sx);
+    const SY = (cam.s == null ? 1 : cam.s) * (cam.sy == null ? 1 : cam.sy);
+    ctx.translate(PV.W / 2 + X * g, PV.H / 2 + Y * g);
+    if (R) ctx.rotate(R * g * Math.PI / 180);
+    if (K) ctx.transform(1, 0, Math.tan(K * g * Math.PI / 180), 1, 0, 0);
+    ctx.scale(1 + (SX - 1) * g, 1 + (SY - 1) * g);
+    ctx.translate(-PV.W / 2, -PV.H / 2);
+  }
+
+  /* 人物图层的镜头增益：camGain 优先，其次 camSpace（screen=0 / scene=1）。
+     默认 1 —— 旧编排稿一个字段都不带，行为必须逐像素不变。 */
+  function figCamGain(fig) {
+    if (!fig) return 1;
+    if (fig.camGain != null) {
+      const v = Number(fig.camGain);
+      return clamp(isFinite(v) ? v : 1, 0, 1);
+    }
+    return fig.camSpace === 'screen' ? 0 : 1;
+  }
+
+  function drawFigureWithCam(ctx, cam, shot, figBox, t, en) {
+    const fig = shot.fig;
+    if (!fig) return;
+    const g = figCamGain(fig);
+    const F = (shot.grade && shot.grade.fig) ? String(shot.grade.fig) : '';
+    if (g >= 0.999) {
+      if (!F) { drawFigure(ctx, fig, figBox, t, en, shot._S, shot); return; }
+      ctx.save(); ctx.filter = F;
+      drawFigure(ctx, fig, figBox, t, en, shot._S, shot);
+      ctx.filter = 'none'; ctx.restore();
+      return;
+    }
+    ctx.save();
+    applyCam(ctx, cam, g);
+    if (F) ctx.filter = F;
+    drawFigure(ctx, fig, figBox, t, en, shot._S, shot);
+    if (F) ctx.filter = 'none';
+    ctx.restore();
   }
 
   /* 等比覆盖裁切：源图比例和框不一致时，宁可裁掉边缘也不要拉变形（拉变形一眼假）。
@@ -484,7 +626,67 @@
     ctx.restore();
   }
 
+  /* 立绘的绘制：只有 alpha 合成 —— 没有框、没有遮罩、没有羽化。
+     立绘的边缘就是画师给的边缘，再揉一遍只会把它糊成一团光晕。
+     入场/退场复用 live 那套语义（fadeIn / out / motion），导演层不必记两套。
+
+     动势（A.bob / A.zoom）是**必要的**：一张完全静止的立绘读作「贴纸」，
+     幅度必须小到说不出哪里在动，但去掉就立刻变呆 —— 与 live 的呼吸同源。
+     全部是 t 的纯函数 ⇒ 同一 t 双渲一致（确定性验收不受影响）。 */
+  function drawArt(ctx, fig, box, t, en, S, shot) {
+    const rec = artRec(fig);
+    const A = fig.art || {};
+    if (!rec || !rec.ok) return;
+    const st0 = shot ? shot.t0 : 0, st1 = shot ? shot.t1 : 1e9;
+    const sm = q => q * q * (3 - 2 * q);
+    let ra = 1;
+    /* 揭示：立绘不需要「从框里长出来」，只要一段柔叠 —— 硬擦会把 alpha 边
+       擦出一道横线，比直接淡入更假。 */
+    const rin = A.revealIn == null ? 0.62 : Number(A.revealIn);
+    if (rin > 0) ra *= sm(clamp((t - st0) / rin, 0, 1));
+    if (fig.fadeIn) ra *= sm(clamp((t - st0) / fig.fadeIn, 0, 1));
+    if (fig.out) {
+      const oc = shot && shot._xcap != null ? shot._xcap : 1;
+      const ow = Math.max(0.04, fig.out * oc);
+      const oq = clamp((t - (st1 - ow)) / ow, 0, 1) * oc;
+      ra *= sm(1 - oq);
+    }
+    /* 出现时机：A.at 是镜内秒数（缺省 0 = 整镜在场）。
+       很多句子只要她在后半句露面 —— 一开场就把立绘怼上去，等于每句都从头压字。 */
+    const at = Number(A.at || 0);
+    if (at > 0) ra *= sm(clamp((t - (st0 + at)) / Math.max(0.05, rin), 0, 1));
+    const a = (A.a == null ? 1 : Number(A.a)) * ra;
+    if (a <= 0.004) return;
+
+    const mo = A.motion == null ? 1 : Number(A.motion);
+    const ph = (A.ph || 0) * TAU;
+    const bob = A.bob == null ? 6 : Number(A.bob);
+    const ox = Math.sin(t * 0.31 + ph) * bob * 0.55 * mo;
+    const oy = Math.cos(t * 0.23 + ph * 1.4) * bob * mo;
+    const p = shot ? clamp((t - st0) / Math.max(0.05, st1 - st0), 0, 1) : 0.5;
+    const zoom = 1 + (Number(A.zoom) || 0) * sm(p);
+    const w = box.w * zoom, h = box.h * zoom;
+    const x = box.x + ox - (w - box.w) / 2, y = box.y + oy - (h - box.h) / 2;
+
+    ctx.save();
+    ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.imageSmoothingQuality = 'high';
+    if (A.flip) { ctx.translate(x + w / 2, 0); ctx.scale(-1, 1); ctx.translate(-(x + w / 2), 0); }
+    /* 座影：立绘是「站在纸里」还是「浮在纸上」，差别就在这一层。
+       只在她身后压一道偏移的柔影，不做边缘描边 —— 描边会读作贴纸。 */
+    if (A.shadow) {
+      ctx.shadowColor = 'rgba(0,0,0,' + clamp(Number(A.shadow), 0, 1).toFixed(3) + ')';
+      ctx.shadowBlur = (A.shadowBlur == null ? 26 : Number(A.shadowBlur));
+      ctx.shadowOffsetX = A.shadowX == null ? 0 : Number(A.shadowX);
+      ctx.shadowOffsetY = A.shadowY == null ? 8 : Number(A.shadowY);
+    }
+    ctx.drawImage(rec.img, x, y, w, h);
+    ctx.restore();
+  }
+
   function drawFigure(ctx, fig, box, t, en, S, shot) {
+    if (fig.art) { drawArt(ctx, fig, box, t, en, S, shot); return; }
+
     S = S || ST.S;
     const name = fig.seq || 'head';
     if (!ST.seq[name]) return;
@@ -989,9 +1191,9 @@
 
   /* 一趟色散残影：把整行重画在 lag 秒之前的位姿上，整体错位(dx,dy)并染成色散色。
      lag > 0 才有意义 —— lag=0 的重画和主层完全重合，只剩下「加粗」。 */
-  function ghostPass(ctx, shot, t, lag, ox, oy, col, blend, S) {
+  function ghostPass(ctx, shot, t, lag, ox, oy, col, blend, S, cut, tier) {
     if (!(lag > 0)) return;
-    const gs = applyParts(shot, t - lag);
+    const gs = pickTier(applyParts(shot, t - lag), cut == null ? null : cut, tier);
     ctx.save();
     ctx.translate(ox, oy);
     ctx.globalCompositeOperation = blend;
@@ -1013,7 +1215,38 @@
   /* TRIET 部件统一签名 (ctx,g,bx,by,a,S)，drawGlyphs 只给前 5 个 ⇒ 在这里把 S 绑进去 */
   const bindS = (fn, sp) => (c, g, bx, by, a) => fn(c, g, bx, by, a, sp);
 
-  function drawLyrics(ctx, shot, t) {
+  /* ---------------- 歌词分层：同一行字分别落在人物前 / 后 ----------------
+     任务书场景 C「歌词与人物交错」。此前一个镜头只有两种排法 —— 人物压住整行，
+     或整行压住人物；真实的交错要求**同一行**的字一半在人后、一半在人前，
+     一次绘制做不到（它需要两趟绘制中间夹一次人物）。所以：按阅读序把字形切成
+     两段，人物前后各画一段。排版层完全不动 —— 它照旧产出一整行 glyph，
+     切分只发生在绘制时，于是 JIZURA 那套逐字动画、碎裂、色散、残影全部照旧生效。
+     切分点 fig.splitAt（0~1，缺省 0.5）：前段在人物**前**，后段在人物**后**，
+     与任务书「歌词后半部分 → 人物 → 歌词前半部分」的叠放次序一致。 */
+  function lyricCut(shot) {
+    if (!shot.fig || shot.fig.layer !== 'split') return null;
+    const v = Number(shot.fig.splitAt == null ? 0.5 : shot.fig.splitAt);
+    return clamp(isFinite(v) ? v : 0.5, 0.02, 0.98);
+  }
+
+  /* 按非空字形的阅读序切两段。空格不计数 —— 否则英文行会被空格挤歪切点。 */
+  function pickTier(glyphs, cut, tier) {
+    if (cut == null || !tier) return glyphs;
+    let n = 0;
+    for (const g of glyphs) if (!g.isSpace) n++;
+    const at = Math.round(n * cut);
+    const out = [];
+    let k = 0;
+    for (const g of glyphs) {
+      if (g.isSpace) continue;
+      const front = k < at;
+      k++;
+      if (tier === 'front' ? front : !front) out.push(g);
+    }
+    return out;
+  }
+
+  function drawLyrics(ctx, shot, t, tier) {
     const S = shot._S || ST.S;
     const lay = shot._lay;
     const dur = Math.max(0.01, shot.t1 - shot.t0);
@@ -1021,12 +1254,16 @@
     const xcap = shot._xcap == null ? 1 : shot._xcap;
     const outDur = shot._xout != null ? shot._xout
       : ((shot.exit && shot.exit.dur != null) ? shot.exit.dur : 0.42);
+    /* 版面层的巨型暗影与规则线/遮带属于**整行**，不能跟着字被切两段 ——
+       切开会让暗影只垫着半行字。所以它只在第一趟（tier≠'front'）画一次。 */
+    const cut = lyricCut(shot);
+    const lay1 = (cut == null || tier !== 'front');
     /* 版面层：巨型暗影在最下，规则线/注记在字下，遮带在字上。
        全部由 layout 自己产出 —— 这样「字和它的线」永远同源，不会各摆各的。
        xcap 必须一起传下去：字停在 55% 而线淡到 0，就是「字没了线还在」的反向版。 */
-    if (lay && PV.drawGiant) PV.drawGiant(ctx, lay.giant, lt, outDur, dur, xcap);
-    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'under', xcap);
-    const glyphs = applyParts(shot, t);
+    if (lay1 && lay && PV.drawGiant) PV.drawGiant(ctx, lay.giant, lt, outDur, dur, xcap);
+    if (lay1 && lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'under', xcap);
+    const glyphs = pickTier(applyParts(shot, t), cut, tier);
     const base = paintFor(shot.treat && shot.treat.k);
     const emph = shot.treatEmph ? paintFor(shot.treatEmph.k) : base;
     const spec = Object.assign({}, S, shot.treat || {});
@@ -1037,7 +1274,7 @@
       const n = shot.trail.n || 3, dt = shot.trail.dt || 0.055, a0 = shot.trail.a || 0.16;
       for (let q = n; q >= 1; q--) {
         /* 残影必须是「稍早时刻的位姿」，否则和主层完全重合、只剩加粗 ⇒ 要把 t 拨回去重算变换 */
-        const gq = applyParts(shot, t - dt * q);
+        const gq = pickTier(applyParts(shot, t - dt * q), cut, tier);
         for (const g of gq) {
           if (g.emph) continue;
           const ge = Object.assign({}, g, { alpha: g.alpha * a0 * (1 - q / (n + 1)) });
@@ -1070,8 +1307,8 @@
          已经飞散的碎片反而变成漂浮的碎屑（实测 "THIS IS THE BEST FEELING"
          读作「字没碎、旁边多了几粒小白点」）。JIZURA 每一趟都是完整重绘，
          内容是上一次位姿下的**同一批零件**。 */
-      ghostPass(ctx, shot, t, 1.6 / 24, -3.4 * chroma * u, -1.3 * chroma * u, S.ghostB, mul, S);
-      ghostPass(ctx, shot, t, 0.8 / 24, 3.2 * chroma * u, 1.9 * chroma * u, S.ghostA, mul, S);
+      ghostPass(ctx, shot, t, 1.6 / 24, -3.4 * chroma * u, -1.3 * chroma * u, S.ghostB, mul, S, cut, tier);
+      ghostPass(ctx, shot, t, 0.8 / 24, 3.2 * chroma * u, 1.9 * chroma * u, S.ghostA, mul, S, cut, tier);
       applyParts(shot, t);           // 上面重算了两次位姿，主层必须回到当前时刻
     }
 
@@ -1079,7 +1316,7 @@
     if (shot.treatEmph) PV.drawGlyphs(ctx, glyphs.filter(g => g.emph), bindS(emph, specE), { S: specE });
     ctx.filter = 'none';
     ctx.globalAlpha = 1;
-    if (lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'over', xcap);
+    if (lay1 && lay && PV.drawMarks) PV.drawMarks(ctx, lay.marks, lt, outDur, dur, 'over', xcap);
   }
 
   /* ---------------- 背景层次 ----------------
@@ -1100,6 +1337,56 @@
       }
       fn(ctx, dd, { S: S || ST.S, t, rel, seed: (start || 0) * 1000 | 0, shot: start });
     }
+  }
+
+  /* ---------------- 三维场景层（bg3d） ----------------
+     任务书 §5.4 要的是「Blender 可以按需出三维镜头」，但**不能成为硬依赖**。
+     所以这一层的契约只有「图片序列 + 摆放」：目录、帧数、帧率、位置、尺寸、裁切、
+     透明度、混合模式、缓慢推移。产出侧是 Blender EEVEE、Cycles、C4D 还是 ffmpeg
+     抽的片段，渲染器一概不问；没有这一层就整段跳过，旧编排稿零影响。
+     帧定位走序列自己的 fps（getFrame），与人物层同一套按需装载/释放机制。 */
+  function drawBg3d(ctx, shot, t) {
+    const b = shot.bg3d;
+    if (!b || !b.seq || !ST.seq[b.seq]) return;
+    const im = getFrame(b.seq, (t - shot.t0) + (b.tOff || 0));
+    if (!im) return;
+    const x = (b.x == null ? 0 : b.x) * PV.W;
+    const y = (b.y == null ? 0 : b.y) * PV.H;
+    const w = (b.w == null ? 1 : b.w) * PV.W;
+    const h = (b.h == null ? 1 : b.h) * PV.H;
+    /* 序列本身在动（那正是三维渲染的意义），这里只补一层可选的缓慢推移，
+       免得固定机位的三维场景被读成一张贴图。 */
+    const p = clamp((t - shot.t0) / Math.max(0.05, shot.t1 - shot.t0), 0, 1);
+    const z = (b.zoom0 == null ? 1 : b.zoom0) + (b.zoom1 || 0) * p;
+    ctx.save();
+    ctx.globalAlpha = b.a == null ? 1 : b.a;
+    if (b.blend) ctx.globalCompositeOperation = b.blend;
+    if (b.fit === 'contain') {
+      const iw = im.naturalWidth || 1, ih = im.naturalHeight || 1;
+      const k = Math.min(w / iw, h / ih) * z;
+      const dw = iw * k, dh = ih * k;
+      ctx.drawImage(im, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+    } else {
+      drawCoverF(ctx, im, x, y, w, h, z, b.fy == null ? 0.5 : b.fy);
+    }
+    ctx.restore();
+  }
+
+  /* ---------------- 分层后期（shot.grade） ----------------
+     任务书 §5.3 要的不是「整帧统一上滤镜」，而是：背景可以有明显的模糊与色彩变化，
+     人物保留原始画质，歌词保持清晰，前景特效单独用透明度/混合。三者只能靠分组处理。
+     这里的做法是**背景层组**（纸底 + bg + bg3d + 背景装饰）先合到离屏画布，
+     再一次性套 grade —— 逐层套滤镜会让层与层的接缝各糊一遍，整组套才是
+     「这一层被打磨过」。只用一张全幅离屏，且只在编排稿写了 grade.bg 时才分配。 */
+  let _gcv = null, _gctx = null;
+  function gradeLayer() {
+    const sc = PV.SCALE || 1;
+    const w = Math.round(PV.W * sc), h = Math.round(PV.H * sc);
+    if (!_gcv) { _gcv = document.createElement('canvas'); _gctx = _gcv.getContext('2d'); }
+    if (_gcv.width !== w || _gcv.height !== h) { _gcv.width = w; _gcv.height = h; }
+    _gctx.setTransform(1, 0, 0, 1, 0, 0);
+    _gctx.clearRect(0, 0, w, h);
+    return _gctx;
   }
 
   function drawDecor(ctx, list, t, start, S) {
@@ -1205,9 +1492,29 @@
     }
 
     if (!JZO) {
-      drawPaper(ctx, t, shot);
-      drawBG(ctx, shot.bgl, t, shot.t0, shot._S);
-      drawDecor(ctx, shot.bg, t, shot.t0, shot._S);
+      /* 背景层组：写了 grade.bg 就整组先合进离屏、再一次性套滤镜（见 gradeLayer）。 */
+      const gb = shot.grade && shot.grade.bg ? String(shot.grade.bg) : '';
+      if (gb) {
+        const g = gradeLayer();
+        applyCam(g, cam, 1);
+        g.fillStyle = rgba(S.paperRGB, 1);
+        g.fillRect(0, 0, PV.W, PV.H);
+        drawPaper(g, t, shot);
+        drawBG(g, shot.bgl, t, shot.t0, shot._S);
+        drawBg3d(g, shot, t);
+        drawDecor(g, shot.bg, t, shot.t0, shot._S);
+        ctx.save();
+        ctx.setTransform(sc, 0, 0, sc, 0, 0);
+        ctx.filter = gb;
+        ctx.drawImage(_gcv, 0, 0, PV.W, PV.H);
+        ctx.filter = 'none';
+        ctx.restore();
+      } else {
+        drawPaper(ctx, t, shot);
+        drawBG(ctx, shot.bgl, t, shot.t0, shot._S);
+        drawBg3d(ctx, shot, t);
+        drawDecor(ctx, shot.bg, t, shot.t0, shot._S);
+      }
     }
 
     /* JIZURA 层（后）：位置在背景之上、人物与文字之下 —— 对应「后景文字」这一层。
@@ -1216,20 +1523,30 @@
 
     // 人物（后）
     let figBox = null;
+    /* 歌词要不要分两段画，取决于人物图层的 layer 是否为 'split'。
+       split 只有在**真有序列**时才成立 —— 无人物时它退化成普通整行（下面 tier=null）。 */
+    const cut = (!JZO && shot.fig) ? lyricCut(shot) : null;
     if (shot.fig) {
-      figBox = placeFigure(shot.fig, shot._lay ? shot._lay.bbox : [0, 0, 0, 0]);
+      /* 第三个参数只在立绘层用到（见图层的分支），其余画框族照旧只看版面 bbox。 */
+      const _gb = (shot._lay && shot._lay.glyphs && shot._lay.glyphs.length)
+        ? PV.bboxOf(shot._lay.glyphs) : null;
+      figBox = placeFigure(shot.fig, shot._lay ? shot._lay.bbox : [0, 0, 0, 0], _gb);
       shot._figBox = figBox;
-      if (shot.fig.layer !== 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S, shot);
+      /* 分层歌词的「后段」先画：它在人物之下 ⇒ 这一段字被人挡住。
+         另一段在人物之后画（下面 tier='front'），压在人身上 —— 一句话同时
+         从人身前、身后穿过，就是任务书场景 C 的交错。 */
+      if (cut != null) drawLyrics(ctx, shot, t, 'behind');
+      if (shot.fig.layer !== 'front') drawFigureWithCam(ctx, cam, shot, figBox, t, en);
     }
 
     /* 文字：jzOnly 时整层不画。
        注意编排稿里的 lines / layout / _lay 全部**保留不动** —— 人物位置、让位、
        reveal 都依赖 _lay.bbox，清掉歌词数据会连带把人物挪位，那就不是
        「只移除主歌词」而是「重新排了一版」。 */
-    if (!JZO) drawLyrics(ctx, shot, t);
+    if (!JZO) drawLyrics(ctx, shot, t, cut != null ? 'front' : null);
 
     // 人物（前）：「文字从她身前过」只在 layer=front 的镜头成立
-    if (shot.fig && shot.fig.layer === 'front') drawFigure(ctx, shot.fig, figBox, t, en, shot._S, shot);
+    if (shot.fig && shot.fig.layer === 'front') drawFigureWithCam(ctx, cam, shot, figBox, t, en);
 
     /* JIZURA 层（前）：压在文字之上 —— 这就是「歌词被文字层局部遮挡/覆盖」的通道。
        只有显式 layer:'front' 的镜头才走这里，默认是 'behind'，避免糊住唱词。 */
@@ -1490,6 +1807,32 @@
     if (live.face) ST.face = live.face;
     if (_nseq) ST.seqCount = _nseq;
 
+    /* 三维场景层（bg3d）：目录/帧数/帧率由编排稿给，这里注册成序列。
+       名字按镜头号固定（b3d<镜头号>），因为不同镜头可能用不同序列；
+       已带 seq 名的（多镜共用同一段）原样沿用。
+       不注册的后果与人物层同款：getFrame 返回 null、静默不画，零报错。 */
+    let _nb3 = 0;
+    for (const sh of (opt.storyboard.shots || [])) {
+      if (sh && sh.bg3d && sh.bg3d.dir) {
+        sh.bg3d.seq = sh.bg3d.seq || ('b3d' + (sh.i == null ? _nb3 : sh.i));
+        loadSeq(sh.bg3d.seq, sh.bg3d);
+        _nb3++;
+      }
+    }
+    if (_nb3) ST.b3Count = _nb3;
+
+    /* 立绘层（art）：编排稿里每镜的 fig.art.src 指向一张透明 PNG。
+       必须**在首帧之前**解码完 —— 少一张图的那一帧会被读作「她没出现」，
+       而首帧正是暖机渲染的样本：冷态与热态混在一份确定性命中，验收就假了。 */
+    let _nart = 0;
+    for (const sh of (opt.storyboard.shots || [])) {
+      const A = sh && sh.fig && sh.fig.art;
+      if (!A || !A.src) continue;
+      const rec = await loadArt(A.src, A);
+      if (rec && rec.ok) _nart++;
+    }
+    ST.artCount = _nart;
+
 
     const ctx = opt.ctx;
     const LINES = opt.storyboard.lines || [];
@@ -1578,7 +1921,7 @@
     ST.ready = true;
     return {
       fonts: nf, glyphs: total, shots: ST.shots.length,
-      seqs: Object.keys(ST.seq), dpr: ST.dpr,
+      seqs: Object.keys(ST.seq), dpr: ST.dpr, b3d: _nb3,
       preload: pre.n, settled: pre.jobs, memMB: Math.round(pre.bytes / 1048576),
       /* 探测文本必须用**这首歌实际会排的字**。早先固定写 'A字'：英文歌的歌词里没有汉字，
          日文分片从头就没被请求过，于是永远报 heavy/mincho/minchoLt「未就绪」——
@@ -1592,4 +1935,8 @@
   /* 调试用只读出口（tools/pv_stills.cjs 与人工核对构图时用） */
   PV.SHOTS = () => ST.shots || [];
   PV.shotAt = t => shotAt(t);
+  /* 纯逻辑探针：只给测试与工具用，不参与渲染。
+     刻意只暴露**纯函数**（不含 DOM/ctx 依赖的那几个），测试才能真的验到
+     「切分规则」本身，而不是在测试里镜像一份实现（镜像出来的测试永远是对的）。 */
+  PV.__probe = { pickTier, figCamGain, lyricCut, applyCam };
 })();

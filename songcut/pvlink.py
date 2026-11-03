@@ -606,3 +606,29 @@ def doctor(date="", online=False, limit=0):
 def _which(exe):
     import shutil
     return bool(shutil.which(exe))
+
+
+# ── 立绘素材库（2026-11-03 改向：人物穿插不再从录播抠人） ────────────────
+# 实现放 songcut/figart.py，这里只做转发。理由和 pvlink 存在的理由一样：
+# 「素材从哪个目录读」必须只有一处定义（RULES §120），否则 CLI、导演层、
+# 渲染器各写一份路径，换素材目录时必定漏改一处，表现为「找不到图但没人报错」。
+def art_dir():
+    from songcut import figart
+    return figart.art_dir()
+
+
+def art(spec="", kind="bust"):
+    """解析立绘名 → (绝对路径, 参数)。spec 见 figart.resolve 的四种写法。"""
+    from songcut import figart
+    p = figart.resolve(spec, kind=kind)
+    return p, figart.info(p)
+
+
+def art_lib(kind="", min_w=0):
+    from songcut import figart
+    return figart.lib(kind, min_w=min_w)
+
+
+def art_pick(kind="bust", min_w=700):
+    from songcut import figart
+    return figart.pick(kind, min_w=min_w)

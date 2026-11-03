@@ -50,8 +50,12 @@ def pick(shots, n, min_dur=1.2):
     return out
 
 
-def build(sb, n=6, modes=None, lead=2.0, tail=2.5):
+def build(sb, n=6, modes=None, lead=2.0, tail=2.5, splits=0, cams=""):
+    """splits: 前 N 处挂点做「歌词分层」（同一行字一部分在人前、一部分在人后）。
+    cams: 逗号分隔的镜头增益（0=屏幕空间固定，1=跟随镜头），按挂点顺序轮转；
+          空串表示不写这一字段 → 引擎走默认（完全跟随），与旧表逐字相同。"""
     modes = modes or MODES
+    cams_v = [float(x) for x in (cams or "").split(",") if x.strip()] if cams else []
     shots = sorted(sb.get("shots") or [], key=lambda s: s["t0"])
     dur = float((sb.get("meta") or {}).get("dur") or 0) or \
         max((float(s.get("t1") or 0) for s in shots), default=0.0)
@@ -70,8 +74,14 @@ def build(sb, n=6, modes=None, lead=2.0, tail=2.5):
         # 在生成端就截断，比让用户去猜为什么被拦好。
         if dur > 0:
             wd = round(min(wd, dur - w0), 3)
-        spans[li] = {"seq": "s%d" % (k + 1), "mode": modes[k % len(modes)],
-                     "win": [round(w0, 3), max(0.5, wd)]}
+        ent = {"seq": "s%d" % (k + 1), "mode": modes[k % len(modes)],
+               "win": [round(w0, 3), max(0.5, wd)]}
+        # 歌词分层只给自认为「长句」的挂点：字太少时切两段读不出交错，只剩半句。
+        if k < splits:
+            ent["split"] = 0.5
+        if cams_v:
+            ent["cam"] = round(cams_v[k % len(cams_v)], 3)
+        spans[li] = ent
     return spans
 
 
@@ -84,12 +94,16 @@ def main():
     ap.add_argument("--lead", type=float, default=2.0, help="窗口起点比镜头早多少秒（约定 2.0）")
     ap.add_argument("--tail", type=float, default=2.5, help="窗口末尾余量")
     ap.add_argument("--out", default="", help="写到文件（缺省打印）")
+    ap.add_argument("--split", type=int, default=0,
+                    help="前 N 处做歌词分层（同一行字一部分在人前/一部分在人后）")
+    ap.add_argument("--cam", default="",
+                    help="镜头增益轮转，如 \"0,0.35,1\"：0=屏幕空间固定，1=跟随镜头")
     a = ap.parse_args()
 
     with open(a.sb, encoding="utf-8") as f:
         sb = json.load(f)
     modes = [m.strip() for m in a.modes.split(",") if m.strip()]
-    spans = build(sb, a.n, modes, a.lead, a.tail)
+    spans = build(sb, a.n, modes, a.lead, a.tail, a.split, a.cam)
     if not spans:
         raise SystemExit("[spans] 编排稿里没有可挂的句子（kind=line 且 line>=0）")
     txt = json.dumps(spans, ensure_ascii=False, indent=1)

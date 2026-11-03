@@ -208,24 +208,150 @@ def test_structural():
 
 
 def test_caps():
-    print("[mvgraph] 引擎能力缺口如实上报")
+    print("[mvgraph] 图层能力：已落地的照描述走，缺入口的才报")
     tmp = tempfile.mkdtemp(prefix="mvg_")
     try:
         sb = mk_sb()
+        sb["meta"]["live"] = {"s1": mkseq(tmp, "s1", 200, 30)}
+        # 图层语义三件套：同一句拆前后层 + 人物镜头增益
+        sb["shots"][1]["fig"] = {"seq": "s1", "mode": "band", "tOff": 0.0,
+                                 "wDur": 3.0, "layer": "split", "splitAt": 0.45,
+                                 "camGain": 0.4}
         g = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb))
-        for lay in g["layers"]:
-            if lay["type"] == "lyric":
-                lay["extra"]["split"] = {"front": [0], "behind": [1]}
-                break
-        g["checks"] = MG.validate(g, sb)
-        ck("lyric.split_unsupported" in codes(g, "error"),
-           "请求歌词前后分层 → 明确说引擎不支持（不假装做到）")
-        ck(MG.ENGINE_CAPS["lyric_split"] is False, "caps 里如实标 False")
+        ly = [l for l in g["layers"]
+              if l["type"] == "lyric" and l["extra"].get("tier")]
+        ck(len(ly) == 2, "split → 歌词出前后两层", [l["id"] for l in ly])
+        back = [l for l in ly if l["extra"]["tier"] == "behind"]
+        front = [l for l in ly if l["extra"]["tier"] == "front"]
+        foot = [l for l in g["layers"] if l["type"] == "footage"]
+        ck(len(foot) == 1, "人物层照常出")
+        if back and front and foot:
+            ck(back[0]["z"] < foot[0]["z"] < front[0]["z"],
+               "z 序：后段 < 人物 < 前段（这才是「交错」而不是一层盖一层）",
+               [back[0]["z"], foot[0]["z"], front[0]["z"]])
+            ck(front[0]["extra"].get("splitAt") == 0.45, "切分点写进描述")
+            ck(foot[0]["camera_space"] is True
+               and abs(foot[0]["extra"]["camGain"] - 0.4) < 1e-6,
+               "人物镜头增益写进描述")
+        ck("lyric.split_unsupported" not in codes(g, "error"),
+           "引擎已支持分层 → 不再报 unsupported")
 
-        g2 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb))
-        g2["layers"].append(MG._layer("bg3d:0", "bg3d", "blender", 0, 1, 5))
-        g2["checks"] = MG.validate(g2, sb)
-        ck("cap.bg3d" in codes(g2, "warn"), "出现三维层但引擎没入口 → 警告")
+        # 切分点越界必须拦住：0 / 1 会切出空段，画面上是「半句话永远不出现」
+        sb2 = mk_sb()
+        sb2["meta"]["live"] = {"s1": mkseq(tmp, "s1", 200, 30)}
+        sb2["shots"][1]["fig"] = {"seq": "s1", "mode": "band", "tOff": 0.0,
+                                  "wDur": 3.0, "layer": "split", "splitAt": 1.0}
+        g2 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb2))
+        ck("lyric.split_at" in codes(g2, "error"), "splitAt 越界 → error")
+
+        # 人物镜头增益越界
+        sb2["shots"][1]["fig"] = {"seq": "s1", "mode": "band", "tOff": 0.0,
+                                  "wDur": 3.0, "camGain": 1.7}
+        g3 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb2))
+        ck("footage.cam_gain" in codes(g3, "error"), "camGain 越界 → error")
+
+        # bg3d 缺目录：不装 Blender 也必须能报出「这一层没素材」
+        sb3 = mk_sb()
+        sb3["shots"][1]["bg3d"] = {"dir": os.path.join(tmp, "no_such"), "n": 10,
+                                   "fps": 24}
+        g4 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb3))
+        ck("bg3d.dir_missing" in codes(g4, "error"), "三维层目录不存在 → error")
+        ck(any(l["type"] == "bg3d" for l in g4["layers"]), "三维层仍然被描述出来")
+
+        # 帧数不足
+        d = os.path.join(tmp, "b3d")
+        os.makedirs(d, exist_ok=True)
+        for i in range(12):
+            open(os.path.join(d, "%05d.jpg" % i), "wb").close()
+        sb3["shots"][1]["bg3d"] = {"dir": d, "n": 40, "fps": 24, "seq": "b3"}
+        g5 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb3))
+        ck("bg3d.frames_missing" in codes(g5, "error"), "声明 40 帧实际 12 帧 → error")
+        sb3["shots"][1]["bg3d"] = {"dir": d, "n": 12, "fps": 24, "seq": "b3"}
+        g6 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb3))
+        ck("bg3d.frames_missing" not in codes(g6, "error"), "帧数对上 → 不报")
+
+        # 分层后期：背景与人物各一层，不能是一层整帧 post
+        sb4 = mk_sb()
+        sb4["shots"][1]["grade"] = {"bg": "blur(6px) saturate(1.2)", "fig": "none"}
+        g7 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb4))
+        gr = [l for l in g7["layers"] if l["id"].startswith("grade:")]
+        ck(len(gr) == 2 and {l["extra"]["target"] for l in gr} == {"bg", "fig"},
+           "分层后期 → 背景/人物各一层", [l["id"] for l in gr])
+        ck(all(l["blend"] == "layer-group" for l in gr),
+           "分层后期不是整帧 post（blend=layer-group）")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _png(path, w, h, box, alpha=True):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0) if alpha else (200, 40, 40, 255))
+    if alpha:
+        d = ImageDraw.Draw(im)
+        d.rectangle(box, fill=(200, 40, 40, 255))
+    im.save(path)
+    return path
+
+
+def test_art():
+    """立绘层（2026-11-03 改向）：会崩的错很少，会「贴一张方块」的错很多。
+
+    这里锁的都是**不报错但画面废掉**的情形：文件不在（整镜没人）、
+    没有透明区（文字穿不过去、读作贴纸）、尺寸/切点越界（画出空段或溢出）。
+    """
+    print("[mvgraph] 立绘层")
+    tmp = tempfile.mkdtemp(prefix="mvg_art_")
+    try:
+        good = _png(os.path.join(tmp, "art.png"), 400, 600, (120, 40, 280, 600))
+        opaque = _png(os.path.join(tmp, "opaque.png"), 400, 600, None, alpha=False)
+
+        sb = mk_sb()
+        sb["shots"][1]["fig"] = {"layer": "split", "splitAt": 0.62,
+                                 "art": {"src": good, "h": 0.88, "shadow": 0.22}}
+        g = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb))
+        art = [l for l in g["layers"] if l["type"] == "art"]
+        ck(len(art) == 1, "立绘出一层", [l["id"] for l in g["layers"]])
+        if art:
+            ck(art[0]["mask"] == "alpha", "遮罩是 alpha（不是矩形窗）", art[0]["mask"])
+            ck(art[0]["rect"] is None and art[0]["geom"] == "engine",
+               "几何不复算（交给引擎）")
+        ck("art.opaque" not in codes(g, "error"), "带透明区 → 不报 opaque")
+        ck("art.src_missing" not in codes(g, "error"), "文件在 → 不报 src_missing")
+
+        # z 序：立绘与 footage 同格（都是「人」），必须落在歌词两层之间
+        ly = [l for l in g["layers"] if l["type"] == "lyric"]
+        if art and len(ly) == 2:
+            back = [l for l in ly if l["extra"].get("tier") == "behind"]
+            front = [l for l in ly if l["extra"].get("tier") == "front"]
+            if back and front:
+                ck(back[0]["z"] < art[0]["z"] < front[0]["z"],
+                   "z 序：后段 < 立绘 < 前段")
+
+        # 文件不在
+        sb2 = mk_sb()
+        sb2["shots"][1]["fig"] = {"layer": "split",
+                                  "art": {"src": os.path.join(tmp, "nope.png")}}
+        g2 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb2))
+        ck("art.src_missing" in codes(g2, "error"), "文件不存在 → error")
+
+        # 没有透明区：这是「会崩 vs 不崩但难看」里最典型的一种，必须是 error
+        sb3 = mk_sb()
+        sb3["shots"][1]["fig"] = {"layer": "split", "art": {"src": opaque}}
+        g3 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb3))
+        ck("art.opaque" in codes(g3, "error"), "没有透明区 → error（不是 warn）")
+
+        # 尺寸越界
+        sb4 = mk_sb()
+        sb4["shots"][1]["fig"] = {"layer": "split", "art": {"src": good, "h": 3.0}}
+        g4 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb4))
+        ck("art.scale" in codes(g4, "error"), "高度占比越界 → error")
+
+        # 切点越界
+        sb5 = mk_sb()
+        sb5["shots"][1]["fig"] = {"layer": "split", "splitAt": 1.0,
+                                  "art": {"src": good}}
+        g5 = MG.build("1999-01-01", "测试曲", storyboard=write(tmp, sb5))
+        ck("art.split" in codes(g5, "error"), "splitAt 越界 → error")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -262,6 +388,7 @@ def main():
     test_footage_coverage()
     test_structural()
     test_caps()
+    test_art()
     test_summary()
     test_missing_storyboard()
     print("")

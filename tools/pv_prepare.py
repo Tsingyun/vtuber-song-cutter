@@ -71,6 +71,22 @@ def main():
     a.add_argument("--arc", action="store_true",
                    help="风格弧线（按歌词意境 + 曲风能量逐句调制）；缺省关闭，关闭时编排稿与旧版逐字段相同")
     a.add_argument("--reuse", action="store_true", help="复用已有 analysis/timing/storyboard（只补缺的）")
+    # ---- 图层语义（可选；不传时编排稿与旧版逐字段相同）
+    a.add_argument("--bg3d", default="", help="三维场景层：图片序列目录（Blender/DCC 产物）")
+    a.add_argument("--bg3d-fps", type=float, default=24.0)
+    a.add_argument("--bg3d-shots", default="all", help="all 或逗号分隔镜头号")
+    a.add_argument("--bg3d-rect", default="0,0,1,1", help="摆放 x,y,w,h（画面占比）")
+    a.add_argument("--bg3d-alpha", type=float, default=1.0)
+    a.add_argument("--grade-bg", default="", help='背景层组后期，如 "blur(6px) saturate(1.15)"')
+    a.add_argument("--grade-fig", default="", help="人物层滤镜（缺省不处理）")
+    a.add_argument("--grade-shots", default="all")
+    # 立绘（2026-11-03 改向）：人物穿插改用素材库的透明 PNG
+    a.add_argument("--fig-art", default="",
+                   help="立绘：auto / #序号 / 文件名 / 子串（songcut/figart.py）")
+    a.add_argument("--fig-art-shots", default="split")
+    a.add_argument("--fig-art-h", type=float, default=0.0)
+    a.add_argument("--fig-art-x", type=float, default=-2.0)
+    a.add_argument("--fig-art-shadow", type=float, default=-1.0)
     a.add_argument("--ffmpeg", default=_RT["ffmpeg"],
                    help="缺省走 pvlink.runtime（env → config → 内置探测）")
     args = a.parse_args()
@@ -119,6 +135,25 @@ def main():
             cmd += ["--jz", args.jz]
         if args.arc:
             cmd += ["--arc"]
+        # 图层语义透传（不传就不加，编排稿与旧版逐字段相同）
+        if args.bg3d:
+            cmd += ["--bg3d", args.bg3d, "--bg3d-fps", str(args.bg3d_fps),
+                    "--bg3d-shots", args.bg3d_shots, "--bg3d-rect", args.bg3d_rect,
+                    "--bg3d-alpha", str(args.bg3d_alpha)]
+        if args.grade_bg:
+            cmd += ["--grade-bg", args.grade_bg]
+        if args.grade_fig:
+            cmd += ["--grade-fig", args.grade_fig]
+        if args.grade_bg or args.grade_fig:
+            cmd += ["--grade-shots", args.grade_shots]
+        if args.fig_art:
+            cmd += ["--fig-art", args.fig_art, "--fig-art-shots", args.fig_art_shots]
+            if args.fig_art_h > 0:
+                cmd += ["--fig-art-h", str(args.fig_art_h)]
+            if args.fig_art_x > -2:
+                cmd += ["--fig-art-x", str(args.fig_art_x)]
+            if args.fig_art_shadow >= 0:
+                cmd += ["--fig-art-shadow", str(args.fig_art_shadow)]
         steps.append((cmd, "direct"))
 
     for cmd, what in steps:

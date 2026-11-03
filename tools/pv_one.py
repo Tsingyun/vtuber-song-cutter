@@ -172,6 +172,23 @@ def main():
                     help="风格名（B/手书/lettering）；pv_one 只支持 B，A 请走 song_cutter.py")
     ap.add_argument("--jz", default="", help="JIZURA 帧序列的 jz.json（tools/pv_jz.cjs 产出）")
     ap.add_argument("--fig-spans", default="", help="人物挂点表 JSON（键=窗口内句号）")
+    # 图层语义（可选；不传时编排稿与旧版逐字段相同）
+    ap.add_argument("--bg3d", default="", help="三维场景层：图片序列目录（Blender/DCC 产物）")
+    ap.add_argument("--bg3d-fps", type=float, default=0,
+                    help="该序列帧率（0=按 12fps 猜，读不到就报错请显式给）")
+    ap.add_argument("--bg3d-shots", default="all", help="all 或逗号分隔镜头号")
+    ap.add_argument("--bg3d-rect", default="0,0,1,1", help="摆放 x,y,w,h（画面占比）")
+    ap.add_argument("--grade-bg", default="", help='背景层组后期，如 "blur(5px) saturate(1.2)"')
+    ap.add_argument("--grade-fig", default="", help="人物层滤镜（缺省=保留原始画质）")
+    ap.add_argument("--grade-shots", default="all", help="all 或逗号分隔镜头号")
+    # 立绘（2026-11-03 改向）：人物穿插改用素材库的透明 PNG，不再从录播抠人
+    ap.add_argument("--fig-art", default="",
+                    help="立绘：auto / #序号 / 文件名 / 子串（songcut/figart.py）")
+    ap.add_argument("--fig-art-shots", default="split",
+                    help="split（默认）| all | 逗号分隔镜头号")
+    ap.add_argument("--fig-art-h", type=float, default=0.0, help="画布高度占比（0=用默认 0.88）")
+    ap.add_argument("--fig-art-x", type=float, default=-2.0, help="横向中心占比（缺省自动）")
+    ap.add_argument("--fig-art-shadow", type=float, default=-1.0, help="座影不透明度（缺省 0.22）")
     ap.add_argument("--no-arc", action="store_true", help="关掉风格弧线（默认按风格开）")
     ap.add_argument("--dry-run", action="store_true",
                     help="只解析素材来源（切点/源/歌词）并打印，不抽音频不渲染")
@@ -323,6 +340,24 @@ def main():
             cmd += ["--jz", a.jz, "--jz-layer", "behind", "--jz-alpha", "0.40"]
         if a.fig_spans:
             cmd += ["--fig-spans", a.fig_spans]
+        # 图层语义透传：这几项不传就不加，旧编排稿逐字段不变（§3.3/§4.5/§5.3/§5.4）
+        if a.bg3d:
+            cmd += ["--bg3d", a.bg3d, "--bg3d-shots", a.bg3d_shots,
+                    "--bg3d-rect", a.bg3d_rect]
+            if a.bg3d_fps > 0:
+                cmd += ["--bg3d-fps", str(a.bg3d_fps)]
+        if a.grade_bg:
+            cmd += ["--grade-bg", a.grade_bg, "--grade-shots", a.grade_shots]
+        if a.grade_fig:
+            cmd += ["--grade-fig", a.grade_fig, "--grade-shots", a.grade_shots]
+        if a.fig_art:
+            cmd += ["--fig-art", a.fig_art, "--fig-art-shots", a.fig_art_shots]
+            if a.fig_art_h > 0:
+                cmd += ["--fig-art-h", str(a.fig_art_h)]
+            if a.fig_art_x > -2:
+                cmd += ["--fig-art-x", str(a.fig_art_x)]
+            if a.fig_art_shadow >= 0:
+                cmd += ["--fig-art-shadow", str(a.fig_art_shadow)]
         if use_arc:
             cmd += ["--arc"]
         dt, out = run(cmd, quiet=True)
