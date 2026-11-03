@@ -2164,3 +2164,15 @@ python tools/pv_figcomp.py --spec fig_spec.json --jz jz_v4 \
 | **正确做法** | ① 翻译层 `tools/pv_to_z.py`：storyboard + lrc → `engine/timeline.js` 的 `Z.SHOTS`（场景、plan、转场、post 全按我们的 tier/section 决定），产物落在派生目录 `_tmp/mvg/zrun`，`_ref/` 只读；② 出片 `tools/pv_z_render.py`：**逐段串行**单 worker + 断点续渲（`chunk_XX.mp4` 存在即跳过）+ 我们自己的 ffmpeg 拼接混音；③ 素材缺口按上游 demo 的做法显式关掉（`char:null, bg:null`），不要伪造同名文件；④ 「人物压到文字层上」用 `illust` 的 `chars[].front:true`，这是上游的既有能力，不用改它代码；⑤ 长尾镜（>10s 的器乐尾）切 7 秒 `typeCard` 尾卡，别把 28 秒套 `afterimage`（那是给 2 秒残影写的）。 |
 | **判据** | ① `grep` 能指出翻译层与出片工具的位置，且 `zrun/engine/timeline.js` 由脚本生成、非手改；② 抽帧必须同时看到三样：JIZURA 版式层、我们选的立绘、上游的 LUT/bloom/颗粒质感；③ 文档要说清**哪部分是上游画上去的**，不许把上游能力写成我们的；④ 两套引擎的差别要写明（`backfront` ≠ 场景 C），不许用「已支持」含糊过去。 |
 | **适用场景** | 需要上游的画面质感 / 版式部件时；评估「某个上游项目能不能用」时。**不要**把「读过文档、抄了思路」记成「已整合」—— 判据永远是能不能出帧，不是文档里写没写。 |
+
+---
+
+## 124. 接上游 = 用它写的编排稿，不是用它的引擎（2026-11-04）
+
+| 项 | 内容 |
+|---|---|
+| **背景** | §123 把上游接进链路之后，`tools/pv_to_z.py` 自己写了一份简化 `setup`：配色、LOOKS、post、HUD、globalFX 全部手写，相机只搬了 `illust` / `converge` / `typeCard` 三种。用户看完成片说「这次完全交给 Vocaloid-Style MV Pipeline，不采取本地的其他任何内容」—— 一句话点破了：**用了它的引擎，片子还是我们的**。 |
+| **错误表现** | ① 上游八个场景用上三个，`dark` / `glass` / `memory` / `meta` / `night` / `typo` 从未出现在片子里；② 它 `timeline.js` 里四个自定义 fx 工厂（`stars` / `ridge` / `starTrails` / `swarmGlyph`，约 100 行，是整部 demo 的骨架）一个没用；③ JIZURA 的四个 plan 只挂两个，`mono` 从未出现；④ 子串 `ghostA: '#39C6E0', ghostB: '#9BD86A'`（demo 的蓝绿）留在母版里，唱词出现与调色无关的青色重影；⑤ 判定标准是「能出片」——能出，所以一直没被发现。 |
+| **正确做法** | ① 母版 = `_ref/.../template/engine/timeline.js` **原文**，只替换两处：film identity + colour script（九个色值）、shots 段（整段）；② 用标记切段（`// ==== shots` 到 `Z.SHOTS = S;`），不要用正则去猜 body 的边界——母版在 shots 段之前已经声明过 `const S` / `shot`，只截到 INTRO 就会撞成 `Identifier 'S' has already been declared`；③ 每条替换走 `sub1()`：命中数 ≠ 1 直接 `SystemExit`，上游改版时把静默失配变成硬报错；④ 场景选择只在上游已有的五种里挑，判定用上游 `analysis` 的段落能量，不用我们自己的 `tier`；⑤ 演示配色的残留（JIZURA 的 `ghostA/ghostB`、`ambience`）要一并换掉，它们不在 colour script 里，最容易漏。 |
+| **判据** | `diff -u <上游 timeline.js> <zrun/engine/timeline.js>` 的 hunk 应当只有七块，且每一块都能说出理由：文件头、identity+colour script、`END`/`TAIL`/section look、JIZURA ghost 双色、shots 段、`VERTICAL_CFG.full`、HUD `SEC_NAME`。除此之外**每一行都相同**。若 body 里出现我们发明的字段（`SPEC.meta`、自写 `LOOKS`、自写 `HUD`、自写 `globalFX`），即视为没接上。实测（本片）：7 个 hunk / +1125 行 / 337→1351 行，新增全在 shots 段。 |
+| **适用场景** | 任何「把片子交给某个现成渲染器」的场合。**不要**把上游当成一组素材去挑着用 —— 挑着用等于自己写了一遍，还拿不到它真正的样子。 |
