@@ -18,9 +18,18 @@ import sys
 
 import numpy as np
 
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NODE = r"C:/Users/Tsing/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
-FF = r"D:/ffmpeg/bin/ffmpeg.exe"
+FF = _RT["ffmpeg"]
 
 
 def sh(cmd, **kw):
@@ -202,8 +211,9 @@ def main():
     print("[clip] job %.1f KB → %s" % (os.path.getsize(job_p) / 1024.0, job_p))
 
     # ④ 渲染
-    env = dict(os.environ)
-    env["NODE_PATH"] = r"C:/Users/Tsing/.workbuddy/binaries/node/workspace/node_modules"
+    # NODE_PATH / ffmpeg 都走 runtime()：这里以前写死了 workbuddy 的 node_modules
+    # 绝对路径，换台机器或换个 node 版本就静默找不到模块。
+    env = dict(os.environ, NODE_PATH=_RT["node_path"], FFMPEG_BIN=_RT["ffmpeg"])
     p = subprocess.run([NODE, os.path.join(ROOT, "renderer", "render_song.cjs"), "--job", job_p],
                        capture_output=True, env=env)
     tail = (p.stdout or b"").decode("utf-8", "ignore").strip().splitlines()[-6:]

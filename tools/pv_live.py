@@ -113,11 +113,43 @@ def one(span_idx, fig, src, cut_start, out_root, force, geo=None, fps=None):
     return name, ent
 
 
+def check_spans(spans, dur):
+    """挂点表的 win 必须落在成片窗口内。
+
+    为什么必须闸门：LIVE_SPANS 是**上一场片子**的逐句定稿（成片时间）。换一首歌
+    却忘了换表时，抽帧窗口会落在片外 —— 源视频里那个时刻是别的内容，
+    ffmpeg 照样抽得出图、渲染照样出人，只是「她对着另一首歌的口型」。
+    这种错不会报任何异常，只有肉眼看才可能发现，所以在这里拦。
+
+    超出 0.5s 容差即视为表与窗口不匹配（表里的 win 是人工按镜头写的，允许半秒余量）。
+    """
+    if not dur or dur <= 0:
+        return
+    bad = []
+    for idx, fig in sorted((spans or {}).items()):
+        if not isinstance(fig, dict) or not fig.get("win"):
+            continue
+        w0, wd = float(fig["win"][0]), float(fig["win"][1])
+        if w0 < -0.5 or w0 + wd > dur + 0.5:
+            bad.append("  %s（第 %s 句）win=%.2f~%.2f 超出成片 0~%.2f"
+                       % (fig.get("seq", "?"), idx, w0, w0 + wd, dur))
+    if bad:
+        raise SystemExit(
+            "[live] 挂点表与本片窗口不匹配（换歌换了表吗？）：\n" + "\n".join(bad)
+            + "\n  成片 %.2fs；换歌请用 --spans 指定该片的挂点表，或先跑 pv_direct 出编排稿。" % dur)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="", help="录播源；默认读 config.json 的 recording_root + date")
-    ap.add_argument("--date", default="2026-10-27")
-    ap.add_argument("--cut-start", type=float, default=4474.10, help="成片 0s 对应的录播绝对时间")
+    ap.add_argument("--date", default="",
+                    help="直播日期 YYYY-MM-DD；缺省取最新一场 segments（以前写死 2026-10-27，换场静默错）")
+    ap.add_argument("--song", default="", help="歌名（--from-segments 时按它定位切点）")
+    ap.add_argument("--seq", type=int, default=None, help="--from-segments 时的第几首（同名歌用）")
+    ap.add_argument("--from-segments", action="store_true",
+                    help="从歌切侧 segments 取成片窗口起点（= 成片 0 点对应的录播绝对时间）")
+    ap.add_argument("--cut-start", type=float, default=None,
+                    help="成片 0s 对应的录播绝对时间；缺省取 segments 窗口起点")
     ap.add_argument("--out", default=os.path.join(ROOT, "_tmp", "live"))
     ap.add_argument("--only", default="", help="只抽指定段（seq 名，逗号分隔，如 s3,s4）")
     ap.add_argument("--force", action="store_true")
@@ -151,6 +183,41 @@ def main():
          "face": {"x": a.face_x, "y": a.face_y},
          "wide": {"x": a.wide_x, "y": a.wide_y, "w": a.wide_w, "h": a.wide_h}}
     F = {"head": a.head_fps, "body": a.body_fps, "wide": a.wide_fps}
+
+    # ---- 日期与成片窗口：能从歌切产物取就不让手填 ----
+    # 以前 --date / --cut-start 的默认值是 2026-10-27 / 4474.10（那一场的实测值）。
+    # 换一场不传参，抽出来的就是「另一首歌的画面」—— ffmpeg 不报错、渲染也出人，
+    # 只有听口型才发现。所以缺省改为「从 segments 推」，推不出就明确报错。
+    date = a.date
+    if not date:
+        ses = PL.sessions()
+        if not ses:
+            raise SystemExit("[live] 没有可用 segments，请显式 --date（并给 --cut-start）")
+        date = ses[0]["date"]
+        print("[live] 未指定 --date，用最新一场 %s" % date)
+    a.date = date
+
+    seg = None
+    if a.from_segments or a.cut_start is None:
+        if not a.song:
+            raise SystemExit("[live] 缺 --cut-start；要么手填成片 0 点对应的录播绝对秒，"
+                             "要么 --from-segments --song <歌名> 从歌切产物取")
+        try:
+            seg = PL.bundle(date, a.song, a.seq, with_source=not a.src)
+        except PL.PvLinkError as e:
+            raise SystemExit(str(e))
+        if a.cut_start is None:
+            a.cut_start = seg["window"]["start"]
+            print("[live] 切点取自歌切产物：第 %s 首 %.2f → %.2f（%s，%.1fs）"
+                  % (seg["seq"], seg["window"]["start"], seg["window"]["end"],
+                     seg["window"]["source"], seg["window"]["dur"]))
+        a.src = a.src or (seg["source"].get("path") or "")
+
+    # 挂点表 vs 成片窗口：对不上就停下来（换歌忘了换表是静默错）
+    if seg:
+        check_spans(LIVE_SPANS, seg["window"]["dur"])
+        if seg["missing"]:
+            print("[live] ⚠ 素材包有缺口：" + "；".join(seg["missing"]))
 
     src = a.src
     if not src:

@@ -62,9 +62,10 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
                '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
                '.otf': 'font/otf', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
-/* ffmpeg 定位：环境变量优先，其次 PATH，最后项目常用绝对路径 */
+/* ffmpeg 定位：调用方传的环境变量优先（pv_one 用 pvlink.runtime 解析后传进来），
+   其次 PATH。不再留项目绝对路径 —— 换盘/换机就是「找不到 ffmpeg」。 */
 function pickFfmpeg() {
-  const cands = [process.env.FFMPEG_BIN, 'ffmpeg', 'D:/ffmpeg/bin/ffmpeg.exe'].filter(Boolean);
+  const cands = [process.env.FFMPEG_BIN, 'ffmpeg'].filter(Boolean);
   for (const c of cands) {
     try { execFileSync(c, ['-version'], { stdio: 'ignore' }); return c; } catch (e) { /* 继续找 */ }
   }

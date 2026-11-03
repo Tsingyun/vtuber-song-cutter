@@ -15,8 +15,18 @@ import subprocess
 import sys
 
 import numpy as np
+import os
 
-FF = "D:/ffmpeg/bin/ffmpeg.exe"
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
+FF = _RT["ffmpeg"]
 W, H = 160, 90
 
 
@@ -43,7 +53,8 @@ def main():
     ap.add_argument("--koma", type=int, default=0,
                     help="两拍格：每秒几张画（编排稿 meta.koma）。>0 时比较的是「相邻两张画」"
                          "而不是「相邻两帧」—— koma=12 / 60fps 下每 5 帧才有 1 张新画，"
-                         "按相邻帧算会有 80% 的死帧，把明明在动的镜头全部误判成静止。")
+                         # argparse 会对 help 做 % 格式化：字面百分号必须写成 %%
+                         "按相邻帧算会有 80%% 的死帧，把明明在动的镜头全部误判成静止。")
     a = ap.parse_args()
 
     # 抽帧后「相邻帧」不再等于「相邻的两张画」：隔 stride 帧取一张才有意义

@@ -652,7 +652,17 @@ def layout_params(layk, mood, fig, r, nwords, key=None, avoid=None):
     return p
 
 
-def fig_script(mood, r, pack):
+# 指定 mode 时的固定几何（不抽签）。给「轻量挂点表」（只写 mode/seq/win 的那种，
+# tools/pv_spans.py 生成）补齐 fig 用 —— 几何只有这一处真源，表里不再抄一份。
+# 值取的是 fig_script 抽签区间的中位，确定性优先：同一张表两次跑必须逐字段相同。
+FIG_GEOM0 = {
+    "disc": dict(r=182, y=0.365, a=0.94, tone="duo"),
+    "band": dict(h=665, y=0.20, a=0.90, wRatio=0.752, tone="mono"),
+    "slab": dict(h=925, y=0.09, a=0.76, wRatio=0.62, tone="mono"),
+}
+
+
+def fig_script(mood, r, pack, seq_pool=None, mode=None):
     """人物剧本（JIZURA 没有人物层，这一层是我们的加法）。
 
     平涂底上的照片必须像「印刷品里切好的一块」，不像贴纸：
@@ -666,8 +676,22 @@ def fig_script(mood, r, pack):
     modes = {"quiet": [("disc", 6), ("band", 4)],
              "drive": [("band", 6), ("disc", 3)],
              "peak": [("slab", 4), ("band", 4)]}[mood]
+    if mode and mode in FIG_GEOM0:
+        # 挂点表指定了形态：几何取固定值，不抽签（同一张表两次跑必须相同）
+        f = dict(FIG_GEOM0[mode])
+        f.update({"mode": mode, "side": "r", "layer": "avoid", "fixed": True,
+                  "feather": 0, "frame": 2, "motion": 0.9, "ph": 0.0})
+        pool0 = (seq_pool or {}).get("_all") or []
+        f["seq"] = pool0[0] if pool0 else mode
+        return f
     mode = weighted(r, modes)
     side = "r" if r.random() < 0.60 else "l"
+    # 序列名不能写死 head/body：pv_live 按挂点表抽出来的序列叫 s1..s6，
+    # 写死的话随机挂上的每一镜都 seq 不存在，引擎取不到帧 → 人物全空且不报错。
+    # 由调用方按「序列的实际宽高比」分类后传进来（几何是唯一判据，名字不是）。
+    kind = "head" if mode == "disc" else "body"
+    pool = (seq_pool or {}).get(kind) or (seq_pool or {}).get("_all") or []
+    seq = pool[int(r.integers(0, len(pool)))] if pool else kind
     fig = {
         "mode": mode, "side": side,
         "tone": "duo" if mode == "disc" else "mono",
@@ -675,7 +699,7 @@ def fig_script(mood, r, pack):
         "ph": round(r.random(), 3),
         "layer": "avoid",
         "fixed": True,
-        "seq": "head" if mode == "disc" else "body",
+        "seq": seq,
         "feather": 0,
         "frame": 2,
     }
@@ -1242,6 +1266,13 @@ def _fig_from_spans(i, w0=0.0):
     """
     f = dict(_FIG_SPANS[i])
     start, wdur = f.pop("win")
+    # 轻量表只写 mode/seq/win（tools/pv_spans.py 的产物）。几何不能靠表里再抄一份，
+    # 用 fig_script 的固定几何补齐 —— 不补就 KeyError（fig_reserve 直接读 fig["r"]，
+    # 实测第一句 disc 就崩）。完整表（dawn 那种逐句定稿）字段齐全，这里不动它。
+    if not any(k in f for k in ("r", "h", "w", "wf", "hf")):
+        base = fig_script("drive", None, "noir", None, mode=f.get("mode") or "disc")
+        for k, v2 in base.items():
+            f.setdefault(k, v2)          # 表里已有的字段（seq/mode）不覆盖
     f["tOff"] = round(w0 - start, 3)
     f["wDur"] = round(wdur, 3)
     return f
@@ -2141,6 +2172,49 @@ def main():
         print("[fig-spans] %s（%d 处，抽卡路径按表挂真实序列）"
               % (a.fig_spans, len(_FIG_SPANS)))
 
+    # ---- 有没有可用的人物序列（决定要不要挂 fig / 版面要不要让位）
+    # 判据是「live.json 里真有 n>0 的序列」，不是「传了 --live-json」：
+    # 抽了 0 帧的残件目录同样取不到图，按有人排版就是白让一块空。
+    _has_live = False
+    _seq_kind = {"head": [], "body": [], "wide": [], "_all": []}
+    # --live（写进 meta.live，引擎靠它装载序列）与 --live-json（抽卡路径的序列来源）
+    # 历史上是两个参数，各自只做了一半：只给 --live 时 fig 是占位名、只给 --live-json
+    # 时 meta.live 是空的 —— 后者看起来「有人」（fig 在），实际引擎一帧都装不到。
+    # 它们是同一份文件的两种用途，这里统一成一个来源。
+    _live_path = getattr(a, "live_json", "") or getattr(a, "live", "")
+    if _live_path and os.path.isfile(_live_path):
+        try:
+            _lj = json.load(open(_live_path, encoding="utf-8"))
+            for _k, _v in _lj.items():
+                if _k in ("face", "cut_start") or not isinstance(_v, dict):
+                    continue
+                if not (_v.get("dir") and int(_v.get("n") or 0) > 0):
+                    continue
+                _has_live = True
+                # 序列按**实际宽高比**归类：head≈1:1、body≈3:4、wide≈16:9。
+                # 名字不可靠（pv_live 按挂点表命名 s1..s6），几何可靠。
+                _w, _h = float(_v.get("w") or 0), float(_v.get("h") or 0)
+                _ar = (_w / _h) if (_w and _h) else 1.0
+                _kk = "wide" if _ar >= 1.4 else ("head" if _ar >= 0.88 else "body")
+                _seq_kind[_kk].append(_k)
+                _seq_kind["_all"].append(_k)
+        except (ValueError, OSError):
+            _has_live = False
+    if not _has_live:
+        print("[fig] 没有可用人物序列 → 本片不挂人物、版面全宽")
+    else:
+        print("[fig] 序列：head %s / body %s / wide %s"
+              % (_seq_kind["head"] or "-", _seq_kind["body"] or "-", _seq_kind["wide"] or "-"))
+    # 分段序列（pv_live 按挂点表抽出来的 s1..sN）**只允许按表挂**：
+    # 随机挂出来的 fig 没有 tOff，引擎按成片时间直接索引，会取到「另一句的画面」，
+    # 而且 clamp 之后画面里照样有人 —— 只能靠肉眼看口型才发现。单序列（旧式全片
+    # head/body）没有这个问题，保持随机挂。
+    _multiseq = len(_seq_kind["_all"]) > 1
+    if _multiseq and not _FIG_SPANS:
+        print("[fig] ⚠ 检测到 %d 条分段序列，但没有 --fig-spans 挂点表 → 不随机挂人"
+              "（随机挂会取到错位的画面）。用 tools/pv_spans.py 从编排稿生成表。"
+              % len(_seq_kind["_all"]))
+
     tdoc = json.load(open(a.timing, encoding="utf-8"))
     ana = json.load(open(a.analysis, encoding="utf-8"))
     total = float(ana["dur"])
@@ -2295,13 +2369,19 @@ def main():
         key = key_index(words, kw)
 
         # ---- 人物：先决定有没有人，再决定版面（版面必须为人让位）
+        # 没有人物序列时**一律不挂 fig**。画框会把版心压到 0.42 宽并给一个不存在的人
+        # 留出一块空白（实测 t=29.3 整块字挤在左上、右侧空一半）。dawn 路径早就有这条
+        # 判据，抽卡路径一直漏着 —— 于是「不传 --live-json 的纯视觉片」表面上没人，
+        # 版式却全按有人排，谁也看不出问题出在哪。
         fig = None
-        if _FIG_SPANS and i in _FIG_SPANS:
+        if not _has_live:
+            pass
+        elif _FIG_SPANS and i in _FIG_SPANS:
             # 给了挂点表就**按表来**：哪一句有人、什么形态、用哪条序列，全部由表定，
             # 不再抽签。抽签只负责「表里没写的那几句有没有人」。
             fig = _fig_from_spans(i, w0)
-        elif r.random() < m["fig"]:
-            fig = fig_script(mood, r, pack)
+        elif r.random() < m["fig"] and not _multiseq:
+            fig = fig_script(mood, r, pack, _seq_kind)
 
         # ---- 版面：语气池 → 形态过滤 → 三重加权抽卡（P0-2）
         pool = [(k, style_layout_w(k, w)) for k, w in VOICE[mood] if FIT[k](nw, n, cjk)]
@@ -2615,8 +2695,8 @@ def main():
 
     # ---- 直播序列
     live = None
-    if a.live and os.path.exists(a.live):
-        lj = json.load(open(a.live, encoding="utf-8"))
+    if _live_path and os.path.exists(_live_path):
+        lj = json.load(open(_live_path, encoding="utf-8"))
         live = {}
         for k, _v in lj.items():
             # 序列名由 live.json 决定（s1..s6），写死三档会一条都装不进去

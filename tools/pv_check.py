@@ -22,8 +22,17 @@ import os
 import subprocess
 import sys
 
-FFMPEG = "D:/ffmpeg/bin/ffmpeg.exe"
-FFPROBE = "D:/ffmpeg/bin/ffprobe.exe"
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
+FFMPEG = _RT["ffmpeg"]
+FFPROBE = _RT["ffprobe"]
 
 
 def probe(mp4):

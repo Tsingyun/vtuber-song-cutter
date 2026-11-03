@@ -34,6 +34,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from songcut import pvlink as PL          # noqa: E402
+from songcut import mvgraph as MG         # noqa: E402  统一时间轴 + 图层描述
 from songcut import style as STYLE_SRC    # noqa: E402
 
 
@@ -207,6 +208,74 @@ def cmd_style(a):
     return 0
 
 
+def cmd_graph(a):
+    """统一时间轴 + 统一图层描述（songcut.mvgraph 的 CLI）。
+
+    只读：从已存在的编排稿派生场景图，不重排镜头、不改窗口。
+    ``--check`` 只看校验结果（出片前的闸门）；``--out`` 落盘给后续工具消费。
+    """
+    try:
+        g = MG.build(a.date, a.song, a.storyboard, a.live, a.seq, fps=a.fps)
+    except MG.MvGraphError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    if a.out:
+        d = os.path.dirname(os.path.abspath(a.out))
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with io.open(a.out, "w", encoding="utf-8") as f:
+            f.write(json.dumps(g, ensure_ascii=False, indent=1))
+    if a.json:
+        _dump(g)
+        return 0 if g["ok"] else 3
+
+    s = MG.summary(g)
+    pr = g["project"]
+    print("《%s》%s ｜ %.2fs / %d 帧 @%gfps ｜ 窗口 %s"
+          % (pr.get("song") or "?", pr.get("date"),
+             s["dur"], s["frames"], g["timeline"]["fps"],
+             ("%.2f→%.2f（%s）" % (pr["window"]["start"], pr["window"]["end"],
+                                   pr["window"]["source"])) if pr.get("window") else "未知"))
+    by = s["by_type"]
+    print("图层 %d ｜ %s" % (s["layers"], " / ".join(
+        "%s %d" % (k, v["n"]) for k, v in sorted(by.items(), key=lambda kv: -kv[1]["n"]))))
+    print("人物覆盖 %.1f%% 时长 ｜ 歌词覆盖 %.1f%%" % (s["footage_pct"], s["lyric_pct"]))
+    if a.layers:
+        print("\n%-16s %-7s %-24s %-13s %s" % ("id", "type", "name", "时间", "z"))
+        for lay in g["layers"]:
+            print("%-16s %-7s %-24s %6.2f→%-6.2f %3d"
+                  % (lay["id"], lay["type"], (lay["name"] or "")[:24],
+                     lay["t0"], lay["t1"], lay["z"]))
+    print("")
+    for c in g["checks"]:
+        mark = {"error": "✗", "warn": "!", "info": "·"}[c["level"]]
+        print("%s [%s] %s" % (mark, c["code"], c["msg"]))
+    if a.out:
+        print("\n→ %s" % os.path.abspath(a.out))
+    return 0 if g["ok"] else 3
+
+
+def cmd_check(a):
+    """出片闸门：只看 error（有 error 即非零退出），供 CI/脚本调用。"""
+    try:
+        g = MG.build(a.date, a.song, a.storyboard, a.live, a.seq, fps=a.fps)
+    except MG.MvGraphError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    errs = [c for c in g["checks"] if c["level"] == "error"]
+    warns = [c for c in g["checks"] if c["level"] == "warn"]
+    for c in errs:
+        print("✗ [%s] %s" % (c["code"], c["msg"]))
+    if a.verbose:
+        for c in warns:
+            print("! [%s] %s" % (c["code"], c["msg"]))
+    if errs:
+        print("\n%d 个错误 / %d 个警告" % (len(errs), len(warns)))
+        return 3
+    print("✓ 场景图一致（%d 层，%d 个警告）" % (len(g["layers"]), len(warns)))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="歌切产物 → 文字 PV 的接入层")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -262,6 +331,28 @@ def main():
     p = sub.add_parser("style", help="各场素材的 live/jz 就绪情况")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_style)
+
+    p = sub.add_parser("graph", help="统一时间轴 + 图层描述（MV 场景图）")
+    p.add_argument("--date", required=True)
+    p.add_argument("--song", default="")
+    p.add_argument("--seq", type=int, default=None)
+    p.add_argument("--storyboard", default="", help="编排稿路径（缺省按 cuts/<日期>/<歌名>/_work 找）")
+    p.add_argument("--live", default="", help="live.json（缺省用编排稿内嵌的 meta.live）")
+    p.add_argument("--fps", type=float, default=None, help="覆盖输出帧率（缺省用编排稿）")
+    p.add_argument("--out", default="", help="把场景图写成 JSON")
+    p.add_argument("--layers", action="store_true", help="逐层打印")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_graph)
+
+    p = sub.add_parser("check", help="出片闸门：场景图有 error 即失败")
+    p.add_argument("--date", required=True)
+    p.add_argument("--song", default="")
+    p.add_argument("--seq", type=int, default=None)
+    p.add_argument("--storyboard", default="")
+    p.add_argument("--live", default="")
+    p.add_argument("--fps", type=float, default=None)
+    p.add_argument("--verbose", action="store_true", help="连警告一起打印")
+    p.set_defaults(fn=cmd_check)
 
     a = ap.parse_args()
     try:

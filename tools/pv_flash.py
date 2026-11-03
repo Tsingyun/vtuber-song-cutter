@@ -25,8 +25,18 @@ import subprocess
 import sys
 
 import numpy as np
+import os
 
-FF = "D:/ffmpeg/bin/ffmpeg.exe"
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
+FF = _RT["ffmpeg"]
 W, H = 320, 180
 
 

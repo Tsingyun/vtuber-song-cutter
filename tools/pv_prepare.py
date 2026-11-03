@@ -25,6 +25,15 @@ import subprocess
 import sys
 import time
 
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
@@ -55,11 +64,15 @@ def main():
     a.add_argument("--date", default="")
     a.add_argument("--source", default="")
     a.add_argument("--live", default="", help="prepare_live.py 的 live.json（缺省=不用人物层）")
+    a.add_argument("--fig-spans", default="",
+                   help="人物挂点表（tools/pv_spans.py 从编排稿生成）；"
+                        "分段序列必须给，否则随机挂图会取到错位画面")
     a.add_argument("--jz", default="", help="tools/pv_jz.cjs 渲出的 jz.json（缺省=不用 JIZURA 层）")
     a.add_argument("--arc", action="store_true",
                    help="风格弧线（按歌词意境 + 曲风能量逐句调制）；缺省关闭，关闭时编排稿与旧版逐字段相同")
     a.add_argument("--reuse", action="store_true", help="复用已有 analysis/timing/storyboard（只补缺的）")
-    a.add_argument("--ffmpeg", default=os.environ.get("SONGCUT_FFMPEG") or "D:/ffmpeg/bin/ffmpeg.exe")
+    a.add_argument("--ffmpeg", default=_RT["ffmpeg"],
+                   help="缺省走 pvlink.runtime（env → config → 内置探测）")
     args = a.parse_args()
 
     out = os.path.abspath(args.outdir)
@@ -74,7 +87,7 @@ def main():
 
     dur = args.dur
     if dur <= 0:
-        r = subprocess.run([os.environ.get("SONGCUT_FFPROBE") or "D:/ffmpeg/bin/ffprobe.exe",
+        r = subprocess.run([_RT["ffprobe"],
                             "-v", "error", "-show_entries", "format=duration",
                             "-of", "csv=p=0", args.audio],
                            capture_output=True, text=True)
@@ -100,6 +113,8 @@ def main():
                "--date", args.date, "--source", args.source, "--lrc", args.lrc]
         if args.live:
             cmd += ["--live", args.live]
+        if args.fig_spans:
+            cmd += ["--fig-spans", args.fig_spans]
         if args.jz:
             cmd += ["--jz", args.jz]
         if args.arc:

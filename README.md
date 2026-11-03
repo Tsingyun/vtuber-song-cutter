@@ -352,6 +352,8 @@ python -m songcut.qc --mp4 成片.mp4 --src-audio 录播.mp4 --src-ss 5814
 - [`docs/transcript-pipeline.md`](docs/transcript-pipeline.md) —— 转写接入设计（上游优先）
 - [`docs/integration-pvlink.md`](docs/integration-pvlink.md) —— 歌切产物与文字 PV 的接入层
   （`songcut/pvlink.py`：切点/原唱/歌词/录播源/画框几何的唯一读口）
+- [`docs/mv-graph.md`](docs/mv-graph.md) —— 统一时间轴与统一图层描述
+  （`songcut/mvgraph.py`：八类图层、帧级时间基准、静默错校验；`pvlink.py graph|check`）
 
 ## 许可
 

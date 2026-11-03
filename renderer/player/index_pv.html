@@ -176,7 +176,9 @@ window.__frame = async (i, opts) => {
     const pend = PV.ensureWindow ? PV.ensureWindow(qt) : null;
     if (pend) {
       await pend; FIG_SHOTS++;
-      if (FIG_SHOTS % 6 === 1) console.log('[pv] 人物装载第 %d 镜 @%.1fs', FIG_SHOTS, qt);
+      // console.log 只认 %d/%s/%f，不认 %.1f —— 写 %.1f 会把格式串原样打出来、
+      // 参数追加在后面（实测 "人物装载第 %d 镜 @%.1fs 1 10.25"），没法读。
+      if (FIG_SHOTS % 6 === 1) console.log('[pv] 人物装载第 %d 镜 @%ss', FIG_SHOTS, qt.toFixed(1));
     }
   }
   applyScale();

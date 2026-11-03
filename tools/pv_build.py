@@ -22,11 +22,20 @@ import os
 import subprocess
 import sys
 
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 NODE = os.environ.get("SONGCUT_NODE") or r"C:/Users/Tsing/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
 NODE_PATH = os.environ.get("SONGCUT_NODE_PATH") or r"C:/Users/Tsing/.workbuddy/binaries/node/workspace/node_modules"
-FFMPEG = os.environ.get("SONGCUT_FFMPEG") or "D:/ffmpeg/bin/ffmpeg.exe"
+FFMPEG = _RT["ffmpeg"]
 
 
 def ap(**kw):
@@ -120,7 +129,8 @@ def main():
     json.dump(job, open(job_path, "w", encoding="utf-8"), ensure_ascii=False)
     print("[job] %s  dur=%.2fs  res=%s  pages=%d  fps=%d" % (job_path, dur, a.res, pages, a.fps))
 
-    env = dict(os.environ, NODE_PATH=NODE_PATH)
+    # FFMPEG_BIN 显式传：render_song.cjs 不再内置 D:/ffmpeg 绝对路径
+    env = dict(os.environ, NODE_PATH=NODE_PATH, FFMPEG_BIN=FFMPEG)
     run([NODE, os.path.join(ROOT, "renderer/render_song.cjs"),
          "--job", job_path, "--encoder", "ffmpeg", "--jq", str(a.jq)], env=env)
 

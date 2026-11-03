@@ -26,6 +26,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from songcut import config as CFG  # noqa: E402
 
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
 PLAYER_DIR = os.path.join(ROOT, "renderer", "player")
 RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
 
@@ -53,7 +62,7 @@ def run(cmd, **kw):
 
 
 def pick_ffmpeg():
-    for c in (os.environ.get("FFMPEG_BIN"), "ffmpeg", "D:/ffmpeg/bin/ffmpeg.exe"):
+    for c in (os.environ.get("FFMPEG_BIN"), _RT["ffmpeg"], "ffmpeg"):
         if not c:
             continue
         try:
@@ -121,7 +130,7 @@ def main():
         jf = os.path.join(tmp, "job.json")
         io.open(jf, "w", encoding="utf-8").write(json.dumps(job, ensure_ascii=False))
 
-        env = dict(os.environ)
+        env = dict(os.environ, FFMPEG_BIN=_RT["ffmpeg"])
         env["NODE_PATH"] = CFG.node_modules_path() or env.get("NODE_PATH", "")
         r = subprocess.run([node_bin, RENDER_CJS, "--job", jf],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)

@@ -28,9 +28,16 @@ _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
 from songcut import ctc_align as CA
 
-FF = (os.environ.get("SONGCUT_FFMPEG")
-      or os.environ.get("FFMPEG")
-      or r"D:/ffmpeg/bin/ffmpeg.exe")
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+# （_ROOT 已在上面由 _HERE 推出，这里只补 import）
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
+FF = _RT["ffmpeg"]
 WIN = 12.0
 HOP = 11.0        # 1s 重叠，避免边界切字
 
@@ -96,7 +103,7 @@ def asr_words(video, t0, t1, tmp):
 def main():
     video, cs, ce, lrc_in, lrc_out = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), sys.argv[4], sys.argv[5]
     trim = "--trim-credits" in sys.argv
-    tmp = r"D:/岁己歌切/_tmp/axisbuild"
+    tmp = os.path.join(_ROOT, "_tmp", "axisbuild")
     os.makedirs(tmp, exist_ok=True)
 
     rows = parse_lrc(lrc_in)

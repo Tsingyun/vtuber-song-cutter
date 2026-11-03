@@ -2128,3 +2128,15 @@ python tools/pv_figcomp.py --spec fig_spec.json --jz jz_v4 \
 | **正确做法** | ① 新增 `songcut/pvlink.py` 作为唯一读口：`bundle(日期, 歌名)` 一次给全窗口/原唱/歌词/封面/源/素材就绪度，且 `window.source`（`cut_abs`/`rough`）与 `lrc.source`（`cache`/`online`/`none`）**必须显式**；② `pv_one --from-segments` 直接吃 `segments`，不再手抄；③ 歌词按 `fetch_title`（演唱版本）查 `_media_cache`，`lrc_drop_lines` 按**非空行**序号剔，没命中的行号进 `drop_missing` 并把 `ready` 打 false；④ 录播源统一走 `song_cutter.find_video`（排除 `.part`、多场取最长、回退根目录）；⑤ 运行时与画框几何各只留一份（`runtime()` / `GEOMETRY_PRESETS`）。 |
 | **判据** | ① `grep -rn "sorted(os.listdir" tools/` 只允许出现在与「取样/诊断」无关的地方，源解析不得再出现；② 新写的工具里不许出现 `D:/ffmpeg/bin` 字面（存量 17 处逐步下降，不许新增）；③ `python tools/pvlink.py show --date X --song Y` 的 `missing` 必须能解释「为什么这片不能起跑」；④ 任何「工具链多处读同一份配置」的新常量，先 `grep` 它在几处出现过（§94 的老坑）。 |
 | **适用场景** | 新增 PV 侧工具 / 改切点来源 / 改人物画框 / 换机器换盘 / 只想「看某天切了哪几首」时。**不要**为了省事在 PV 侧复制切点判定或认歌逻辑 —— 那会造出第二套真相。 |
+
+---
+
+## 121. 图层与时间的关系必须能一次读全：`songcut/mvgraph.py` 是唯一出口（2026-11-03）
+
+| 项 | 内容 |
+|---|---|
+| **背景** | 人物早就是逐帧合成的图层（`pv_engine.drawFigure` 按 `shot.fig` 画），不是最后贴片。但「这一帧该画谁」的事实散在三处：`storyboard.shots[].fig`（含 tOff）、`live.json`（序列目录/帧数/帧率）、命令行的 `--dur/--fps`。三者不一致时**没有任何一处会报错**。 |
+| **错误表现** | ① 序列帧数不够覆盖镜头 → `getFrame` clamp 到末帧 → 人在画面上但**定格不动**；② `fig.seq` 在 live.json 里不存在 → `getFrame` 返回 null → 那一镜**静默没人**，编排稿上却写着有人；③ `tOff` 少加窗口起点 → 整段落在序列外，同样静默没人。三种都不抛异常。 |
+| **正确做法** | ① 新增 `songcut/mvgraph.py`：从 segments + storyboard + live.json 派生 `graph{project, timeline, layers[], checks[]}`，**只读，不接管渲染**；② 时间基准只有 `frame_of/time_of`（四舍五入，与编码器取整一致），层自带 `frame0/frame1`；③ 人物帧覆盖按**序列自己的 fps** 换算（素材可能 24/10/5fps），越界即报 `footage.out_of_seq` 并区分头缺/尾缺；④ 八类图层类型固定为 `LAYER_TYPES`，引擎做不到的写在 `ENGINE_CAPS`（`lyric_split` / `bg3d` / `fg` / `per_layer_post` / `footage_camera_space`）；⑤ `tools/pvlink.py graph|check` 是 CLI，`check` 有 error 即 rc=3。 |
+| **判据** | ① 出片前必须能跑通 `pvlink.py check`，且 error 为 0；② 新图层类型必须先加进 `LAYER_TYPES` 并在 `ENGINE_CAPS` 标出引擎现状，**不许**在图里描述一个渲染器画得出的幻觉；③ `mvgraph` 里**不许**复算引擎几何（`rect` 一律 `None` + `geom="engine"`）—— 复算就是第二份真相（§94/§120 同源）；④ 描述里出现 `bg3d`/`fg` 层而 `caps` 为 False 时，允许出片但必须报警告。 |
+| **适用场景** | 加图层、换渲染器、排查「这段为什么没人 / 人为什么不动」、出片前验收。**不要**为了加一个视觉效果去改 `pv_engine` 的绘制顺序 —— 先在 `mvgraph` 里把它描述出来，再看引擎缺哪个入口。 |

@@ -37,6 +37,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -113,6 +114,29 @@ def lrc_from_segments(bundle, work):
     return p, {}
 
 
+def resolve_concept(a):
+    """``--concept auto``：意象表写的就是本片这首歌才启用，否则自动关。
+
+    为什么要有 auto：意象映射表是**逐句定稿**（Innocence 是 47 句，逐句指定意象与版面），
+    拿它去跑别的歌必然 `映射 47 句 ≠ 窗口内 N 句`。报错本身是对的，但把它设成默认值
+    的结果是「通用路径一进来就死」—— 换歌必须记得加 `--concept ""`，忘了就是一次失败。
+    auto 保留原来「跑 Innocence 不带参就是晨光绘本」的行为，其余歌自动走抽卡路径。
+    """
+    if a.concept != "auto":
+        return a.concept, ""
+    p = a.imagery or os.path.join(ROOT, "docs", "innocence-v2-imagery-map.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            m = json.load(f)
+    except (OSError, ValueError):
+        return "", "意象表读不到（%s），按不启用处理" % os.path.basename(p)
+    want = ((m.get("_meta") or {}).get("song") or "").strip()
+    norm = lambda s: re.sub(r"[\s\W_]+", "", (s or "").lower())  # noqa: E731
+    if want and norm(want) == norm(a.song):
+        return "dawn", "意象表命中《%s》" % want
+    return "", "意象表是《%s》的逐句定稿，与本片《%s》不符" % (want or "?", a.song)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True, help="直播日期 YYYY-MM-DD（用于定位录播与命名）")
@@ -128,7 +152,8 @@ def main():
     ap.add_argument("--online", action="store_true",
                     help="--from-segments 时，歌词缓存未命中才联网补一份")
     ap.add_argument("--lrc", default="", help="LRC 路径（缺省联网取）")
-    ap.add_argument("--concept", default="dawn", choices=["", "dawn"])
+    ap.add_argument("--concept", default="auto", choices=["", "auto", "dawn"],
+                    help="auto=意象表写的就是本片这首歌才启用（缺省）；dawn=强制；空=关")
     ap.add_argument("--imagery", default="", help="意象映射 JSON（--concept dawn 用）")
     ap.add_argument("--live-json", default="", help="prepare_live.py 的 live.json（人物层）")
     ap.add_argument("--seed", type=int, default=0)
@@ -163,17 +188,32 @@ def main():
             raise SystemExit(str(e))
         a.song = a.song or seg["title"]
         a.artist = a.artist or seg["artist"]
-        a.start, a.end = seg["window"]["start"], seg["window"]["end"]
+        # 只在**没给**的时候才用 segments 的窗口：显式 --start/--end 是「试片段」
+        # 或「人工复核窗口」，无条件覆盖会让 from-segments 没法出短样片，
+        # 想看 40s 就必须先渲染 269s。
+        if a.start is None:
+            a.start = seg["window"]["start"]
+        if a.end is None:
+            a.end = seg["window"]["end"]
         a.src = a.src or (seg["source"].get("path") or "")
         log("歌切产物：%s 第 %s 首（%s）｜窗口 %.2f → %.2f（%s，%.1fs）"
             % (os.path.basename(seg["segments"] or "?"), seg["seq"], seg["match"],
                a.start, a.end, seg["window"]["source"], seg["window"]["dur"]))
+        if (a.start, a.end) != (seg["window"]["start"], seg["window"]["end"]):
+            log("  ↳ 用显式窗口 %.2f → %.2f（覆盖 segments 的 %.2f → %.2f；"
+                "只出这一段，歌词/时间轴按此窗口重算）"
+                % (a.start, a.end, seg["window"]["start"], seg["window"]["end"]))
         for m in seg["missing"]:
             log("  ⚠ " + m)
     if not a.song:
         raise SystemExit("缺 --song（或加 --from-segments 从歌切产物取）")
     if a.start is None or a.end is None:
         raise SystemExit("缺 --start/--end（或加 --from-segments 从歌切产物取）")
+
+    # ---- 意象驱动：只有映射表对应的那首歌才开（否则自动走抽卡，不再一进来就死）----
+    a.concept, _why = resolve_concept(a)
+    if _why:
+        log("意象驱动 %s（%s）" % ("开" if a.concept else "关", _why))
 
     from songcut import style as STYLE_SRC
     try:
@@ -333,7 +373,9 @@ def main():
         1920 * a.res, 1080 * a.res, a.fps, pages, "%.1f Mbps" % (bitrate / 1e6)))
     dt, out = run([NODE, os.path.join(ROOT, "renderer/render_song.cjs"), "--job", jobp,
                    "--encoder", "ffmpeg", "--jq", str(a.jq)],
-                  env=dict(os.environ, NODE_PATH=NODE_PATH))
+                  # FFMPEG_BIN 显式传下去：render_song.cjs 不再内置 D:/ffmpeg 绝对路径，
+                  # 而 PATH 里不一定有 ffmpeg —— 不传就是「找不到 ffmpeg」。
+                  env=dict(os.environ, NODE_PATH=NODE_PATH, FFMPEG_BIN=FFMPEG))
     stages["render"] = round(dt, 1)
     for line in out.strip().splitlines()[-6:]:
         log("  " + line)
@@ -421,6 +463,27 @@ def main():
     log("耗时：%s｜合计 %.1fs" % (
         "，".join("%s %.0fs" % (k, v2) for k, v2 in stages.items()), man["total_s"]))
     log("manifest → %s" % mp)
+
+    # ---- ⑩ 场景图：随片落盘（统一时间轴 + 图层描述 + 静默错清单）
+    # 出片之后最常被问的是「这一段为什么没人 / 人为什么不动」。把镜头、人物序列、
+    # 帧覆盖算一遍存下来，比事后拿成片去猜快得多。校验失败不阻断出片（成片已经在了），
+    # 但必须显式打出来 —— 不能让它只躺在 json 里。
+    try:
+        from songcut import mvgraph as MG
+        g = MG.build(a.date, a.song, storyboard=sb,
+                     live_json=(a.live_json or ""), seq=a.seq)
+        gp = os.path.join(outdir, "graph.json")
+        with open(gp, "w", encoding="utf-8") as f:
+            json.dump(g, f, ensure_ascii=False, indent=1)
+        _s = MG.summary(g)
+        log("场景图：%d 层｜人物 %.1f%% 时长｜%d error / %d warn → %s"
+            % (_s["layers"], _s["footage_pct"], _s["errors"], _s["warns"],
+               os.path.basename(gp)))
+        for c in g["checks"]:
+            if c["level"] == "error":
+                log("  ✗ [%s] %s" % (c["code"], c["msg"]))
+    except Exception as e:              # 场景图是旁证，不该把成片交付拖垮
+        log("场景图跳过：%s" % e)
     return 0 if ok else 3
 
 

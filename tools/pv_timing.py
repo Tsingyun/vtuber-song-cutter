@@ -26,6 +26,15 @@ import sys
 
 import numpy as np
 
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
 SR = 24000
 HOP = 240                      # 100 fps
 V_LO, V_HI = 250.0, 4000.0     # 人声频段
@@ -139,7 +148,7 @@ def main():
     ap.add_argument("--audio", required=True)
     ap.add_argument("--analysis", default="", help="tools/analyze_music.py 的产物（取 voiced 掩码）")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--ffmpeg", default="D:/ffmpeg/bin/ffmpeg.exe")
+    ap.add_argument("--ffmpeg", default=_RT["ffmpeg"])
     ap.add_argument("--lead", type=float, default=0.0, help="整体提前量（秒），正数=歌词更早出现")
     ap.add_argument("--snap", type=float, default=0.18, help="边界向起音吸附的最大位移")
     a = ap.parse_args()

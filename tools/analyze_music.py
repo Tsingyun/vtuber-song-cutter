@@ -25,6 +25,15 @@ import sys
 
 import numpy as np
 
+# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
+# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from songcut import pvlink as _PVRT  # noqa: E402
+_RT = _PVRT.runtime()
+
+
 
 def decode(ffmpeg, path, sr):
     cmd = [ffmpeg, "-v", "error", "-i", path, "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"]
@@ -65,7 +74,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--fps", type=int, default=60)
     ap.add_argument("--nb", type=int, default=48, help="对数频段数量")
-    ap.add_argument("--ffmpeg", default="D:/ffmpeg/bin/ffmpeg.exe")
+    ap.add_argument("--ffmpeg", default=_RT["ffmpeg"])
     ap.add_argument("--bpm", type=float, default=0.0, help="人工指定 BPM（0=自动检测）")
     args = ap.parse_args()
 
