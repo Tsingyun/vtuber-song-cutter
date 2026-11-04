@@ -2176,3 +2176,15 @@ python tools/pv_figcomp.py --spec fig_spec.json --jz jz_v4 \
 | **正确做法** | ① 母版 = `_ref/.../template/engine/timeline.js` **原文**，只替换两处：film identity + colour script（九个色值）、shots 段（整段）；② 用标记切段（`// ==== shots` 到 `Z.SHOTS = S;`），不要用正则去猜 body 的边界——母版在 shots 段之前已经声明过 `const S` / `shot`，只截到 INTRO 就会撞成 `Identifier 'S' has already been declared`；③ 每条替换走 `sub1()`：命中数 ≠ 1 直接 `SystemExit`，上游改版时把静默失配变成硬报错；④ 场景选择只在上游已有的五种里挑，判定用上游 `analysis` 的段落能量，不用我们自己的 `tier`；⑤ 演示配色的残留（JIZURA 的 `ghostA/ghostB`、`ambience`）要一并换掉，它们不在 colour script 里，最容易漏。 |
 | **判据** | `diff -u <上游 timeline.js> <zrun/engine/timeline.js>` 的 hunk 应当只有七块，且每一块都能说出理由：文件头、identity+colour script、`END`/`TAIL`/section look、JIZURA ghost 双色、shots 段、`VERTICAL_CFG.full`、HUD `SEC_NAME`。除此之外**每一行都相同**。若 body 里出现我们发明的字段（`SPEC.meta`、自写 `LOOKS`、自写 `HUD`、自写 `globalFX`），即视为没接上。实测（本片）：7 个 hunk / +1125 行 / 337→1351 行，新增全在 shots 段。 |
 | **适用场景** | 任何「把片子交给某个现成渲染器」的场合。**不要**把上游当成一组素材去挑着用 —— 挑着用等于自己写了一遍，还拿不到它真正的样子。 |
+
+---
+
+## 125. A 唱片风格：当前行会放大到出屏（英文长句必现，2026-11-05《Love Story》）
+
+| 项 | 内容 |
+|---|---|
+| **背景** | A 风格（`renderer/player/index.html`）的歌词层：非当前行按 `fit = (vw-12)/spr.w` 钳制缩小收在视口内；**当前行豁免 fit**，字号 48→65px（1.35×），超宽时改走 Apple Music 式横向滚动，把「正唱到的字」稳定钉在视口 42% 处。中文句 10~14 字很少触顶；英文句 40 字符左右会真的超宽。 |
+| **错误表现** | 不是丢字，是「行首只露 2/3」：18.0s 首句 `We were both young when I first saw you` 只显示到 `...when I`，尾部 `first saw you` 出屏；19.5s 滚到 `th young when I [first saw you]` 时句首又出屏。观众第一眼读作「第一句歌词少一部分」（与 §119 同类观感，但成因完全不同，不要照着 PV 那条去查）。 |
+| **正确做法** | 先分清是哪一种：①行尾永不出现 → 真丢字，查 LRC；②**同一行随时间左右平移**（拖两帧对比即可判定，`ffmpeg -ss 18 vs 19.5` 抽帧）→ 就是本节的横向滚动，属设计行为。想让长句整句一屏：把 2633 行的 `if(i !== idx && sc > fit)` 的 `i !== idx &&` 去掉（当前行也钳制），横向滚动那段自动失效；代价是长句的「当前行放大」强调消失。**改这条要全片重渲**，4K60 约 68 分钟，先问用户。 |
+| **判据** | 抽帧对照：同一行两个时刻的**左端起点不同** ⇒ 滚动；**同一位置永远缺同一截** ⇒ 真丢字。 |
+| **适用场景** | 英文/日文长句、副歌长句居多的歌。出片后若用户说「歌词被切了」，先用这条自证，别急着改 LRC 或重排。 |
