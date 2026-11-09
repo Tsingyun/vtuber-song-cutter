@@ -1989,21 +1989,45 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "duration": round(ce - cs, 2),      # 渲染前磁盘预检要用（估算 mjpeg 峰值）
         "out": render_tmp,
     }
+    # 音轨副本必须在**开渲之前**备好：out_mp3 在 cuts/<date>/ 下，属人看得到的地方，
+    # 并发工具链整理目录时会把它搬走（11-09 实测被搬进 _legacy_<date>/，混流直接报
+    # "No such file or directory"，80 分钟渲染白费）。副本在 _render_tmp 里，谁也动不到。
+    mux_audio = out_mp3
+    try:
+        _mux_copy = os.path.join(render_tmp_dir(workdir, date),
+                                 "_mux_audio" + os.path.splitext(out_mp3)[1])
+        if os.path.exists(out_mp3):
+            shutil.copy2(out_mp3, _mux_copy)
+            mux_audio = _mux_copy
+        elif os.path.exists(_mux_copy):
+            mux_audio = _mux_copy
+    except OSError as e:
+        log("  ⚠ 音轨副本建立失败（回退直读原文件）：%s" % e)
+
     t0 = time.time()
     render_player_video(workdir, job, ffmpeg)
 
     # 5. 混流：渲染画面 + MP3 音轨 → 最终 MP4（视频流直拷，音轨 AAC 重编码）
+    rc, err = -1, ""
     try:
-        rc, _, err = run([ffmpeg, "-y", "-v", "error", "-i", render_tmp, "-i", out_mp3,
+        rc, _, err = run([ffmpeg, "-y", "-v", "error", "-i", render_tmp, "-i", mux_audio,
                           "-map", "0:v:0", "-map", "1:a:0",
                           "-c:v", "copy", "-c:a", "aac", "-b:a", OUT_AUDIO_BR,
                           "-movflags", "+faststart", "-shortest", out_mp4])
     finally:
-        # 混流成功/失败都要收掉 .render.mp4：它是 0.6 GB 级的中间体，
-        # 留在 _render_tmp 里会逐首累积（旧的 `if os.path.exists` 在 run() 抛异常时会漏掉）
-        if not _rm_retry(render_tmp, log=log) and os.path.exists(render_tmp):
-            log("  ⚠ 中间成片删不掉（可能被占用）：%s" % render_tmp)
-        _prune_empty_tmp_dir(workdir, date)
+        # 混流**成功**才收掉 .render.mp4；失败必须留着 —— 4K60 重渲要 80+ 分钟，
+        # 而混流失败通常是音轨/路径一侧的外部问题（11-09 实测：并发的另一条管线把
+        # cuts/<date>/ 整体搬走，MP3 不在原位），留一份就能用 ffmpeg 手工补混，
+        # 一次都不必重渲。旧的「成功失败都删」在 run() 抛异常时还会漏删。
+        if rc == 0:
+            if not _rm_retry(render_tmp, log=log) and os.path.exists(render_tmp):
+                log("  ⚠ 中间成片删不掉（可能被占用）：%s" % render_tmp)
+            _prune_empty_tmp_dir(workdir, date)
+        elif os.path.exists(render_tmp):
+            log("  ⚠ 混流失败，已保留画面中间件供补混：%s" % render_tmp)
+            log("     补混：ffmpeg -i \"<上面那个>\" -i \"%s\" -map 0:v:0 -map 1:a:0 "
+                "-c:v copy -c:a aac -b:a %s -movflags +faststart -shortest \"<成片路径>\""
+                % (out_mp3, OUT_AUDIO_BR))
     if rc != 0:
         raise RuntimeError("混流失败：%s" % err[-300:])
     log("  渲染+混流完成，耗时 %.0fs" % (time.time() - t0))
