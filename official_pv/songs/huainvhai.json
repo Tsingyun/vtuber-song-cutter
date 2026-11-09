@@ -1,0 +1,51 @@
+{
+  "id": "huainvhai",
+  "title": "坏女孩",
+  "titleSub": "BAD GIRL",
+  "artist": "徐良 × 小凌",
+  "credit": "词曲 徐良 · 2011《不良少年》",
+  "date": "2026-11-09",
+  "absStart": 4275.50,
+  "absEnd": 4517.75,
+  "duration": 242.25,
+  "bpm": 128,
+  "lrc": "analysis/lyrics_mv.lrc",
+  "thesis": "一整夜的霓虹雨 · 电话没接通，回忆却反复打断现在。全片冷青蓝，只有「灯红酒绿」和那张笑脸是洋红。",
+  "palette": {
+    "void": "#070510",
+    "ink": "#120B22",
+    "mid": "#241640",
+    "glow": "#DFF6FA",
+    "accent": "#6FDCE8",
+    "warm": "#F2B368",
+    "magenta": "#E8557F",
+    "violet": "#9B6CFF"
+  },
+  "grad": [[0, "#05030C"], [0.4, "#160E2A"], [0.75, "#1D2F52"], [1, "#070510"]],
+  "glyphs": ["坏", "雨", "喂", "灯", "笑", "念", "夜", "变"],
+  "tunnelWords": ["I miss you", "那时我放开你的手", "你消失在无名大街", "舞池里跳动着音乐", "却回不到从前"],
+  "typeLines": ["坏女孩", "却回不到从前"],
+  "motifs": ["霓虹", "雨", "拨号音", "洋红", "玻璃"],
+  "live": [
+    [21.1, 24.5], [50.2, 53.6], [84.0, 87.4],
+    [135.2, 138.6], [176.2, 179.6], [208.0, 211.4]
+  ],
+  "lookDefault": { "boil": 1.1, "bloom": 0.38, "bloomThreshold": 0.74, "grain": 0.07, "vignette": 0.44, "lutMix": 0.0 },
+  "acts": [
+    { "id": "intro",   "t0": 0,    "t1": 21.0,  "look": "intro",     "intensity": 0.16, "lut": "night", "pool": ["typeCard", "converge", "solid"],              "fx": ["dust", "glow", "custom"],                    "trans": ["xfade", "black"] },
+    { "id": "verse1",  "t0": 21.0, "t1": 50.0,  "look": "verse",     "intensity": 0.36, "lut": "night", "pool": ["illust", "solid", "jz", "illust"],         "fx": ["rain", "dust", "glow", "custom", "rays"],    "trans": ["xfade", "iris", "push"] },
+    { "id": "chorus1", "t0": 50.0, "t1": 78.0,  "look": "chorus",    "intensity": 0.70, "lut": "mono",  "pool": ["kanjiSlam", "illust", "converge", "solid"], "fx": ["embers", "cracks", "glow", "custom"],        "trans": ["flash", "slices", "shatter", "black"] },
+    { "id": "verse2",  "t0": 78.0, "t1": 111.0, "look": "verse",     "intensity": 0.44, "lut": "night", "pool": ["illust", "tunnel", "road", "jz"],          "fx": ["rain", "dust", "custom", "grad", "rays"],    "trans": ["ink", "xfade", "wipe"] },
+    { "id": "bridge",  "t0": 111.0,"t1": 135.0, "look": "bridge",    "intensity": 0.58, "lut": "P4",    "pool": ["afterimage", "ref", "illust", "ember"],     "fx": ["cracks", "glow", "custom", "fireflies"],     "trans": ["black", "zoom", "iris"] },
+    { "id": "chorus2", "t0": 135.0,"t1": 176.0, "look": "chorus",    "intensity": 0.84, "lut": "mono",  "pool": ["kanjiSlam", "illust", "converge", "solid"], "fx": ["embers", "rays", "glow", "custom", "dust"],  "trans": ["flash", "shatter", "irisClose"] },
+    { "id": "inst",    "t0": 176.0,"t1": 212.0, "look": "pre",       "intensity": 0.52, "lut": "night", "pool": ["tunnel", "road", "illust", "ref"],         "fx": ["rain", "dust", "custom", "feathers"],        "trans": ["slices", "wipe", "xfade"] },
+    { "id": "outro",   "t0": 212.0,"t1": 242.25,"look": "outro",     "intensity": 0.20, "lut": "dawn",  "pool": ["afterimage", "typeCard", "solid", "illust"],"fx": ["dust", "fireflies", "custom"],               "trans": ["flash", "xfade"] }
+  ],
+  "signature": [
+    { "t": 0.0,   "note": "dial-tone title card over near silence" },
+    { "t": 50.0,  "note": "first hook: per-beat kanji slam + magenta neon" },
+    { "t": 111.0, "note": "「灯红酒绿」 — the only magenta burst" },
+    { "t": 176.0, "note": "instrumental: lyric tunnel, no dead air" },
+    { "t": 232.0, "note": "end on the negative afterimage of the title" }
+  ]
+}

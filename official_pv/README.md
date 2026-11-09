@@ -1,0 +1,101 @@
+# 歌切系统 · official_pv
+
+一个**可在本地直接运行**的歌切成片系统。它把 [vocaloid-style-mv-pipeline](https://github.com/EGSECDA/vocaloid-style-mv-pipeline) 的引擎当作真正的渲染内核，而不是参考样板。
+
+## 一句话
+
+给一个日期 + 曲目白名单，一条命令完成：从录播切出精确音频 → 用官方 24 场景引擎生成整支歌词 MV → 运行时证明官方能力确实生效 → 编码成片 → 落到交付目录。
+
+```bash
+cd D:\岁己歌切\official_pv
+node cut.mjs --date 2026-11-09                 # 渲染白名单里的全部曲目
+node cut.mjs --date 2026-11-09 --song faruxue  # 只渲一首
+node cut.mjs --date 2026-11-09 --audit-only    # 只准备素材 + 审计，不出片
+```
+
+流水线**强制串行**：`prepare.py` → `audit_official.mjs`（运行时验收）→ `render_frames.mjs` → `ffprobe` → 交付。
+审计不通过就拒绝渲染，所以不会出现"成片交了才说官方能力没接上"。
+
+## 目录
+
+```
+official_pv/
+  cut.mjs                      一键入口
+  engine/
+    index.html                 官方脚本顺序（8 个场景文件全加载）
+    core/                      ★ 官方原版 6 个文件，逐字节复制
+    scenes/                    ★ 官方原版 8 个文件 + 我们 1 个自定义 livewin.js
+    fonts/                     43 个字体文件（自包含，不依赖 junction）
+    songcut.timeline.js        通用剪辑驱动：读 songs/<id>.json 生成 Z.SHOTS
+    __official_demo_timeline.js  官方 Demo「蛍火」时间线，用于冒烟测试
+  jizura/app/                 官方 adapter + 构建好的 JIZURA bundle（MIT）
+  assets/style/               官方 palettes.json + LUT PNG
+  assets/bg/                  程序化生成的背景板（无 AI 图片、无外部素材）
+  assets/live/<song>/frames/  只抽直播插入窗口的帧
+  analysis/                   audio.json / envelope_30fps.json / lyrics_mv.lrc
+  audio/song.wav              当前曲目的精确切片
+  songs/2026-11-09.json       日期 + 曲目白名单 + 录播绝对时间
+  songs/<id>.json             单曲视听设定（配色、段落、场景池、直播窗口）
+  tools/
+    prepare.py                素材准备
+    audit_official.mjs        ★ 运行时验收（浏览器内真跑一遍）
+    render_frames.mjs         官方渲染器 + 2 处已记录补丁
+    stills.mjs / kit_env.mjs / render_final.mjs ... 官方工具
+  docs/OFFICIAL_SOURCE_HASHES.json   ★ 与官方 template 的逐字节 sha256 核对结果
+  docs/COMPLETENESS.md        ★ 逐项补齐对照表 + 源码核对 + 视觉 QA 记录
+  docs/OFFICIAL_LICENSE.txt   上游 MIT 许可证（Copyright 2026 NikusonP）
+  docs/OFFICIAL_PROJECT_README.md  官方 template/PROJECT_README.md 副本
+```
+
+## 官方能力是怎么被用上的
+
+| 官方机制 | 本系统 |
+|---|---|
+| 24 个 `Z.scene()` 场景（05 §8） | 页面加载全部 8 个场景文件；镜头 `scene` 指向官方注册名 |
+| 13 种转场（core/trans.js） | 每镜按段落文法挑选，实测命中见审计报告 |
+| 11 种内建 fx（scenes.js:97-116） | 每镜独立组合 `fxBack` / `fx` |
+| 自定义 fx 工厂（官方 Demo 有 5 个） | 每首歌 5 个专属确定性工厂（雪/月/墨/朱砂/光尘；霓虹/雨玻璃/拨号环/…） |
+| WebGL2 post（core/gl.js，15+ 参数） | 每镜 `post` + `Z.LOOKS` 段落分档 + `Z.globalFX` 节拍闪白 |
+| JIZURA 多 plan（06 §3） | 5 套 plan，在 style / seed / fx / centerFree 上真分化 |
+| 官方 Demo 的零图片路线 | 系统不依赖任何 AI 图片；`illust` 同时走渐变分支与程序化 bg 相机分支 |
+| 节拍锁定剪辑（09 §2） | 切点吸附真实 LRC 行起点，`audio.json` 的 beats 就是这些 onset |
+| master 规格（08 §1） | 1920×1080 / 30fps / quantizer QP20 ≈ 30–40 Mb/s / AAC 320k |
+
+**官方文件只有一个被改动**，其余全是本系统新增文件，逐项见 `docs/COMPLETENESS.md`：
+1. `tools/render_frames.mjs`（唯一改过的官方文件）：h264 裸流 remux 时用 `setts` 重打时间戳（否则成片不可 seek）、并增加 `--wc-mode/--wc-qp` 让 quantizer 高码率生效。
+2. 新增 `engine/scenes/livewin.js`：唯一自定义场景，用于「直播画面短促点缀」，纯 alpha 遮罩、零形变、含窗口帧号回退。
+3. 新增 `engine/songcut.timeline.js` / `cut.mjs` / `tools/prepare.py` / `tools/audit_official.mjs`：驱动与编排层。
+
+源码核对实测：**25 个官方文件逐字节一致**（6 个 core、8 个官方 scenes、JIZURA、工具），
+1 个官方文件被改（`render_frames.mjs`），基准为本地官方克隆 `13b380d`。
+
+## 运行时验收与视觉 QA
+
+`audit_official.mjs` 共 **17 项**检查，含**全片逐镜冒烟渲染**（每个镜头中点真渲一帧），
+任何一项 FAIL 就拒绝出片。报告落在 `render/audit_<id>.json`，随成片一起交付。
+视觉 QA 按官方 `09-qa-and-lessons.md` 走「抽联系表 → 发现问题 → 修 → 重抽」，
+本轮两轮联系表与全部修复项记录在 `docs/COMPLETENESS.md §6`。
+
+## 依赖
+
+Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）、ffmpeg / ffprobe、Microsoft Edge 或 Chrome（GPU）。
+全部资源都在本目录内，没有跨目录联接，可以直接整包拷走。
+
+## 加一首新歌
+
+1. 在 `songs/<date>.json` 的 `whitelist` 里加 id，并写 `songs[id]`（录播绝对起止时间、时长、文件名、切点依据）。
+2. 写 `songs/<id>.json`：原唱信息、配色、段落表（每段的官方场景池 / fx 池 / 转场池 / LUT）、直播插入窗口。
+3. 把官方 LRC 放到 `songs/<id>.lrc`（首次运行时 `prepare.py` 也会从 `_media_cache` 自动取）。
+4. `node cut.mjs --date <date> --song <id>`。
+
+## 交付规范
+
+成片落在 `D:\岁己歌切\cuts\<date>\official\`，`manifest.json` **只包含白名单曲目**。
+歌手名一律标**原唱**（不是翻唱者），封面/署名用原唱资料；歌词与切点按现场实唱版本对齐，两者解耦。
+
+## 交付补充（2026-11-09）
+
+- 白名单只有《发如雪》《坏女孩》；**《多余的解释》不纳入切分、不出现在 `official/` 结果中**。
+- `analysis/*` 与 `audio/song.wav` 是**当前曲目共享路径**，由 `prepare.py` 每次重建。
+  用 `cut.mjs` 时逐首串行，无需关心；单独对另一首跑审计/抽帧前需先 `python tools/prepare.py --song <id>`。
+- 直播帧提取用 `ffmpeg -start_number` 原地覆盖写入，不做批量删除，重复运行安全。
