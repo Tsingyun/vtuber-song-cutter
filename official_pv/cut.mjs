@@ -20,6 +20,32 @@ const session = JSON.parse(fs.readFileSync(path.join(ROOT, 'songs', `${date}.jso
 const ids = only ? [only] : session.whitelist;
 for (const id of ids) if (!session.whitelist.includes(id)) { console.error(`song ${id} is not in the ${date} whitelist`); process.exit(2); }
 
+// -- DIRECTORY BOUNDARY -- RULES.md 129 (2026-11-10 incident) ------------------
+// This repo is shared with ANOTHER, PARALLEL, ACTIVE song-cut pipeline:
+//   song_cutter.py / auto_cut.py / renderer/   (A-side, 4K60)
+// It writes its products AND its IN-USE mux intermediates (.mp3, .render.mp4,
+// .mjpeg, cutter.log, events.jsonl, manifest.json) into cuts/<date>/ TOP LEVEL.
+// Those files are NOT ours. NEVER move, rename, delete, overwrite or "clean"
+// any of them, even when the song is not in our whitelist. Never suggest
+// stopping that pipeline. Our results live ONLY in cuts/<date>/official/.
+const DELIVERY_SUBDIR = 'official';
+function deliveryDir(d) {
+  // Derive from ROOT (the official_pv dir) instead of hardcoding a Windows path.
+  const dir = path.join(path.dirname(ROOT), 'cuts', d, DELIVERY_SUBDIR);
+  if (path.basename(dir) !== DELIVERY_SUBDIR) throw new Error('delivery must stay inside official/');
+  return dir;
+}
+// Read-only awareness: LIST and PRINT only; never touch those files.
+try {
+  const top = path.join(path.dirname(ROOT), 'cuts', date);
+  const buddy = fs.readdirSync(top).filter(n =>
+    /^(cutter[.]log|events[.]jsonl|manifest[.]json)$/.test(n) ||
+    /[.](mjpeg|mp3|src[.]lrc|lrc|mp4|render[.]mp4)$/i.test(n));
+  if (buddy.length) console.log('[boundary] cuts/' + date + '/ 顶层检测到平行管线 ' + buddy.length +
+    ' 个文件（只读，不移动/不删除/不覆盖）；两边同时跑同一场请先与用户确认。');
+} catch { /* top dir not present yet: fine */ }
+
+
 function run(bin, args, label) {
   console.log(`\n======== ${label} ========`);
   const r = spawnSync(bin, args, { cwd: ROOT, stdio: 'inherit', shell: false });
@@ -67,7 +93,7 @@ for (const id of ids) {
   if (!ok) { console.error('output spec mismatch, not delivering'); process.exit(5); }
 
   // ---- deliver ONLY the whitelisted songs, into a clean directory -----------------
-  const outDir = path.join('D:\\岁己歌切', 'cuts', date, 'official');
+  const outDir = deliveryDir(date);
   fs.mkdirSync(outDir, { recursive: true });
   const base = meta.file;
   const mp4 = path.join(outDir, `${base}.mp4`), lrc = path.join(outDir, `${base}.lrc`);
@@ -87,7 +113,7 @@ for (const id of ids) {
 }
 
 // manifest contains EXACTLY the whitelist, nothing else
-const outDir = path.join('D:\\岁己歌切', 'cuts', date, 'official');
+const outDir = deliveryDir(date);
 if (!auditOnly) {
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({
     date, generated_by: 'official_pv/cut.mjs',

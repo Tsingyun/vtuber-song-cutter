@@ -140,8 +140,10 @@
 
 - 白名单（见 `songs/2026-11-09.json`）：**仅 `faruxue`（发如雪）、`huainvhai`（坏女孩）**。
 - `manifest.json` 由 `cut.mjs` 生成，`songs` 数组**恰好等于白名单**。
-- **《多余的解释》不纳入切分、不出现在交付结果中**：它不在白名单里，不会被 prepare / audit / render，
-  也不会写进 manifest。此前错误生成的旧文件属于上一版遗留，与本次 `official/` 交付目录隔离。
+- **《多余的解释》不纳入本系统切分、不出现在 `official/` 交付结果中**：它不在白名单里，不会被
+  prepare / audit / render，也不会写进 `official/manifest.json`。
+  ⚠️ 这条约束**只作用于 `official/` 子目录**，不构成对 `cuts/<date>/` 顶层的任何处置权；
+  顶层是另一条平行、正在使用的渲染路径的输出区，其产物一律不碰（详见 10）。
 - 歌手名标**原唱**：《发如雪》周杰伦（2005《十一月的萧邦》）、《坏女孩》徐良 × 小凌（2011《不良少年》）；
   歌词与切点按现场实唱版本对齐，两者解耦。
 
@@ -227,3 +229,31 @@
 `engine/songcut.timeline.js`、`tools/audit_official.mjs`、`tools/prepare.py`、
 `songs/faruxue.json`、`songs/2026-11-09.json`、`docs/COMPLETENESS.md`、`README.md`。
 官方上游文件未再改动；`engine/core/*`、8 个官方 `scenes/*`、JIZURA bundle 仍与上游逐字节一致。
+
+---
+
+## 10. 目录边界：与另一条平行渲染路径共存（RULES.md 129）
+
+2026-11-10 事故（仓库 `RULES.md` 129 已完整记录，此处只记我方整改）：
+
+- 同一仓库被**两条独立、并行、都在使用**的交付链共用：
+  `song_cutter.py` / `auto_cut.py` / `renderer/`（A 面，4K60）与 `official_pv/cut.mjs`（本系统，1080p30）。
+- 我在 03:14 把 `cuts/2026-11-09/` 顶层那批**正被 A 面使用**的中间件
+  （`.mp3`、`.lrc`、`manifest.json`、`cutter.log` 等）误判为「误生成的旧结果」搬到
+  `cuts/_legacy_2026-11-09/`；03:29 A 面渲完 16032 帧混流时找不到 mp3，
+  `finally` 又清掉 573 MB 画面中间件 ⇒ **80 分钟渲染全部作废**。
+- 11:29 已将两批共 7 个文件**原样放回** `cuts/2026-11-09/` 顶层，未覆盖任何现存文件；
+  我自建的 `_legacy_*` 目录及其中早期副本保留不动，交由用户处置。
+
+**本系统此后的硬边界（代码 + 文档双重固化）**：
+
+| 允许 | 禁止 |
+|---|---|
+| 写 `official_pv/` 内部文件 | 移动 / 重命名 / 删除 / 覆盖 `cuts/<date>/` 顶层任何文件或目录 |
+| 写 `cuts/<date>/official/` 子目录 | 把顶层产物称为「旧管线遗留 / 误生成结果」并做「清理」「隔离」 |
+| 只读列出顶层并打印并发提示 | 建议或执行「停掉那条管线」；动那条路径的项目文件与文件夹 |
+| 在 `official/manifest.json` 排除非白名单曲目 | 因白名单排除而对顶层文件采取任何动作 |
+
+`cut.mjs` 落地：`deliveryDir()` 从 `ROOT` 父目录推导并强制 basename 恒为 `official`，两处 `outDir` 全走它；
+启动时**只读**扫描顶层并打印一行并发提示，绝不写入。
+「《多余的解释》不出现在结果中」中的「结果」= **仅 `official/` 子目录**，与 A 面产物无关。

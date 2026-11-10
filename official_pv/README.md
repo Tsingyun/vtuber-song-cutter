@@ -95,7 +95,8 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
 
 ## 交付补充（2026-11-09）
 
-- 白名单只有《发如雪》《坏女孩》；**《多余的解释》不纳入切分、不出现在 `official/` 结果中**。
+- 白名单只有《发如雪》《坏女孩》；**《多余的解释》不纳入本系统切分、不出现在 `official/` 结果中**。
+  ⚠️ 这只约束 `official/` 子目录，**不构成对 `cuts/<date>/` 顶层的任何处置权**，见下方「目录边界」。
 - `analysis/*` 与 `audio/song.wav` 是**当前曲目共享路径**，由 `prepare.py` 每次重建。
   用 `cut.mjs` 时逐首串行，无需关心；单独对另一首跑审计/抽帧前需先 `python tools/prepare.py --song <id>`。
 - 直播帧提取用 `ffmpeg -start_number` 原地覆盖写入，不做批量删除，重复运行安全。
@@ -109,3 +110,21 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
 - JIZURA `centerFree`（`J.sideZones` 会把中间 40% 挖空并 `clip()` 文字到左右窄带）
   **只允许 `oncam` plan 在 `livewin` 岁己镜头使用**；`cf` 已恢复全幅排版。
   新增第 18 项审计 `centre-reserve plans only on live inserts`，详见 `docs/COMPLETENESS.md §9`。
+
+## 目录边界（与另一条平行渲染路径共存）
+
+`D:/岁己歌切/` 仓库里还有**另一条平行、可执行、正在使用中的歌切渲染路径**
+（`song_cutter.py` / `auto_cut.py` / `renderer/`，4K60），它把产物**和正在使用的混流中间件**
+写在 `cuts/<date>/` **顶层**。它不是旧管线，也不是遗留。
+
+本系统被允许写的地方**只有两处**：`official_pv/` 内部，以及自己的交付子目录 `cuts/<date>/official/`。
+
+**严禁**：对 `cuts/<date>/` 顶层的任何文件/目录做移动、重命名、删除、覆盖、"清理"或"隔离"；
+把顶层产物称为「旧管线遗留 / 误生成结果」；因白名单排除了某首歌就去处理顶层的同名产物；
+建议或执行「停掉那条管线」。也**不要动那条路径的项目文件和文件夹里的任何东西**。
+
+「《多余的解释》不出现在结果中」里的**「结果」仅指 `official/` 子目录**，与顶层产物无关。
+`cut.mjs` 用 `deliveryDir()` 把交付路径锁死在 `official/`，启动时只读列出顶层并打印并发提示。
+
+> 事故：2026-11-10 03:14 顶层正在使用的 `.mp3` 中间件被误搬走，导致该链 03:29 混流失败、
+> 573 MB 画面中间件被清掉、80 分钟渲染作废（仓库 `RULES.md` 129）。11:29 已全部原样放回。
