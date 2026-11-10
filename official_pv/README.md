@@ -71,7 +71,7 @@ official_pv/
 
 ## 运行时验收与视觉 QA
 
-`audit_official.mjs` 共 **17 项**检查，含**全片逐镜冒烟渲染**（每个镜头中点真渲一帧），
+`audit_official.mjs` 共 **18 项**检查，含**全片逐镜冒烟渲染**与**中央预留框作用域检查**（每个镜头中点真渲一帧），
 任何一项 FAIL 就拒绝出片。报告落在 `render/audit_<id>.json`，随成片一起交付。
 视觉 QA 按官方 `09-qa-and-lessons.md` 走「抽联系表 → 发现问题 → 修 → 重抽」，
 本轮两轮联系表与全部修复项记录在 `docs/COMPLETENESS.md §6`。
@@ -99,3 +99,13 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
 - `analysis/*` 与 `audio/song.wav` 是**当前曲目共享路径**，由 `prepare.py` 每次重建。
   用 `cut.mjs` 时逐首串行，无需关心；单独对另一首跑审计/抽帧前需先 `python tools/prepare.py --song <id>`。
 - 直播帧提取用 `ffmpeg -start_number` 原地覆盖写入，不做批量删除，重复运行安全。
+
+
+## QA round 2（2026-11-10）
+
+- 《发如雪》掐掉录播开头 14.5 s 死区：`abs_start 3612.25 / duration 284.80`，
+  **音频 + 视频 + LRC + 段落 + 直播窗口整体平移 −14.5 s**，歌词与录播的绝对对齐不变；
+  配置 `songs/<id>.json` 的 `lrcOffset` 控制，`prepare.py` 有开头静音硬门槛。
+- JIZURA `centerFree`（`J.sideZones` 会把中间 40% 挖空并 `clip()` 文字到左右窄带）
+  **只允许 `oncam` plan 在 `livewin` 岁己镜头使用**；`cf` 已恢复全幅排版。
+  新增第 18 项审计 `centre-reserve plans only on live inserts`，详见 `docs/COMPLETENESS.md §9`。

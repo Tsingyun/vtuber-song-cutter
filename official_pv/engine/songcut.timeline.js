@@ -215,11 +215,18 @@
         fx: { motion: 0.7, glitch: 0.32, chroma: 0.42, decor: 0.4, density: 0.5, texture: 0.5, flash: false, koma: 12, hud: 'off', bgSwitch: 0.3 },
       };
       await JZ.addPlan('main',  Object.assign({}, common, { style: 'gold',    seed: 128 }));
-      await JZ.addPlan('cf',    Object.assign({}, common, { style: 'gold',    seed: 131, centerFree: true }));
+      // `cf` = FULL-FRAME typography. It must NOT set centerFree: that flag is JIZURA's
+      // 「中央を空ける」 side-band mode (jizura_engine.js:2944 J.sideZones -> :3998 X.clip()).
+      // It reserves the middle 40% of the frame for an on-screen character and CLIPS every
+      // lyric/decoration to the left/right 30% bands. Applied to ordinary shots it cut giant
+      // glyphs in half (《发如雪》「惹尘埃是非」) and left the centre of every animation empty
+      // (《坏女孩》t=7). Only `oncam`, used EXCLUSIVELY by livewin shots, may open that centre.
+      await JZ.addPlan('cf',    Object.assign({}, common, { style: 'gold',    seed: 131 }));
+      await JZ.addPlan('oncam', Object.assign({}, common, { style: 'gold',    seed: 131, centerFree: true }));
       await JZ.addPlan('noir',  Object.assign({}, common, { style: 'noir',    seed: 129, fx: Object.assign({}, common.fx, { glitch: 0.52, chroma: 0.62 }) }));
       await JZ.addPlan('mono',  Object.assign({}, common, { style: 'mono',    seed: 130, fx: Object.assign({}, common.fx, { motion: 0.85, chroma: 0.70 }) }));
       await JZ.addPlan('slam',  Object.assign({}, common, { style: 'crimson', seed: 133, fx: Object.assign({}, common.fx, { motion: 0.92, glitch: 0.20, chroma: 0.30, density: 0.62 }) }));
-      for (const nm of ['main', 'cf', 'noir', 'mono', 'slam']) {
+      for (const nm of ['main', 'cf', 'noir', 'mono', 'slam', 'oncam']) {
         const pl = JZ.plans[nm] && JZ.plans[nm].plan;
         if (pl) for (const c of pl.cuts) if (c.companion) c.companion.scheme = c.scheme;
       }
@@ -321,11 +328,11 @@
             phase: i * 0.7, swayX: 0, swayY: 0,
             fx: [{ type: 'dust', n: 16, color: Z.rgba(P.glow, 0.14) }],
           },
-          plan: 'cf', lyric: 'front',
+          plan: 'oncam', lyric: 'front',   // centre reserved ONLY here: the singer is really on screen
           post: { bloom: 0.13, bloomThreshold: 0.88, beatBloom: 0, exposure: -0.015, lutA: act.lut, lutMix: 0.10, boil: 0.6 },
           hud: true,
         });
-        bump(stats.scenes, 'livewin'); bump(stats.plans, 'cf');
+        bump(stats.scenes, 'livewin'); bump(stats.plans, 'oncam');
         stats.liveShots++; stats.liveSec += t1 - t0;
         prev = [prev[1], 'livewin'];
         continue;
@@ -460,6 +467,20 @@
     if (first) { first.scene = 'typeCard'; first.args = { lines: [cfg.title], size: 104, fam: 'minchoHeavy', weight: 700, paper: P.void, ruleColor: P.accent, sub: cfg.credit, lead: 0.25 }; first.lyric = 'none'; first.post = { boil: 0, bloom: 0.20, grain: 0.035 }; first.hud = false; }
     if (last)  { last.scene = 'afterimage'; last.args = { text: cfg.title, sub: cfg.titleSub.toLowerCase(), credit: cfg.credit, color: P.warm || P.violet, char: NO_IMAGE }; last.lyric = 'none'; last.post = S2 => Object.assign(Z.INTRO.post.afterimage(S2), { boil: 0 }); last.hud = false; }
 
+    // ---- HARD GUARD (QA round 2) -------------------------------------------------------
+    // A centre-reserving JIZURA plan is legal ONLY on a shot whose scene is `livewin`.
+    // Sanitise any accidental use so the middle of an ordinary animation can never be
+    // clipped away, and expose the count so the audit can prove it is zero.
+    const CF = new Set(window.JZ ? Object.keys(JZ.plans).filter(n => JZ.plans[n].plan.centerFree) : []);
+    let centreReserveOutsideLive = 0;
+    for (const sh of S) {
+      const used = [sh.plan, sh.args && sh.args.plan].filter(Boolean);
+      if (sh.scene !== 'livewin' && used.some(p => CF.has(p))) {
+        if (sh.plan && CF.has(sh.plan)) sh.plan = 'cf';
+        if (sh.args && CF.has(sh.args.plan)) sh.args.plan = 'cf';
+        centreReserveOutsideLive++;
+      }
+    }
     Z.SHOTS = S;
     window.__zankoMeta.duration = cfg.duration;
     window.__zankoMeta.fps = 30;
@@ -471,6 +492,8 @@
       scenes: stats.scenes, fxTypes: stats.fx, customFactories: stats.custom,
       transitions: stats.trans, plans: stats.plans,
       jizuraPlans: window.JZ ? Object.keys(JZ.plans) : [],
+      centreFreePlans: [...CF], centreReserveOutsideLive,
+      oncamShots: S.filter(s => s.scene === 'livewin').length,
       liveShots: stats.liveShots, liveSec: +stats.liveSec.toFixed(2),
       livePct: +(100 * stats.liveSec / cfg.duration).toFixed(1),
       shots: S.length, duration: cfg.duration,

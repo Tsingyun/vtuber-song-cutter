@@ -58,6 +58,16 @@ def main():
         lrc_path.write_text(d['lrc'], encoding='utf-8')
     lines = parse_lrc(lrc_path.read_text(encoding='utf-8'))
     assert lines and all(lines[i][0] <= lines[i + 1][0] for i in range(len(lines) - 1)), 'LRC not monotonic'
+    # QA round 2: some live recordings carry a dead-air gap before the accompaniment starts
+    # (11-09 《发如雪》: 1.5-14.25 s of digital silence, RMS ~0.001). We drop that head by
+    # moving abs_start forward by the SAME amount and shifting the whole timeline -offset.
+    # Audio / video / LRC / acts / live windows all shift together, so every lyric stays
+    # locked to the exact same absolute instant of the original recording.
+    offset = float(cfg.get('lrcOffset', 0) or 0)
+    if offset:
+        lines = [(t - offset, txt) for t, txt in lines if t - offset >= 0]
+        assert lines and lines[0][0] >= 0, 'LRC offset removed every line'
+        print(f'[prepare] LRC offset: -{offset:.2f}s -> {lines[0][0]:.2f} .. {lines[-1][0]:.2f}')
     print(f'[prepare] LRC: {len(lines)} lines, {lines[0][0]:.2f} .. {lines[-1][0]:.2f}')
 
     # JIZURA wants no metadata rows and no BOM (references/06 §3)
@@ -116,6 +126,14 @@ def main():
            'mid': np.clip(mid, 0, 1).tolist(), 'high': np.clip(high, 0, 1).tolist(),
            'onset': onset.tolist(), 'vocal': rms.tolist()}
     (ROOT / 'analysis' / 'envelope_30fps.json').write_text(json.dumps(env), encoding='utf-8')
+    # ---- 3c. opening-audio guard (QA round 2) -----------------------------------------
+    # The delivered cut must START with music, not 12 s of digital silence. Check the real
+    # PCM we just cut, skipping the first 0.5 s so a transient click cannot mask dead air.
+    head = mono[int(sr * 0.5):int(sr * 2.5)]
+    head_rms = float(np.sqrt(np.mean(head ** 2))) if head.size else 0.0
+    print(f'[prepare] opening RMS (0.5-2.5 s): {head_rms:.4f}')
+    if head_rms < 0.008:
+        raise SystemExit(f'OPENING AUDIO IS SILENT (RMS={head_rms:.5f}); check abs_start / lrcOffset')
     print(f'[prepare] analysis: {len(beats)} beats, {len(sections)} sections, {n} envelope frames')
 
     # ---- 4. procedural background plates (no AI art, no external images) ------

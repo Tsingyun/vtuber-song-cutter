@@ -90,7 +90,7 @@
 ## 5. 运行时验收（关键：交付前真跑，不是交付后才说明）
 
 `tools/audit_official.mjs` 打开真实页面、等 `window.ready`、读引擎自己的注册表，并**逐个渲染每个镜头的中点帧**。
-共 **17 项检查**，任何一项 FAIL，`cut.mjs` 直接拒绝出片。
+共 **18 项检查**（QA round 2 新增「中央预留框只允许出现在岁己镜头」），任何一项 FAIL，`cut.mjs` 直接拒绝出片。
 
 | 检查 | 《发如雪》 | 《坏女孩》 |
 |---|---|---|
@@ -152,3 +152,78 @@
   单独对另一首跑 stills/audit 前需先 `prepare.py --song <id>`。
 - 渲染依赖本机 GPU（Edge/Chrome + ANGLE），无 GPU 环境 audit 的「real GPU renderer」会 FAIL 并拒绝出片。
 - 官方 23 个上游工具（转写 / Blender / AI 出图）未引入，理由见 §1。
+
+
+---
+
+## 9. QA round 2（2026-11-10）：用户反馈的三处裁切 / 开头静音
+
+### 9.1 《发如雪》开头 12 秒没有伴奏 —— 波形实证与整体平移
+
+用 `ffmpeg` 把成片解码成 16 kHz 单声道 PCM，按 0.25 s 窗算 RMS：
+
+| 成片时间 | RMS | 判定 |
+|---|---|---|
+| 0.00–1.25 s | 0.03 → 0.35 | 上一首的尾音 / 切歌爆音，不是本曲伴奏 |
+| 1.50–14.25 s | 0.0009 – 0.014（多数 < 0.002） | **数字静音**，源录播这段音频丢失 |
+| 14.50 s 起 | 0.0589 → 持续 0.02–0.06 | 伴奏真正起音 |
+
+源录播同样：`3600.0–3609.5 s` RMS ≈ 0.001，`3612.0 s` 起恢复。也就是说**录播在这首歌的起点之后有 14.5 s 死区**，
+不是渲染器加的静音，也不是切点算错——SRT 锚点 `3619.77 「狼牙月…」` 与 LRC `22.02` 推得的 `abs_start=3597.75`
+本来就正确。
+
+修法：**掐掉死区，整条时间轴同步平移 −14.5 s**，而不是只挪音频。
+
+| 项 | 旧 | 新 |
+|---|---|---|
+| `abs_start` | 3597.75 | **3612.25** |
+| `duration` | 299.30 | **284.80** |
+| LRC（113 行） | 22.02 … 284.02 | **7.52 … 269.52** |
+| `acts` / `live` / `signature` | 原值 | 全部 −14.5（首个 act t0 clamp 到 0） |
+
+因为 `录播绝对时刻 = 新 abs_start + (旧相对时刻 − 14.5) = 旧 abs_start + 旧相对时刻`，
+**每一句歌词、每个镜头、每一帧直播插入仍锁在录播的同一个绝对时刻**，对齐关系零改变，
+只是伴奏现在从成片 0 秒响起。`prepare.py` 新增 `lrcOffset` 配置（从原始官方 LRC 生成平移后的
+`analysis/lyrics_mv.lrc` 与交付 LRC，原始 LRC 保持为 source of truth），并新增**开头静音硬门槛**：
+`0.5–2.5 s` PCM RMS < 0.008 直接拒绝出片。实测新《发如雪》`0.0251`、《坏女孩》`0.0819`。
+
+### 9.2 满屏大字被切 / 多阶段动画中央缺失 —— 同一个根因
+
+**根因在 JIZURA 的 `centerFree`，不是画布裁切、不是 mask、不是直播框。**
+
+源码链（`jizura/app/jizura_engine.js`，上游 MIT 组件）：
+
+- `:2684` `centerFree: false, // 中央を空ける: lay the cuts out in side bands ... around a character`
+- `:2944` `const zones = project.centerFree ? J.sideZones(W, H, project.centerDir, project.zoneW) : null;`
+- `:3428` `J.sideZones` 宽屏默认左右各 **30%**、中间 **40%** 完全留给角色
+- `:2946` `if (zones && en.bg) en.bg.bigChar = false;` —— 连满屏大字背景都被关掉
+- `:3994–3999` `const Z = plan.centerFree && cut.zone ? cut.zone : null; ... X.rect(Z.x, Z.y, Z.w, Z.h); X.clip();`
+
+也就是：**每个 cut 的文字/装饰/相机都被 `clip()` 到左右两条窄带**。旧 `songcut.timeline.js` 把开了
+`centerFree: true` 的 `cf` plan 用在了 intro/outro、verse 的一般镜头以及 `jz` 场景上，于是：
+
+- 《发如雪》「惹尘埃是非」的大字被硬 `clip()` 成左右两半（t=36.40 实测：右带大字的左半缺失）；
+- 《坏女孩》t=7 以及多个阶段的动画/文字被挤到左右两侧，中间 40% 一条从上到下的空白——
+  这正是用户指出的「预留给岁己出镜的框」，但它**在没有岁己镜头的时段也生效了**。
+
+修复（全部在 `engine/songcut.timeline.js`）：
+
+1. `cf` 去掉 `centerFree`，恢复全幅 JIZURA 排版（含 `bigChar`）；
+2. 新增 `oncam`（`centerFree: true`），**只**赋给 `scene === 'livewin'` 的镜头；
+3. 加**硬守卫**：生成 `Z.SHOTS` 前遍历所有镜头，凡非 `livewin` 却引用了任一 centerFree plan，
+   一律改写回 `cf` 并计数；
+4. `window.__cutAudit` 暴露 `centreFreePlans / centreReserveOutsideLive / oncamShots`，
+   `audit_official.mjs` 新增第 18 项检查：centerFree plan 必须存在、`outsideLive === 0`、
+   且 `oncamShots === liveShots`，否则拒绝出片。
+
+实测两首：`centerFree=[oncam] outsideLive=0 oncam=12/12`（发如雪）、`8/8`（坏女孩）。
+修复后抽帧复核：《发如雪》`t=21.4/21.9/22.4`（平移后的「惹尘埃是非」）大字整行完整、
+`t=121.2` 第二次副歌大字完整；《坏女孩》`t=7` 中央变成连续的 `do / 坏女孩 / n't` 大字排版，
+`t=190` 透视舞台与中央文字连续，均无竖直空白带。岁己镜头（`t=10.5 / 50 / 84 / 135` 等）
+仍保持 centerFree，歌词分列两侧、中间是直播人像——只在真的有岁己出镜时才留白。
+
+### 9.3 本轮改动文件
+
+`engine/songcut.timeline.js`、`tools/audit_official.mjs`、`tools/prepare.py`、
+`songs/faruxue.json`、`songs/2026-11-09.json`、`docs/COMPLETENESS.md`、`README.md`。
+官方上游文件未再改动；`engine/core/*`、8 个官方 `scenes/*`、JIZURA bundle 仍与上游逐字节一致。

@@ -3,18 +3,21 @@
   "source_video": "D:/录播/25788785-岁己SUI/2026-11-09/录制-25788785-20261109-201517-174-陪你这个猪过周一！唱唱聊聊_merged_compressed.mp4",
   "source_spec": "1920x1080 / 60fps / HEVC + AAC / 16073.283 s",
   "cut_method": "ASR onset anchors from the 11-09 SRT, cross-checked against the official LRC offset; out-point from a -70dB digital-silence valley, calibrated against the session's known anchor (measured 5291.19 vs 5291.25, error 0.06 s)",
-  "whitelist": ["faruxue", "huainvhai"],
+  "whitelist": [
+    "faruxue",
+    "huainvhai"
+  ],
   "songs": {
     "faruxue": {
       "file": "【岁己SUI】发如雪【20261109歌切】",
-      "abs_start": 3597.75,
+      "abs_start": 3612.25,
       "abs_end": 3897.05,
-      "duration": 299.30,
-      "evidence": "in 3619.77 (SRT 「狼牙月…」) - 22.02 (official LRC first line) = 3597.75; out 3897.05 = -70dB silence valley. Live length 299.30 s vs official 4:59 = 299 s."
+      "duration": 284.8,
+      "evidence": "in 3619.77 (SRT 「狼牙月…」) - 22.02 (official LRC first line) = 3597.75; out 3897.05 = -70dB silence valley. Live length 299.30 s vs official 4:59 = 299 s. | QA round 2: waveform showed 1.5-14.25 s of digital silence (RMS 0.001) at the old in-point, with accompaniment only from +14.5 s; abs_start advanced 14.5 s and the whole timeline (LRC / acts / live / duration) shifted by -14.5 s together."
     },
     "huainvhai": {
       "file": "【岁己SUI】坏女孩【20261109歌切】",
-      "abs_start": 4275.50,
+      "abs_start": 4275.5,
       "abs_end": 4517.75,
       "duration": 242.25,
       "evidence": "in 4296.51 (SRT 「那时我放开的手…」) - 21.02 (official LRC) = 4275.49; cross-check 4288.27 - 12.75 = 4275.52, and 4275.50 + 1.16 = 4276.66 (SRT 「me too」 = I miss you). out 4517.75 = -70dB silence valley. Live length 242.25 s vs official 242.426 s."

@@ -5,9 +5,9 @@
   "artist": "周杰伦",
   "credit": "词 方文山 / 曲 周杰伦 · 2005《十一月的萧邦》",
   "date": "2026-11-09",
-  "absStart": 3597.75,
+  "absStart": 3612.25,
   "absEnd": 3897.05,
-  "duration": 299.30,
+  "duration": 284.8,
   "bpm": 76,
   "lrc": "analysis/lyrics_mv.lrc",
   "thesis": "月下雪 · 一句话说了三遍，雪就越下越大。全片从青白冷月走到朱砂红尘，最后回到一片白。",
@@ -21,33 +21,360 @@
     "gold": "#D9B26A",
     "cold": "#7FA9BE"
   },
-  "grad": [[0, "#04070B"], [0.45, "#10202C"], [0.8, "#2A4353"], [1, "#05090E"]],
-  "glyphs": ["雪", "月", "尘", "缘", "悔", "杯", "红", "颜"],
-  "tunnelWords": ["狼牙月", "伊人憔悴", "饮尽了风雪", "繁华如三千东流水", "你发如雪", "今生我把酒奉陪"],
-  "typeLines": ["发如雪", "凄美了离别"],
-  "motifs": ["雪", "月", "墨", "朱砂", "香灰"],
-  "live": [
-    [24.0, 27.4], [70.2, 73.6], [105.9, 109.3],
-    [170.2, 173.6], [240.2, 243.6], [272.3, 275.7]
+  "grad": [
+    [
+      0,
+      "#04070B"
+    ],
+    [
+      0.45,
+      "#10202C"
+    ],
+    [
+      0.8,
+      "#2A4353"
+    ],
+    [
+      1,
+      "#05090E"
+    ]
   ],
-  "lookDefault": { "boil": 1.0, "bloom": 0.30, "bloomThreshold": 0.80, "grain": 0.055, "vignette": 0.34, "lutMix": 0.0 },
+  "glyphs": [
+    "雪",
+    "月",
+    "尘",
+    "缘",
+    "悔",
+    "杯",
+    "红",
+    "颜"
+  ],
+  "tunnelWords": [
+    "狼牙月",
+    "伊人憔悴",
+    "饮尽了风雪",
+    "繁华如三千东流水",
+    "你发如雪",
+    "今生我把酒奉陪"
+  ],
+  "typeLines": [
+    "发如雪",
+    "凄美了离别"
+  ],
+  "motifs": [
+    "雪",
+    "月",
+    "墨",
+    "朱砂",
+    "香灰"
+  ],
+  "live": [
+    [
+      9.5,
+      12.9
+    ],
+    [
+      55.7,
+      59.1
+    ],
+    [
+      91.4,
+      94.8
+    ],
+    [
+      155.7,
+      159.1
+    ],
+    [
+      225.7,
+      229.1
+    ],
+    [
+      257.8,
+      261.2
+    ]
+  ],
+  "lookDefault": {
+    "boil": 1.0,
+    "bloom": 0.3,
+    "bloomThreshold": 0.8,
+    "grain": 0.055,
+    "vignette": 0.34,
+    "lutMix": 0.0
+  },
   "acts": [
-    { "id": "intro",   "t0": 0,    "t1": 22.0,  "look": "intro",     "intensity": 0.18, "lut": "night", "pool": ["typeCard", "converge", "solid"],                 "fx": ["dust", "glow", "custom"],                       "trans": ["xfade", "black"] },
-    { "id": "verse1",  "t0": 22.0, "t1": 56.0,  "look": "verse",     "intensity": 0.34, "lut": "night", "pool": ["illust", "solid", "jz", "illust"],            "fx": ["rain", "dust", "glow", "custom", "feathers"],   "trans": ["xfade", "iris", "push"] },
-    { "id": "pre1",    "t0": 56.0, "t1": 70.0,  "look": "pre",       "intensity": 0.48, "lut": "mono",  "pool": ["tunnel", "illust", "converge"],               "fx": ["rays", "embers", "dust", "custom"],             "trans": ["slices", "zoom", "xfade"] },
-    { "id": "chorus1", "t0": 70.0, "t1": 110.0, "look": "chorus",    "intensity": 0.72, "lut": "P4",    "pool": ["kanjiSlam", "illust", "solid", "converge"],    "fx": ["embers", "feathers", "glow", "rays", "custom"],  "trans": ["flash", "iris", "shatter", "black"] },
-    { "id": "verse2",  "t0": 110.0,"t1": 160.0, "look": "verse",     "intensity": 0.40, "lut": "night", "pool": ["illust", "road", "jz", "solid"],              "fx": ["rain", "cracks", "dust", "custom", "grad"],      "trans": ["ink", "xfade", "wipe"] },
-    { "id": "pre2",    "t0": 160.0,"t1": 170.0, "look": "pre",       "intensity": 0.55, "lut": "mono",  "pool": ["tunnel", "ember", "illust"],                  "fx": ["embers", "rays", "custom"],                      "trans": ["zoom", "slices"] },
-    { "id": "chorus2", "t0": 170.0,"t1": 210.0, "look": "chorus",    "intensity": 0.82, "lut": "dawn",  "pool": ["kanjiSlam", "illust", "converge", "solid"],    "fx": ["embers", "feathers", "glow", "custom", "rays"],   "trans": ["flash", "shatter", "iris", "black"] },
-    { "id": "bridge",  "t0": 210.0,"t1": 240.0, "look": "bridge",    "intensity": 0.30, "lut": "mono",  "pool": ["afterimage", "ref", "illust", "tunnel"],       "fx": ["dust", "grad", "custom", "cracks"],              "trans": ["black", "xfade", "wipe"] },
-    { "id": "climax",  "t0": 240.0,"t1": 272.0, "look": "climax",    "intensity": 1.00, "lut": "dawn",  "pool": ["kanjiSlam", "illust", "converge", "solid"],    "fx": ["embers", "fireflies", "glow", "rays", "custom"],  "trans": ["flash", "irisClose", "shatter", "zoom"] },
-    { "id": "outro",   "t0": 272.0,"t1": 299.3, "look": "outro",     "intensity": 0.22, "lut": "day",   "pool": ["afterimage", "typeCard", "solid", "illust"],    "fx": ["feathers", "dust", "custom"],                    "trans": ["flash", "xfade"] }
+    {
+      "id": "intro",
+      "t0": 0.0,
+      "t1": 7.5,
+      "look": "intro",
+      "intensity": 0.18,
+      "lut": "night",
+      "pool": [
+        "typeCard",
+        "converge",
+        "solid"
+      ],
+      "fx": [
+        "dust",
+        "glow",
+        "custom"
+      ],
+      "trans": [
+        "xfade",
+        "black"
+      ]
+    },
+    {
+      "id": "verse1",
+      "t0": 7.5,
+      "t1": 41.5,
+      "look": "verse",
+      "intensity": 0.34,
+      "lut": "night",
+      "pool": [
+        "illust",
+        "solid",
+        "jz",
+        "illust"
+      ],
+      "fx": [
+        "rain",
+        "dust",
+        "glow",
+        "custom",
+        "feathers"
+      ],
+      "trans": [
+        "xfade",
+        "iris",
+        "push"
+      ]
+    },
+    {
+      "id": "pre1",
+      "t0": 41.5,
+      "t1": 55.5,
+      "look": "pre",
+      "intensity": 0.48,
+      "lut": "mono",
+      "pool": [
+        "tunnel",
+        "illust",
+        "converge"
+      ],
+      "fx": [
+        "rays",
+        "embers",
+        "dust",
+        "custom"
+      ],
+      "trans": [
+        "slices",
+        "zoom",
+        "xfade"
+      ]
+    },
+    {
+      "id": "chorus1",
+      "t0": 55.5,
+      "t1": 95.5,
+      "look": "chorus",
+      "intensity": 0.72,
+      "lut": "P4",
+      "pool": [
+        "kanjiSlam",
+        "illust",
+        "solid",
+        "converge"
+      ],
+      "fx": [
+        "embers",
+        "feathers",
+        "glow",
+        "rays",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "iris",
+        "shatter",
+        "black"
+      ]
+    },
+    {
+      "id": "verse2",
+      "t0": 95.5,
+      "t1": 145.5,
+      "look": "verse",
+      "intensity": 0.4,
+      "lut": "night",
+      "pool": [
+        "illust",
+        "road",
+        "jz",
+        "solid"
+      ],
+      "fx": [
+        "rain",
+        "cracks",
+        "dust",
+        "custom",
+        "grad"
+      ],
+      "trans": [
+        "ink",
+        "xfade",
+        "wipe"
+      ]
+    },
+    {
+      "id": "pre2",
+      "t0": 145.5,
+      "t1": 155.5,
+      "look": "pre",
+      "intensity": 0.55,
+      "lut": "mono",
+      "pool": [
+        "tunnel",
+        "ember",
+        "illust"
+      ],
+      "fx": [
+        "embers",
+        "rays",
+        "custom"
+      ],
+      "trans": [
+        "zoom",
+        "slices"
+      ]
+    },
+    {
+      "id": "chorus2",
+      "t0": 155.5,
+      "t1": 195.5,
+      "look": "chorus",
+      "intensity": 0.82,
+      "lut": "dawn",
+      "pool": [
+        "kanjiSlam",
+        "illust",
+        "converge",
+        "solid"
+      ],
+      "fx": [
+        "embers",
+        "feathers",
+        "glow",
+        "custom",
+        "rays"
+      ],
+      "trans": [
+        "flash",
+        "shatter",
+        "iris",
+        "black"
+      ]
+    },
+    {
+      "id": "bridge",
+      "t0": 195.5,
+      "t1": 225.5,
+      "look": "bridge",
+      "intensity": 0.3,
+      "lut": "mono",
+      "pool": [
+        "afterimage",
+        "ref",
+        "illust",
+        "tunnel"
+      ],
+      "fx": [
+        "dust",
+        "grad",
+        "custom",
+        "cracks"
+      ],
+      "trans": [
+        "black",
+        "xfade",
+        "wipe"
+      ]
+    },
+    {
+      "id": "climax",
+      "t0": 225.5,
+      "t1": 257.5,
+      "look": "climax",
+      "intensity": 1.0,
+      "lut": "dawn",
+      "pool": [
+        "kanjiSlam",
+        "illust",
+        "converge",
+        "solid"
+      ],
+      "fx": [
+        "embers",
+        "fireflies",
+        "glow",
+        "rays",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "irisClose",
+        "shatter",
+        "zoom"
+      ]
+    },
+    {
+      "id": "outro",
+      "t0": 257.5,
+      "t1": 284.8,
+      "look": "outro",
+      "intensity": 0.22,
+      "lut": "day",
+      "pool": [
+        "afterimage",
+        "typeCard",
+        "solid",
+        "illust"
+      ],
+      "fx": [
+        "feathers",
+        "dust",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "xfade"
+      ]
+    }
   ],
   "signature": [
-    { "t": 0.0,   "note": "title card in near silence (T21 quiet card)" },
-    { "t": 70.0,  "note": "first 「发如雪」 — per-beat kanji slam" },
-    { "t": 170.0, "note": "chorus 2 returns on fire (ember + shatter)" },
-    { "t": 240.0, "note": "last chorus: snow becomes light" },
-    { "t": 288.0, "note": "end on a retinal afterimage of the title, not a fade" }
-  ]
+    {
+      "t": 0.0,
+      "note": "title card in near silence (T21 quiet card)"
+    },
+    {
+      "t": 55.5,
+      "note": "first 「发如雪」 — per-beat kanji slam"
+    },
+    {
+      "t": 155.5,
+      "note": "chorus 2 returns on fire (ember + shatter)"
+    },
+    {
+      "t": 225.5,
+      "note": "last chorus: snow becomes light"
+    },
+    {
+      "t": 273.5,
+      "note": "end on a retinal afterimage of the title, not a fade"
+    }
+  ],
+  "lrcOffset": 14.5,
+  "timeline_note": "QA round 2: dropped the 14.5 s dead-air head of the 11-09 recording. abs_start, audio, video, LRC, acts, live windows and duration all shifted together; lyric-to-recording alignment is byte-identical to the previous cut."
 }
