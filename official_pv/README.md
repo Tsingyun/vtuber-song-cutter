@@ -54,14 +54,16 @@ official_pv/
 
 | 官方机制 | 本系统 |
 |---|---|
-| 24 个 `Z.scene()` 场景（05 §8） | 页面加载全部 8 个场景文件；镜头 `scene` 指向官方注册名 |
-| 13 种转场（core/trans.js） | 每镜按段落文法挑选，实测命中见审计报告 |
-| 11 种内建 fx（scenes.js:97-116） | 每镜独立组合 `fxBack` / `fx` |
-| 自定义 fx 工厂（官方 Demo 有 5 个） | 每首歌 5 个专属确定性工厂（雪/月/墨/朱砂/光尘；霓虹/雨玻璃/拨号环/…） |
-| WebGL2 post（core/gl.js，15+ 参数） | 每镜 `post` + `Z.LOOKS` 段落分档 + `Z.globalFX` 节拍闪白 |
-| JIZURA 多 plan（06 §3） | 5 套 plan，在 style / seed / fx / centerFree 上真分化 |
+| 24 个 `Z.scene()` 场景（05 §8） | 页面加载全部 8 个场景文件；**25 个场景的参数全部接线**（`songcut.timeline.js` 的 `sceneArgs` 注册表），每首按 `direction.lexicon` 选自己的子集 |
+| 13 种转场（core/trans.js） | 全部 13 类可用（含 `cut` 计为文法选择），每镜按段落文法抽样，参数（`cx/cy/angle/dx/n/seed`）随镜抖动 |
+| 11 种内建 fx（scenes.js:97-116） | 11 种全覆盖，含此前被静默丢弃的 `grad`；未解析的名字进 `__cutAudit.fxDropped` 并让审计 FAIL |
+| 自定义 fx 工厂（官方 Demo 有 5 个） | 新增 `engine/recipes.js`：**18 个通用配方工厂**（按 falling/rising/radial/linear/texture/fracture/colour 分类），每首从 `direction.lexicon.recipes` 抽不同子集 |
+| WebGL2 post（core/gl.js，15+ 参数） | 每镜 `post` + `Z.LOOKS` 段落分档；曲线（bloom/grain/vignette/lutMix）来自 `direction.grade`，高-key 片自动换一套 |
+| JIZURA 多 plan（06 §3） | plan 数量由 `direction.type.plans` 决定（5–7），在 style / schemes / seed / fx / centerFree 上真分化 |
+| 27 套 JIZURA style（06 §4） | `direction.type.styles` 直接点名；`schemes: 'light'` 用于白天片；DENY 名单支持逐片增删（06 §5「adapt per film」） |
+| 调色板「每片新建」（STYLE_RESEARCH / 02 §13） | `prepare.py` 生成 `songs/<id>.palette.json`，`core/main.js` 把 `S_<id>` / `S_<id>_duo` 追加进 LUT atlas（32 行） |
 | 官方 Demo 的零图片路线 | 系统不依赖任何 AI 图片；`illust` 同时走渐变分支与程序化 bg 相机分支 |
-| 节拍锁定剪辑（09 §2） | 切点吸附真实 LRC 行起点，`audio.json` 的 beats 就是这些 onset |
+| 节拍锁定剪辑（09 §2） | 切点吸附真实 LRC 行起点；`audio.json` 的 downbeats 现在是**从 PCM onset 能量测出来的相位**，不再是写死的 0 |
 | master 规格（08 §1） | 1920×1080 / 30fps / quantizer QP20 ≈ 30–40 Mb/s / AAC 320k |
 
 **官方文件只有一个被改动**，其余全是本系统新增文件，逐项见 `docs/COMPLETENESS.md`：
@@ -72,9 +74,36 @@ official_pv/
 源码核对实测：**25 个官方文件逐字节一致**（6 个 core、8 个官方 scenes、JIZURA、工具），
 1 个官方文件被改（`render_frames.mjs`），基准为本地官方克隆 `13b380d`。
 
+## 差异化：direction 层（2026-11-11）
+
+官方 README 写着 "a toolbox to adapt, not a look to reuse"，`02 §10` 规定「与范例撞超过 3 行就 push further」。
+旧版驱动违反这条：每首歌都是同 10 段骨架、同一条强度曲线、`(i*5+ai*3) % pool.length` 的取模式分镜、
+同一批 plan。三首成片只差配色——这就是「模板化」的技术来源。
+
+现在每首歌由 `direction` 决定一切，驱动本身不做任何选择：
+
+| 字段 | 作用 |
+|---|---|
+| `structure` | 段落序列（`pattern`）、各段权重、强度基线与抖动、字密度、最长镜长 → 自动从**歌词自己的时间位置**推导段落边界并吸附到真实行首 |
+| `lexicon.scenes / fx / recipes / trans` | 这首歌的可用词汇（按段落分角色），场景用**种子加权抽样**选，不再取模 |
+| `type` | JIZURA 的 27 套 style、`schemes`（light/dark）、plan 数量、逐片 DENY 增删、`centerDir` |
+| `grade` | LUT 池（含专属 `S_<id>`）、key（exposure）、bloom/grain/vignette/lutMix 曲线、节拍闪白开关 |
+| `opening / ending` | 开场与收尾由方向决定，不再恒定 `typeCard → afterimage` |
+| `char` | 单张 AI 立绘 + 出场窗口；同一张图有 `full/bust/close/sil/rim/shadow` 六种形态（官方 `illust` 的 chars 分支） |
+
+两道闸门，任一失败就拒绝出片：
+
+1. `tools/direction_report.mjs`（`cut.mjs` 第一步自动跑）——把每首歌的 **12 轴签名**物化，
+   两两比对；任意一对差异 < 9 轴、或出现**完全相同的段落骨架**、或整场词汇覆盖太窄，直接 FAIL。
+2. `tools/audit_official.mjs`——22 项运行时检查，含「本片与每一部他片的差异 ≥ 9/12 轴」
+   「所有声明的 fx 都被解析」「立绘可绘制」。
+
+`engine/direction.js` 是这套东西的内核，`engine/recipes.js` 是通用配方库。
+
 ## 运行时验收与视觉 QA
 
-`audit_official.mjs` 共 **18 项**检查，含**全片逐镜冒烟渲染**与**中央预留框作用域检查**（每个镜头中点真渲一帧），
+`audit_official.mjs` 共 **22 项**检查，含**全片逐镜冒烟渲染**、**中央预留框作用域检查**、
+**fx 静默丢弃检查**、**跨片差异度检查**与**立绘可用性检查**（每个镜头中点真渲一帧），
 任何一项 FAIL 就拒绝出片。报告落在 `render/audit_<id>.json`，随成片一起交付。
 视觉 QA 按官方 `09-qa-and-lessons.md` 走「抽联系表 → 发现问题 → 修 → 重抽」，
 本轮两轮联系表与全部修复项记录在 `docs/COMPLETENESS.md §6`。
@@ -87,9 +116,16 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
 ## 加一首新歌
 
 1. 在 `songs/<date>.json` 的 `whitelist` 里加 id，并写 `songs[id]`（录播绝对起止时间、时长、文件名、切点依据）。
-2. 写 `songs/<id>.json`：原唱信息、配色、段落表（每段的官方场景池 / fx 池 / 转场池 / LUT）、直播插入窗口。
+2. 写 `songs/<id>.json`：原唱信息、配色、`grad`、母题字、直播插入窗口，以及 **`direction`**：
+   - `structure.pattern` 写这首歌真实的段落序列（不是照抄别人），`density` 决定字密度；
+   - `lexicon` 写它自己的场景 / fx / 配方 / 转场词汇（按段落角色分）；
+   - `type` 选 JIZURA style 与 `schemes`（白天片务必 `light` + 高-key `grade.exposure`）；
+   - `axes` 把 12 轴答案写清楚，`direction_report` 用它算差异。
+   - 素材依赖场景（`panels` `burst` `memories` `seq` `wetFloor` `train`）需要照片/片段素材，没有素材就别放进 `lexicon`。
 3. 把官方 LRC 放到 `songs/<id>.lrc`（首次运行时 `prepare.py` 也会从 `_media_cache` 自动取）。
-4. `node cut.mjs --date <date> --song <id>`。
+4. 可选：把立绘放到 `assets/char/<id>.png`（RGBA、≥1600 px 高、主体不碰画布边缘），
+   在 `char` 里写 `count` / `roles` / `forms`。素材缺失时立绘窗口自动关闭，不阻塞出片。
+5. `node cut.mjs --date <date> --song <id>`（会先跑 `direction_report` 再逐首 `prepare → audit → render`）。
 
 ## 交付规范
 

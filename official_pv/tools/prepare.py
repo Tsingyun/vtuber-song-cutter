@@ -97,7 +97,10 @@ def main():
          '-vn', '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', str(wav)])
     print(f'[prepare] audio: {wav.stat().st_size/1e6:.1f} MB')
 
-    # ---- 3. analysis/audio.json : beats are REAL lyric onsets + midpoints -----
+    # ---- 2b. bespoke palette for THIS film (02 §"build new palettes for every film") ----
+    write_song_palette(ROOT, cfg)
+
+    # ---- 3. beats = REAL lyric onsets + midpoints -------------------------------
     beats = []
     for i, (t, _) in enumerate(lines):
         beats.append(round(t, 3))
@@ -106,38 +109,71 @@ def main():
             if mid - t > 0.45: beats.append(round(mid, 3))
     beats = sorted(set(b for b in beats if 0 <= b <= cfg['duration']))
     sections = [{'index': i, 'start': ac['t0'], 'end': ac['t1'], 'look': ac['look'], 'id': ac['id']}
-                for i, ac in enumerate(cfg['acts'])]
-    audio = {
-        'duration': cfg['duration'], 'bpm': cfg['bpm'], 'beats': beats,
-        'bars': [{'index': i // 4, 'start': beats[i], 'beats': [i, i + 1, i + 2, i + 3]}
-                 for i in range(0, len(beats) - 3, 4)],
-        'sections': sections, 'stops': [], 'impacts': [ac['t0'] for ac in cfg['acts'] if ac['look'] in ('chorus', 'climax')],
-        'downbeat_info': {'winning_phase': 0},
-        'note': 'beat grid = official-LRC onsets + midpoints; cuts snap to real onsets, never n*60/bpm',
-    }
-    (ROOT / 'analysis' / 'audio.json').write_text(json.dumps(audio, ensure_ascii=False, indent=1), encoding='utf-8')
+                for i, ac in enumerate(cfg.get('acts') or [])]
 
-    # ---- 3b. 30 fps envelope from the actual PCM (Z.makeEnv) ------------------
+    # ---- 3b. PCM analysis: envelope + REAL downbeats + strong onsets -----------
+    # `direction.structure.mode == 'auto'` derives the acts in the browser, so the sections
+    # written here are advisory only. What the engine actually needs from the audio is the
+    # beat grid and the DOWNBEATS: upstream `beats_in(T0,T1,"downbeats")` (and any Blender
+    # shot later) hangs off them. The old build wrote `downbeat_info.winning_phase = 0`
+    # unconditionally, i.e. an invented phase. Now the phase is measured from the PCM.
     import numpy as np, soundfile as sf
     x, sr = sf.read(str(wav), dtype='float32', always_2d=True)
     mono = x.mean(axis=1)
     n = int(math.ceil(cfg['duration'] * 30))
     hop = sr / 30
+
     def frame_rms(i):
         s = int(i * hop); e = min(len(mono), int((i + 1) * hop))
         return float(np.sqrt(np.mean(mono[s:e] ** 2))) if e > s else 0.0
     rms = np.array([frame_rms(i) for i in range(n)], dtype=np.float32)
     mx = float(rms.max()) or 1.0
-    rms = np.clip(rms / mx, 0, 1)
-    onset = np.clip(np.diff(rms, prepend=rms[0]) * 4, 0, 1)
+    rmsn = np.clip(rms / mx, 0, 1)
+    onset_raw = np.clip(np.diff(rmsn, prepend=rmsn[0]) * 4, 0, 1)
+
+    bpm = float(cfg.get('bpm') or 0) or 120.0
+    spb = 60.0 / bpm
+    bar = 4.0 * spb
+    nbars = max(1, int(cfg['duration'] / bar))
+    best_ph, best_sc = 0.0, -1.0
+    for ph in np.linspace(0, bar, 192, endpoint=False):
+        idx = ((np.arange(nbars) * bar + ph) * 30).astype(int)
+        idx = idx[(idx >= 0) & (idx < n)]
+        sc = float(onset_raw[idx].sum()) if idx.size else 0.0
+        if sc > best_sc:
+            best_sc, best_ph = sc, float(ph)
+    downbeats = [round(best_ph + k * bar, 3) for k in range(nbars) if best_ph + k * bar < cfg['duration'] - 0.3]
+    # strong onsets: local maxima, 0.22 s apart
+    peaks = []
+    for i in range(1, n - 1):
+        if onset_raw[i] >= onset_raw[i - 1] and onset_raw[i] >= onset_raw[i + 1] and onset_raw[i] > 0.16:
+            t = i / 30.0
+            if not peaks or t - peaks[-1][0] > 0.22:
+                peaks.append((t, float(onset_raw[i])))
+    peaks.sort(key=lambda p: -p[1])
+    impacts = sorted(round(t, 3) for t, _ in peaks[:8])
+    onsets_strong = sorted(round(t, 3) for t, v in peaks[:220])
+
+    audio = {
+        'duration': cfg['duration'], 'bpm': bpm, 'beats': beats, 'downbeats': downbeats,
+        'bars': [{'index': k, 'start': t, 'beats': [k * 4 + j for j in range(4)]} for k, t in enumerate(downbeats)],
+        'sections': sections, 'stops': [], 'impacts': impacts,
+        'onsets_strong': onsets_strong,
+        'downbeat_info': {'winning_phase': round(best_ph, 4), 'bpm': bpm,
+                          'note': 'phase measured from the PCM onset envelope, not assumed'},
+        'note': 'beat grid = official-LRC onsets + midpoints; downbeats from real onset energy',
+    }
+    (ROOT / 'analysis' / 'audio.json').write_text(json.dumps(audio, ensure_ascii=False, indent=1), encoding='utf-8')
+    print(f'[prepare] downbeats: {len(downbeats)} (phase {best_ph:.3f}s @ {bpm:g} bpm, {bar:.2f}s/bar), strong onsets: {len(onsets_strong)}')
+
     # cheap 3-band split: smoothing differs, enough for env.low / mid / high driven fx
     def smooth(v, k):
         ker = np.ones(k, np.float32) / k
         return np.convolve(v, ker, mode='same')
-    low = smooth(rms, 21); high = np.clip(rms - smooth(rms, 5) + 0.2, 0, 1); mid = smooth(rms, 7)
-    env = {'fps': 30, 'rms': rms.tolist(), 'low': np.clip(low, 0, 1).tolist(),
+    low = smooth(rmsn, 21); high = np.clip(rmsn - smooth(rmsn, 5) + 0.2, 0, 1); mid = smooth(rmsn, 7)
+    env = {'fps': 30, 'rms': rmsn.tolist(), 'low': np.clip(low, 0, 1).tolist(),
            'mid': np.clip(mid, 0, 1).tolist(), 'high': np.clip(high, 0, 1).tolist(),
-           'onset': onset.tolist(), 'vocal': rms.tolist()}
+           'onset': onset_raw.tolist(), 'vocal': rmsn.tolist()}
     (ROOT / 'analysis' / 'envelope_30fps.json').write_text(json.dumps(env), encoding='utf-8')
     # ---- 3c. opening-audio guard (QA round 2) -----------------------------------------
     # The delivered cut must START with music, not 12 s of digital silence. Check the real
@@ -156,6 +192,9 @@ def main():
         print('[prepare] procedural plates: 3')
     except ImportError:
         print('[prepare] Pillow missing -- illust falls back to its gradient branch (still official)')
+
+    # ---- 4b. the (user-supplied) single illustration ---------------------------
+    check_char_asset(ROOT, cfg)
 
     # ---- 5. live insert frames (short, cropped, 30 fps) -----------------------
     # Idempotent by construction: ffmpeg writes the FINAL frame numbers in place with
@@ -178,6 +217,77 @@ def main():
         print(f'[prepare] live frames: {total}  ({100*total/30/cfg["duration"]:.1f}% of runtime)')
 
     print('[prepare] DONE')
+
+
+def _rgb(h):
+    h = h.lstrip('#')
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _mix(a, b, k):
+    A, B = _rgb(a), _rgb(b)
+    return '#%02X%02X%02X' % tuple(round(A[i] + (B[i] - A[i]) * k) for i in range(3))
+
+
+def write_song_palette(ROOT, cfg):
+    """Write songs/<id>.palette.json -- the film's OWN gradient map.
+
+    Upstream STYLE_RESEARCH / 02 §13: "build new palettes for every film, the shipped five are
+    the zanko example". The engine (core/main.js) appends these rows to the LUT atlas as
+    `S_<id>` / `S_<id>_duo`, so a song can be graded with its own ramp instead of borrowing
+    P1..P5. Stops are declared as colours, no PNG asset needed.
+    """
+    P = cfg['palette']
+    d = cfg.get('direction') or {}
+    high = float((d.get('grade') or {}).get('exposure') or 0) > 0.15
+    if high:
+        # high-key: never crush the shadows, lift them toward the paper colour
+        ramp = [(0.00, _mix(P['ink'], P['glow'], 0.28)),
+                (0.30, _mix(P['mid'], P['accent'], 0.45)),
+                (0.60, P['accent']),
+                (0.85, _mix(P['accent'], P['glow'], 0.65)),
+                (1.00, '#FFFFFF')]
+    else:
+        ramp = [(0.00, P['void']), (0.28, P['ink']), (0.54, P['mid']),
+                (0.76, P['accent']), (0.92, P['glow']), (1.00, '#FFFFFF')]
+    duo = [(0.0, P.get('cold') or P['mid']), (0.5, _mix(P['mid'], P['accent'], 0.5)), (1.0, P['glow'])]
+    out = {'id': f"S_{cfg['id']}", 'key': 'high' if high else 'low',
+           'ramp': [[k, c] for k, c in ramp], 'duo': [[k, c] for k, c in duo],
+           'note': 'per-film gradient map; appended to the LUT atlas by core/main.js'}
+    (ROOT / 'songs' / f"{cfg['id']}.palette.json").write_text(
+        json.dumps(out, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    print(f"[prepare] palette: {out['id']} ({out['key']}-key, {len(ramp)} stops)")
+
+
+def check_char_asset(ROOT, cfg):
+    """Validate the (user-supplied) single illustration before it is wired in.
+
+    Upstream 09 lists "sprite straight edge" and "alpha 252-254" as recurring failure modes,
+    and both are invisible until you watch the render. Catch them here instead.
+    """
+    p = ROOT / 'assets' / 'char' / f"{cfg['id']}.png"
+    if not p.exists():
+        print(f"[prepare] char: none at assets/char/{cfg['id']}.png -> character windows disabled for now")
+        return
+    try:
+        from PIL import Image
+    except ImportError:
+        print('[prepare] char: found but Pillow missing, cannot validate')
+        return
+    im = Image.open(p)
+    print(f"[prepare] char: {p.name}  {im.size[0]}x{im.size[1]}  {im.mode}")
+    if im.mode not in ('RGBA', 'LA'):
+        print('[prepare] char: WARNING no alpha channel -- export RGBA or run a matte step, '
+              'otherwise the `sil` / `rim` forms will draw a rectangle')
+    else:
+        bb = im.getchannel('A').getbbox()
+        w, h = im.size
+        if bb and (bb[0] <= 1 or bb[1] <= 1 or bb[2] >= w - 1 or bb[3] >= h - 1):
+            print(f'[prepare] char: WARNING subject touches the canvas edge {bb} -- official 09 '
+                  f'"sprite straight edge"; the `close` form will reveal a cut line')
+    if im.size[1] < 1600:
+        print(f'[prepare] char: WARNING height {im.size[1]} < 1600 -- the close-up form draws at '
+              f'h=2380 px, expect softness')
 
 
 def paint_plates(ROOT, cfg, Image, ImageDraw, ImageFilter):

@@ -61,6 +61,11 @@ function probe(file) {
 }
 
 const delivered = [];
+// Enforce upstream 02 §10 for the WHOLE session before touching a single frame: every pair of
+// films must differ on at least 9 of the 12 axes, and no two may share an act skeleton.
+// This is the gate that makes "templated batch" impossible to ship.
+run(process.execPath, ['tools/direction_report.mjs', '--date', date], `DIRECTION REPORT ${date}`);
+
 for (const id of ids) {
   const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'songs', `${id}.json`), 'utf8'));
   const meta = session.songs[id];

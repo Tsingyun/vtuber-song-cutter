@@ -95,11 +95,11 @@
     ]
   ],
   "lookDefault": {
-    "boil": 1.0,
-    "bloom": 0.3,
-    "bloomThreshold": 0.8,
-    "grain": 0.055,
-    "vignette": 0.34,
+    "boil": 0.85,
+    "bloom": 0.44,
+    "bloomThreshold": 0.93,
+    "grain": 0.032,
+    "vignette": 0.12,
     "lutMix": 0.0
   },
   "acts": [
@@ -367,5 +367,245 @@
   "lrcOffset": 0.0,
   "theme": "city",
   "timeline_note": "4 ASR anchors vs official LRC (spread 0.29 s) -> 6698.61; opening RMS 0.0968 (healthy, no head shift). out 6904.00 = -180 dB absolute digital silence lasting 27.6 s until the 6931.5 s speech; live length 205.39 s vs official 210.373 s (尾奏提前收 5.0 s).",
-  "original_artist_verified": true
+  "original_artist_verified": true,
+  "direction": {
+    "seed": 20091221,
+    "structure": {
+      "mode": "auto",
+      "pattern": [
+        "intro",
+        "verse",
+        "pre",
+        "chorus",
+        "verse",
+        "pre",
+        "chorus",
+        "tag",
+        "climax",
+        "outro"
+      ],
+      "weights": {
+        "verse": 0.95,
+        "pre": 0.45,
+        "chorus": 1.2,
+        "tag": 0.4,
+        "climax": 0.85
+      },
+      "base": {
+        "intro": 0.2,
+        "verse": 0.42,
+        "pre": 0.6,
+        "chorus": 0.8,
+        "tag": 0.34,
+        "climax": 0.96,
+        "outro": 0.24
+      },
+      "jitter": 0.08,
+      "density": 1,
+      "maxHold": 4.2,
+      "minShot": 0.55,
+      "tailGap": 1.6
+    },
+    "lexicon": {
+      "scenes": {
+        "intro": [
+          "titleRiff",
+          "typeCard",
+          "converge"
+        ],
+        "verse": [
+          "illust",
+          "jz",
+          "solid",
+          "ref"
+        ],
+        "pre": [
+          "converge",
+          "ref",
+          "illust"
+        ],
+        "chorus": [
+          "kanjiSlam",
+          "converge",
+          "illust"
+        ],
+        "tag": [
+          "typeCard",
+          "jz"
+        ],
+        "climax": [
+          "kanjiSlam",
+          "converge",
+          "illust",
+          "tunnel"
+        ],
+        "outro": [
+          "typeCard",
+          "afterimage",
+          "solid"
+        ]
+      },
+      "any": [
+        "illust",
+        "jz",
+        "solid"
+      ],
+      "fx": {
+        "intro": [
+          "grad",
+          "dust"
+        ],
+        "verse": [
+          "grad",
+          "rays",
+          "glow",
+          "custom"
+        ],
+        "pre": [
+          "fill",
+          "rays",
+          "custom"
+        ],
+        "chorus": [
+          "rays",
+          "glow",
+          "fireflies",
+          "grad"
+        ],
+        "tag": [
+          "fill",
+          "grad"
+        ],
+        "climax": [
+          "rays",
+          "glow",
+          "fireflies",
+          "grad"
+        ],
+        "outro": [
+          "grad",
+          "feathers"
+        ]
+      },
+      "anyFx": [
+        "grad",
+        "dust"
+      ],
+      "trans": [
+        "flash",
+        "slices",
+        "push",
+        "wipe",
+        "zoom",
+        "shatter",
+        "irisClose",
+        "cut"
+      ],
+      "recipes": [
+        "arrowFlow",
+        "halftone",
+        "gridPersp",
+        "confettiBurst",
+        "sweepBars",
+        "speedLines",
+        "clockTicks",
+        "scanlines"
+      ]
+    },
+    "type": {
+      "styles": [
+        "candy",
+        "kraft",
+        "acid"
+      ],
+      "schemes": "light",
+      "plans": 7,
+      "fx": {
+        "motion": 0.85,
+        "glitch": 0.18,
+        "chroma": 0.3,
+        "decor": 0.6,
+        "density": 0.64,
+        "texture": 0.4,
+        "flash": true,
+        "koma": 12,
+        "hud": "off",
+        "bgSwitch": 0.4
+      },
+      "deny": {
+        "layout": {
+          "add": [
+            "ransom",
+            "proofread"
+          ]
+        }
+      },
+      "centerDir": "tb"
+    },
+    "grade": {
+      "lutPool": [
+        "day",
+        "S_xiageluokoujian",
+        "graphic"
+      ],
+      "base": {
+        "boil": 0.85,
+        "bloom": 0.44,
+        "bloomThreshold": 0.93,
+        "grain": 0.032,
+        "vignette": 0.12,
+        "lutMix": 0.0
+      },
+      "exposure": 0.18,
+      "bloomCurve": [
+        0.34,
+        0.56
+      ],
+      "grainCurve": [
+        0.02,
+        0.05
+      ],
+      "vignetteCurve": [
+        0.06,
+        0.18
+      ],
+      "lutMixCurve": [
+        0.1,
+        0.3
+      ],
+      "caBoost": 0.8,
+      "flashOnSection": true,
+      "shakeOnClimax": false
+    },
+    "opening": "titleRiff",
+    "ending": "typeCard",
+    "axes": {
+      "world": "正午城市 · 十字路口 / 地铁指示 / 巨大钟面",
+      "timeArc": "正午走到午后，全程明亮，绝不落夜",
+      "palette": "奶油白 #FFF7EC + 蜜桃粉 #F06FA8 + 薄荷青 #63C9DE",
+      "motif": "方格 → 箭头 + 圆（钟面刻度）",
+      "material": "丝网印刷 2–3 色 + 粗马克笔 + 半调网点",
+      "role": "轻快动态的街头姿态，走出画框"
+    }
+  },
+  "char": {
+    "img": "assets/char/xiageluokoujian.png",
+    "count": 5,
+    "roles": [
+      "verse",
+      "chorus",
+      "climax"
+    ],
+    "forms": [
+      "full",
+      "close",
+      "bust",
+      "shadow",
+      "rim"
+    ],
+    "lenRange": [
+      2.4,
+      4.0
+    ]
+  }
 }

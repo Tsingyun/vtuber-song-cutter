@@ -34,6 +34,11 @@
 <!-- Our ONE custom scene: a short, small, mask-only insert of the stream footage.
      Registered in this page (and vertical.html) as required by 05-engine.md §9. -->
 <script src="scenes/livewin.js"></script>
+<!-- Differentiation layer (not part of upstream, but it exists to OBEY upstream):
+     direction.js turns a song's own material into a 12-axis direction + act skeleton,
+     recipes.js is the generic fx-factory library. Both are consumed by the timeline. -->
+<script src="direction.js"></script>
+<script src="recipes.js"></script>
 <script>
   // Default timeline is the generic song-cut driver; ?tl= can still load any official
   // timeline (e.g. ?tl=__official_demo_timeline.js) for smoke tests / scene tests.

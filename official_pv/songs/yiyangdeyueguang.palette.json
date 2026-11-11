@@ -1,0 +1,45 @@
+{
+ "id": "S_yiyangdeyueguang",
+ "key": "low",
+ "ramp": [
+  [
+   0.0,
+   "#050A16"
+  ],
+  [
+   0.28,
+   "#0A1226"
+  ],
+  [
+   0.54,
+   "#1B2740"
+  ],
+  [
+   0.76,
+   "#9DB4E8"
+  ],
+  [
+   0.92,
+   "#EEF2FF"
+  ],
+  [
+   1.0,
+   "#FFFFFF"
+  ]
+ ],
+ "duo": [
+  [
+   0.0,
+   "#7E9BD4"
+  ],
+  [
+   0.5,
+   "#5C6E94"
+  ],
+  [
+   1.0,
+   "#EEF2FF"
+  ]
+ ],
+ "note": "per-film gradient map; appended to the LUT atlas by core/main.js"
+}

@@ -95,11 +95,11 @@
     ]
   ],
   "lookDefault": {
-    "boil": 1.0,
-    "bloom": 0.3,
-    "bloomThreshold": 0.8,
-    "grain": 0.055,
-    "vignette": 0.34,
+    "boil": 0.7,
+    "bloom": 0.16,
+    "bloomThreshold": 0.86,
+    "grain": 0.062,
+    "vignette": 0.42,
     "lutMix": 0.0
   },
   "acts": [
@@ -367,5 +367,232 @@
   "lrcOffset": 5.0,
   "theme": "moon",
   "timeline_note": "3 ASR anchors vs official LRC (spread 0.35 s) -> 6291.77. SRT 首句「倔强的表情／怎么看得我越来越心慌」判定为徐佳莹 2009 原创版，不是苏芮《搭错车》版；成片标原唱 徐佳莹。0.5 s 处 -67 dB 谷 + 15 s 轻钢琴前奏导致开头 RMS 0.0070 < 0.008 门槛 -> start advanced 5.00 s, whole timeline shifted -5.00 s. out 6525.60 = -62 dB fade-out before the 6526 s speech; live length 228.83 s vs official 240.386 s (尾奏提前收 6.6 s).",
-  "original_artist_verified": true
+  "original_artist_verified": true,
+  "direction": {
+    "seed": 20090529,
+    "structure": {
+      "mode": "auto",
+      "pattern": [
+        "intro",
+        "verse",
+        "chorus",
+        "bridge",
+        "chorus",
+        "climax",
+        "outro"
+      ],
+      "weights": {
+        "verse": 1.15,
+        "chorus": 1.35,
+        "bridge": 0.7,
+        "climax": 0.8
+      },
+      "base": {
+        "intro": 0.14,
+        "verse": 0.28,
+        "chorus": 0.6,
+        "bridge": 0.22,
+        "climax": 0.86,
+        "outro": 0.16
+      },
+      "jitter": 0.04,
+      "density": 3,
+      "maxHold": 7.0,
+      "minShot": 0.9,
+      "tailGap": 3.2
+    },
+    "lexicon": {
+      "scenes": {
+        "intro": [
+          "ink",
+          "typeCard",
+          "solid"
+        ],
+        "verse": [
+          "jz",
+          "illust",
+          "solid",
+          "ink"
+        ],
+        "chorus": [
+          "jz",
+          "illust",
+          "converge",
+          "solid"
+        ],
+        "bridge": [
+          "ink",
+          "afterimage",
+          "jz"
+        ],
+        "climax": [
+          "illust",
+          "jz",
+          "converge"
+        ],
+        "outro": [
+          "solid",
+          "afterimage",
+          "typeCard"
+        ]
+      },
+      "any": [
+        "jz",
+        "illust",
+        "solid"
+      ],
+      "fx": {
+        "intro": [
+          "dust"
+        ],
+        "verse": [
+          "glow",
+          "dust",
+          "grad",
+          "custom"
+        ],
+        "chorus": [
+          "glow",
+          "dust",
+          "grad"
+        ],
+        "bridge": [
+          "fill",
+          "dust",
+          "custom",
+          "grad"
+        ],
+        "climax": [
+          "glow",
+          "fireflies",
+          "rays"
+        ],
+        "outro": [
+          "dust",
+          "feathers"
+        ]
+      },
+      "anyFx": [
+        "dust",
+        "glow"
+      ],
+      "trans": [
+        "cut",
+        "xfade",
+        "black",
+        "ink",
+        "iris",
+        "zoom"
+      ],
+      "recipes": [
+        "ripples",
+        "breathFog",
+        "paperFiber",
+        "bokehOrbs",
+        "edgeBloom"
+      ]
+    },
+    "type": {
+      "styles": [
+        "sumi",
+        "mono"
+      ],
+      "schemes": "dark",
+      "plans": 5,
+      "fx": {
+        "motion": 0.34,
+        "glitch": 0.1,
+        "chroma": 0.2,
+        "decor": 0.22,
+        "density": 0.3,
+        "texture": 0.74,
+        "flash": false,
+        "koma": 12,
+        "hud": "off",
+        "bgSwitch": 0.16
+      },
+      "deny": {
+        "decor": {
+          "add": [
+            "qrBlock",
+            "cursorClick",
+            "notifBell",
+            "confetti",
+            "starburst"
+          ]
+        },
+        "fx": {
+          "add": [
+            "speedLines",
+            "focusLines",
+            "halftone"
+          ]
+        }
+      },
+      "centerDir": "lr"
+    },
+    "grade": {
+      "lutPool": [
+        "mono",
+        "S_yiyangdeyueguang",
+        "night"
+      ],
+      "base": {
+        "boil": 0.7,
+        "bloom": 0.16,
+        "bloomThreshold": 0.86,
+        "grain": 0.062,
+        "vignette": 0.42,
+        "lutMix": 0.0
+      },
+      "exposure": -0.04,
+      "bloomCurve": [
+        0.1,
+        0.26
+      ],
+      "grainCurve": [
+        0.045,
+        0.08
+      ],
+      "vignetteCurve": [
+        0.26,
+        0.52
+      ],
+      "lutMixCurve": [
+        0.12,
+        0.22
+      ],
+      "caBoost": 0.4,
+      "flashOnSection": false,
+      "shakeOnClimax": false
+    },
+    "opening": "ink",
+    "ending": "solid",
+    "axes": {
+      "world": "深夜房间 · 窗 / 墙 / 地板 / 月光",
+      "timeArc": "一整夜不变，只让月光移出画面",
+      "palette": "墨蓝 #050A16/#1B2740 + 银白 #EEF2FF（无第三色）",
+      "motif": "圆（月 / 月晕）+ 矩形（窗棂与硬边投影）",
+      "material": "剪影 / 版画，几乎无描边，两三层平涂",
+      "role": "侧脸或背影，只给轮廓与一道银边"
+    }
+  },
+  "char": {
+    "img": "assets/char/yiyangdeyueguang.png",
+    "count": 3,
+    "roles": [
+      "verse",
+      "chorus",
+      "bridge"
+    ],
+    "forms": [
+      "sil",
+      "shadow",
+      "rim"
+    ],
+    "lenRange": [
+      3.6,
+      6.0
+    ]
+  }
 }

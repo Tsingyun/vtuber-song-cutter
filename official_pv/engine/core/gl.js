@@ -51,7 +51,7 @@
   uniform float boil, boilSeed, lutA, lutB, lutBlend, lutMix, ca, textCa, glitch, glitchSeed, zoomBlur, textOpacity;
   uniform float exposure, contrast, saturation; uniform vec3 lift, gain;
   uniform vec2 zoomCenter, shake;
-  const float LUT_ROWS = 16.;
+  const float LUT_ROWS = 32.;
   vec3 gradmap(float l, float row){ return texture(lut, vec2(l*255./256.+0.5/256., (row+0.5)/LUT_ROWS)).rgb; }
   vec3 sceneAt(vec2 q){
     return texture(scene, q).rgb;
@@ -202,7 +202,7 @@
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
       gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       progs.comp = prog(FS_COMP); progs.bright = prog(FS_BRIGHT); progs.blur = prog(FS_BLUR); progs.final = prog(FS_FINAL);
-      texScene = tex(W, H); texText = tex(W, H); texLut = tex(256, 16); texFg = tex(W, H);
+      texScene = tex(W, H); texText = tex(W, H); texLut = tex(256, 32); texFg = tex(W, H);
       fbo.comp = target(W, H, 'rgba16f');
       fbo.b1 = target(W >> 1, H >> 1, 'rgba16f'); fbo.b1b = target(W >> 1, H >> 1, 'rgba16f');
       fbo.b2 = target(W >> 2, H >> 2, 'rgba16f'); fbo.b2b = target(W >> 2, H >> 2, 'rgba16f');
@@ -211,7 +211,7 @@
       post.renderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
       return post.renderer;
     },
-    // LUT atlas: canvas 256 x 16, one palette ramp per row (row index = Z.LUT[name])
+    // LUT atlas: canvas 256 x LUT_ROWS, one palette ramp per row (row index = Z.LUT[name])
     setLutAtlas(canvas) {
       gl.bindTexture(gl.TEXTURE_2D, texLut);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);

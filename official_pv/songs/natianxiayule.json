@@ -96,7 +96,7 @@
   ],
   "lookDefault": {
     "boil": 1.0,
-    "bloom": 0.3,
+    "bloom": 0.28,
     "bloomThreshold": 0.8,
     "grain": 0.055,
     "vignette": 0.34,
@@ -368,5 +368,250 @@
   "lrcOffset": 3.4,
   "theme": "rain",
   "timeline_note": "7 ASR anchors vs official LRC (spread 2.26 s) -> 5787.80; 0.5-3.4 s digital dead air (-49..-60 dB) -> start advanced 3.40 s and LRC/acts/live/duration shifted -3.40 s together; out 6011.00 = -114 dB digital silence before the 6012 s speech. Live length 219.80 s vs official 223 s.",
-  "original_artist_verified": true
+  "original_artist_verified": true,
+  "direction": {
+    "seed": 20261110,
+    "structure": {
+      "mode": "auto",
+      "pattern": [
+        "intro",
+        "verse",
+        "pre",
+        "chorus",
+        "verse",
+        "pre",
+        "chorus",
+        "bridge",
+        "climax",
+        "outro"
+      ],
+      "weights": {
+        "verse": 1.0,
+        "pre": 0.5,
+        "chorus": 1.3,
+        "bridge": 0.75,
+        "climax": 0.9
+      },
+      "base": {
+        "intro": 0.16,
+        "verse": 0.34,
+        "pre": 0.5,
+        "chorus": 0.72,
+        "bridge": 0.3,
+        "climax": 0.94,
+        "outro": 0.2
+      },
+      "jitter": 0.07,
+      "density": 2,
+      "maxHold": 6.0,
+      "minShot": 0.62,
+      "tailGap": 2.2
+    },
+    "lexicon": {
+      "scenes": {
+        "intro": [
+          "typeCard",
+          "converge",
+          "solid"
+        ],
+        "verse": [
+          "illust",
+          "jz",
+          "solid",
+          "ref",
+          "road"
+        ],
+        "pre": [
+          "tunnel",
+          "converge",
+          "ref",
+          "illust"
+        ],
+        "chorus": [
+          "kanjiSlam",
+          "converge",
+          "illust"
+        ],
+        "bridge": [
+          "ink",
+          "afterimage",
+          "illust",
+          "jz"
+        ],
+        "climax": [
+          "kanjiSlam",
+          "tunnel",
+          "illust"
+        ],
+        "outro": [
+          "afterimage",
+          "typeCard",
+          "solid",
+          "illust"
+        ]
+      },
+      "any": [
+        "illust",
+        "jz",
+        "solid"
+      ],
+      "fx": {
+        "intro": [
+          "dust",
+          "glow"
+        ],
+        "verse": [
+          "rain",
+          "dust",
+          "glow",
+          "custom"
+        ],
+        "pre": [
+          "rays",
+          "dust",
+          "grad"
+        ],
+        "chorus": [
+          "rain",
+          "feathers",
+          "glow",
+          "fireflies"
+        ],
+        "bridge": [
+          "dust",
+          "fill",
+          "custom"
+        ],
+        "climax": [
+          "fireflies",
+          "glow",
+          "rays",
+          "cracks"
+        ],
+        "outro": [
+          "feathers",
+          "dust"
+        ]
+      },
+      "anyFx": [
+        "dust",
+        "glow"
+      ],
+      "trans": [
+        "xfade",
+        "iris",
+        "push",
+        "ink",
+        "wipe",
+        "zoom",
+        "slices",
+        "black"
+      ],
+      "recipes": [
+        "ripples",
+        "pollen",
+        "bokehOrbs",
+        "dustShaft",
+        "sweepLines",
+        "breathFog",
+        "petalFall",
+        "sparkTrail"
+      ]
+    },
+    "type": {
+      "styles": [
+        "ocean",
+        "newsprint"
+      ],
+      "schemes": "dark",
+      "plans": 6,
+      "fx": {
+        "motion": 0.62,
+        "glitch": 0.26,
+        "chroma": 0.38,
+        "decor": 0.34,
+        "density": 0.46,
+        "texture": 0.62,
+        "flash": false,
+        "koma": 12,
+        "hud": "off",
+        "bgSwitch": 0.28
+      },
+      "deny": {
+        "decor": {
+          "add": [
+            "qrBlock",
+            "cursorClick",
+            "notifBell"
+          ]
+        }
+      },
+      "centerDir": "tb"
+    },
+    "grade": {
+      "lutPool": [
+        "night",
+        "dawn",
+        "P4",
+        "S_natianxiayule"
+      ],
+      "base": {
+        "boil": 1.0,
+        "bloom": 0.28,
+        "bloomThreshold": 0.8,
+        "grain": 0.055,
+        "vignette": 0.34,
+        "lutMix": 0.0
+      },
+      "exposure": 0,
+      "bloomCurve": [
+        0.16,
+        0.4
+      ],
+      "grainCurve": [
+        0.04,
+        0.075
+      ],
+      "vignetteCurve": [
+        0.18,
+        0.44
+      ],
+      "lutMixCurve": [
+        0.1,
+        0.24
+      ],
+      "caBoost": 1.0,
+      "flashOnSection": false,
+      "shakeOnClimax": false
+    },
+    "opening": "typeCard",
+    "ending": "afterimage",
+    "axes": {
+      "world": "雨后市郊车站 · 候车月台 / 车窗 / 积水",
+      "timeArc": "阴 → 雨停 → 一道很淡的彩虹",
+      "palette": "冷青灰 #07121A/#1E3B48 + 单一暖金 #E8A34C",
+      "motif": "竖直雨线 + 圆弧（透明伞 / 虹）",
+      "material": "细笔水彩 + 纸纹，平涂 + 单硬阴影",
+      "role": "安静撑伞的少女，越过肩膀回望"
+    }
+  },
+  "char": {
+    "img": "assets/char/natianxiayule.png",
+    "count": 4,
+    "roles": [
+      "verse",
+      "chorus",
+      "climax"
+    ],
+    "forms": [
+      "full",
+      "rim",
+      "bust",
+      "sil"
+    ],
+    "lenRange": [
+      3.0,
+      4.8
+    ]
+  }
 }
