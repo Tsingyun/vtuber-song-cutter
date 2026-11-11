@@ -1,0 +1,371 @@
+{
+  "id": "xiageluokoujian",
+  "title": "下个，路口，见",
+  "titleSub": "SEE YOU AT THE NEXT CROSSING",
+  "artist": "李宇春",
+  "credit": "词曲 李宇春 / 编曲 谭伊哲 · 2009 同名专辑《李宇春》",
+  "date": "2026-11-10",
+  "absStart": 6698.61,
+  "absEnd": 6904.0,
+  "duration": 205.39,
+  "bpm": 120,
+  "lrc": "analysis/lyrics_mv.lrc",
+  "thesis": "两个城市一个时差 · 平行的画总在滴答声里交叉。洋红与青色交错，最后定格在没亮的人行灯。",
+  "palette": {
+    "void": "#0A0713",
+    "ink": "#150E22",
+    "mid": "#2A1B3D",
+    "glow": "#FFF0F6",
+    "accent": "#F06FA8",
+    "warm": "#FFB36B",
+    "gold": "#E8C48A",
+    "cold": "#63C9DE"
+  },
+  "grad": [
+    [
+      0,
+      "#08050F"
+    ],
+    [
+      0.42,
+      "#1B102C"
+    ],
+    [
+      0.8,
+      "#43204F"
+    ],
+    [
+      1,
+      "#0A0713"
+    ]
+  ],
+  "glyphs": [
+    "路",
+    "钟",
+    "差",
+    "铁",
+    "雨",
+    "茶",
+    "遇",
+    "见"
+  ],
+  "tunnelWords": [
+    "刚下的地铁还不算拥挤",
+    "东京下雨淋湿巴黎",
+    "秒针转动 DI DI DA",
+    "小小时差 DI DI DA",
+    "平行的画",
+    "下个路口再见吧"
+  ],
+  "typeLines": [
+    "下个，路口，见",
+    "下个路口再见吧"
+  ],
+  "motifs": [
+    "地铁",
+    "路口",
+    "时钟",
+    "霓虹",
+    "时差"
+  ],
+  "live": [
+    [
+      9.24,
+      12.64
+    ],
+    [
+      51.35,
+      54.75
+    ],
+    [
+      82.16,
+      85.56
+    ],
+    [
+      129.4,
+      132.8
+    ],
+    [
+      164.31,
+      167.71
+    ],
+    [
+      188.96,
+      192.36
+    ]
+  ],
+  "lookDefault": {
+    "boil": 1.0,
+    "bloom": 0.3,
+    "bloomThreshold": 0.8,
+    "grain": 0.055,
+    "vignette": 0.34,
+    "lutMix": 0.0
+  },
+  "acts": [
+    {
+      "id": "intro",
+      "t0": 0.0,
+      "t1": 7.19,
+      "look": "intro",
+      "intensity": 0.18,
+      "lut": "night",
+      "pool": [
+        "typeCard",
+        "converge",
+        "solid"
+      ],
+      "fx": [
+        "dust",
+        "glow",
+        "custom"
+      ],
+      "trans": [
+        "xfade",
+        "black"
+      ]
+    },
+    {
+      "id": "verse1",
+      "t0": 7.19,
+      "t1": 32.53,
+      "look": "verse",
+      "intensity": 0.34,
+      "lut": "night",
+      "pool": [
+        "illust",
+        "road",
+        "jz",
+        "solid"
+      ],
+      "fx": [
+        "rain",
+        "dust",
+        "glow",
+        "custom"
+      ],
+      "trans": [
+        "wipe",
+        "push",
+        "xfade"
+      ]
+    },
+    {
+      "id": "pre1",
+      "t0": 32.53,
+      "t1": 47.2,
+      "look": "pre",
+      "intensity": 0.48,
+      "lut": "mono",
+      "pool": [
+        "tunnel",
+        "converge",
+        "illust"
+      ],
+      "fx": [
+        "rays",
+        "embers",
+        "custom"
+      ],
+      "trans": [
+        "slices",
+        "zoom"
+      ]
+    },
+    {
+      "id": "chorus1",
+      "t0": 47.2,
+      "t1": 73.85,
+      "look": "chorus",
+      "intensity": 0.72,
+      "lut": "P4",
+      "pool": [
+        "kanjiSlam",
+        "solid",
+        "illust",
+        "converge"
+      ],
+      "fx": [
+        "glow",
+        "rays",
+        "glow",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "shatter",
+        "iris"
+      ]
+    },
+    {
+      "id": "verse2",
+      "t0": 73.85,
+      "t1": 106.27,
+      "look": "verse",
+      "intensity": 0.4,
+      "lut": "night",
+      "pool": [
+        "illust",
+        "road",
+        "jz",
+        "afterimage"
+      ],
+      "fx": [
+        "rain",
+        "cracks",
+        "dust",
+        "custom"
+      ],
+      "trans": [
+        "wipe",
+        "xfade",
+        "ink"
+      ]
+    },
+    {
+      "id": "pre2",
+      "t0": 106.27,
+      "t1": 120.71,
+      "look": "pre",
+      "intensity": 0.55,
+      "lut": "mono",
+      "pool": [
+        "tunnel",
+        "converge",
+        "ember"
+      ],
+      "fx": [
+        "embers",
+        "rays",
+        "custom"
+      ],
+      "trans": [
+        "zoom",
+        "slices"
+      ]
+    },
+    {
+      "id": "chorus2",
+      "t0": 120.71,
+      "t1": 149.8,
+      "look": "chorus",
+      "intensity": 0.82,
+      "lut": "dawn",
+      "pool": [
+        "kanjiSlam",
+        "illust",
+        "solid",
+        "road"
+      ],
+      "fx": [
+        "glow",
+        "embers",
+        "feathers",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "iris",
+        "shatter"
+      ]
+    },
+    {
+      "id": "bridge",
+      "t0": 149.8,
+      "t1": 169.31,
+      "look": "bridge",
+      "intensity": 0.3,
+      "lut": "mono",
+      "pool": [
+        "afterimage",
+        "ref",
+        "illust",
+        "tunnel"
+      ],
+      "fx": [
+        "dust",
+        "grad",
+        "custom"
+      ],
+      "trans": [
+        "black",
+        "wipe",
+        "xfade"
+      ]
+    },
+    {
+      "id": "climax",
+      "t0": 169.31,
+      "t1": 188.96,
+      "look": "climax",
+      "intensity": 1.0,
+      "lut": "dawn",
+      "pool": [
+        "kanjiSlam",
+        "road",
+        "converge",
+        "illust"
+      ],
+      "fx": [
+        "fireflies",
+        "rays",
+        "glow",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "zoom",
+        "shatter"
+      ]
+    },
+    {
+      "id": "outro",
+      "t0": 188.96,
+      "t1": 205.39,
+      "look": "outro",
+      "intensity": 0.22,
+      "lut": "day",
+      "pool": [
+        "afterimage",
+        "typeCard",
+        "solid",
+        "illust"
+      ],
+      "fx": [
+        "feathers",
+        "dust",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "xfade"
+      ]
+    }
+  ],
+  "signature": [
+    {
+      "t": 0.0,
+      "note": "title card on the first bar (T21 quiet card)"
+    },
+    {
+      "t": 47.2,
+      "note": "first chorus: per-beat kanji slam"
+    },
+    {
+      "t": 120.71,
+      "note": "chorus 2 returns (ember + shatter)"
+    },
+    {
+      "t": 169.31,
+      "note": "last chorus / climax"
+    },
+    {
+      "t": 194.09,
+      "note": "end on a retinal afterimage of the title"
+    }
+  ],
+  "lrcOffset": 0.0,
+  "theme": "city",
+  "timeline_note": "4 ASR anchors vs official LRC (spread 0.29 s) -> 6698.61; opening RMS 0.0968 (healthy, no head shift). out 6904.00 = -180 dB absolute digital silence lasting 27.6 s until the 6931.5 s speech; live length 205.39 s vs official 210.373 s (尾奏提前收 5.0 s).",
+  "original_artist_verified": true
+}

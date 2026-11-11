@@ -1,0 +1,371 @@
+{
+  "id": "yiyangdeyueguang",
+  "title": "一样的月光",
+  "titleSub": "THE SAME MOONLIGHT",
+  "artist": "徐佳莹",
+  "credit": "词曲 徐佳莹 · 2009《LaLa 首张创作专辑》",
+  "date": "2026-11-10",
+  "absStart": 6296.77,
+  "absEnd": 6525.6,
+  "duration": 228.83,
+  "bpm": 76,
+  "lrc": "analysis/lyrics_mv.lrc",
+  "thesis": "同一片月光 · 人没变，方向变了。冷银的窗一格格亮起来，最后只剩脚步声往远处走。",
+  "palette": {
+    "void": "#050A16",
+    "ink": "#0A1226",
+    "mid": "#1B2740",
+    "glow": "#EEF2FF",
+    "accent": "#9DB4E8",
+    "warm": "#B9825C",
+    "gold": "#CFC0A0",
+    "cold": "#7E9BD4"
+  },
+  "grad": [
+    [
+      0,
+      "#040814"
+    ],
+    [
+      0.45,
+      "#101B33"
+    ],
+    [
+      0.8,
+      "#273A5C"
+    ],
+    [
+      1,
+      "#050A16"
+    ]
+  ],
+  "glyphs": [
+    "月",
+    "窗",
+    "慌",
+    "影",
+    "寂",
+    "步",
+    "暗",
+    "光"
+  ],
+  "tunnelWords": [
+    "倔强的表情",
+    "一样的月光",
+    "越来越心慌",
+    "孤单的方向",
+    "照不亮未来的形状",
+    "占据我的窗"
+  ],
+  "typeLines": [
+    "一样的月光",
+    "怎么看得我越来越心慌"
+  ],
+  "motifs": [
+    "月",
+    "窗框",
+    "影子",
+    "脚步",
+    "月晕"
+  ],
+  "live": [
+    [
+      10.3,
+      13.7
+    ],
+    [
+      57.21,
+      60.61
+    ],
+    [
+      91.53,
+      94.93
+    ],
+    [
+      144.16,
+      147.56
+    ],
+    [
+      183.06,
+      186.46
+    ],
+    [
+      210.52,
+      213.92
+    ]
+  ],
+  "lookDefault": {
+    "boil": 1.0,
+    "bloom": 0.3,
+    "bloomThreshold": 0.8,
+    "grain": 0.055,
+    "vignette": 0.34,
+    "lutMix": 0.0
+  },
+  "acts": [
+    {
+      "id": "intro",
+      "t0": 0.0,
+      "t1": 10.91,
+      "look": "intro",
+      "intensity": 0.18,
+      "lut": "night",
+      "pool": [
+        "typeCard",
+        "solid",
+        "converge"
+      ],
+      "fx": [
+        "dust",
+        "glow",
+        "custom"
+      ],
+      "trans": [
+        "xfade",
+        "black"
+      ]
+    },
+    {
+      "id": "verse1",
+      "t0": 10.91,
+      "t1": 34.83,
+      "look": "verse",
+      "intensity": 0.34,
+      "lut": "night",
+      "pool": [
+        "illust",
+        "solid",
+        "jz",
+        "illust"
+      ],
+      "fx": [
+        "dust",
+        "glow",
+        "grad",
+        "custom"
+      ],
+      "trans": [
+        "xfade",
+        "iris",
+        "wipe"
+      ]
+    },
+    {
+      "id": "pre1",
+      "t0": 34.83,
+      "t1": 48.66,
+      "look": "pre",
+      "intensity": 0.48,
+      "lut": "mono",
+      "pool": [
+        "tunnel",
+        "converge",
+        "afterimage"
+      ],
+      "fx": [
+        "rays",
+        "dust",
+        "custom"
+      ],
+      "trans": [
+        "zoom",
+        "slices"
+      ]
+    },
+    {
+      "id": "chorus1",
+      "t0": 48.66,
+      "t1": 78.73,
+      "look": "chorus",
+      "intensity": 0.72,
+      "lut": "P4",
+      "pool": [
+        "kanjiSlam",
+        "illust",
+        "solid",
+        "converge"
+      ],
+      "fx": [
+        "glow",
+        "feathers",
+        "dust",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "iris",
+        "black"
+      ]
+    },
+    {
+      "id": "verse2",
+      "t0": 78.73,
+      "t1": 121.34,
+      "look": "verse",
+      "intensity": 0.4,
+      "lut": "night",
+      "pool": [
+        "illust",
+        "ref",
+        "jz",
+        "solid"
+      ],
+      "fx": [
+        "rain",
+        "dust",
+        "cracks",
+        "custom"
+      ],
+      "trans": [
+        "ink",
+        "xfade",
+        "push"
+      ]
+    },
+    {
+      "id": "pre2",
+      "t0": 121.34,
+      "t1": 132.5,
+      "look": "pre",
+      "intensity": 0.55,
+      "lut": "mono",
+      "pool": [
+        "tunnel",
+        "illust",
+        "ember"
+      ],
+      "fx": [
+        "rays",
+        "embers",
+        "custom"
+      ],
+      "trans": [
+        "slices",
+        "zoom"
+      ]
+    },
+    {
+      "id": "chorus2",
+      "t0": 132.5,
+      "t1": 165.13,
+      "look": "chorus",
+      "intensity": 0.82,
+      "lut": "dawn",
+      "pool": [
+        "kanjiSlam",
+        "converge",
+        "illust",
+        "solid"
+      ],
+      "fx": [
+        "glow",
+        "feathers",
+        "embers",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "iris",
+        "shatter"
+      ]
+    },
+    {
+      "id": "bridge",
+      "t0": 165.13,
+      "t1": 189.33,
+      "look": "bridge",
+      "intensity": 0.3,
+      "lut": "mono",
+      "pool": [
+        "afterimage",
+        "illust",
+        "tunnel",
+        "ref"
+      ],
+      "fx": [
+        "dust",
+        "grad",
+        "custom"
+      ],
+      "trans": [
+        "black",
+        "xfade",
+        "wipe"
+      ]
+    },
+    {
+      "id": "climax",
+      "t0": 189.33,
+      "t1": 207.51,
+      "look": "climax",
+      "intensity": 1.0,
+      "lut": "dawn",
+      "pool": [
+        "kanjiSlam",
+        "illust",
+        "converge",
+        "solid"
+      ],
+      "fx": [
+        "fireflies",
+        "glow",
+        "rays",
+        "custom"
+      ],
+      "trans": [
+        "flash",
+        "irisClose",
+        "zoom"
+      ]
+    },
+    {
+      "id": "outro",
+      "t0": 207.51,
+      "t1": 228.83,
+      "look": "outro",
+      "intensity": 0.22,
+      "lut": "day",
+      "pool": [
+        "afterimage",
+        "solid",
+        "typeCard",
+        "illust"
+      ],
+      "fx": [
+        "dust",
+        "feathers",
+        "custom"
+      ],
+      "trans": [
+        "xfade",
+        "black"
+      ]
+    }
+  ],
+  "signature": [
+    {
+      "t": 0.0,
+      "note": "title card on the first bar (T21 quiet card)"
+    },
+    {
+      "t": 48.66,
+      "note": "first chorus: per-beat kanji slam"
+    },
+    {
+      "t": 132.5,
+      "note": "chorus 2 returns (ember + shatter)"
+    },
+    {
+      "t": 189.33,
+      "note": "last chorus / climax"
+    },
+    {
+      "t": 217.53,
+      "note": "end on a retinal afterimage of the title"
+    }
+  ],
+  "lrcOffset": 5.0,
+  "theme": "moon",
+  "timeline_note": "3 ASR anchors vs official LRC (spread 0.35 s) -> 6291.77. SRT 首句「倔强的表情／怎么看得我越来越心慌」判定为徐佳莹 2009 原创版，不是苏芮《搭错车》版；成片标原唱 徐佳莹。0.5 s 处 -67 dB 谷 + 15 s 轻钢琴前奏导致开头 RMS 0.0070 < 0.008 门槛 -> start advanced 5.00 s, whole timeline shifted -5.00 s. out 6525.60 = -62 dB fade-out before the 6526 s speech; live length 228.83 s vs official 240.386 s (尾奏提前收 6.6 s).",
+  "original_artist_verified": true
+}

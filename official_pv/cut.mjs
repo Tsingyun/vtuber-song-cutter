@@ -66,7 +66,7 @@ for (const id of ids) {
   const meta = session.songs[id];
   console.log(`\n############  ${cfg.title}  ·  ${cfg.artist}  ·  ${cfg.duration}s  ############`);
 
-  run('python', ['tools/prepare.py', '--song', id], `PREPARE ${id}`);
+  run('python', ['tools/prepare.py', '--date', date, '--song', id], `PREPARE ${id}`);
   run(process.execPath, ['tools/audit_official.mjs', '--song', id], `OFFICIAL-CAPABILITY AUDIT ${id}`);
   const audit = JSON.parse(fs.readFileSync(path.join(ROOT, 'render', `audit_${id}.json`), 'utf8'));
   const failed = audit.checks.filter(c => !c.pass);

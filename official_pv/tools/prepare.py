@@ -3,7 +3,7 @@
 
 Steps (all deterministic, all local):
   1. copy the song's LRC into songs/<id>.lrc (self-contained source of truth)
-  2. cut the exact audio slice out of the 11-09 recording  -> audio/song.wav
+  2. cut the exact audio slice out of the session recording -> audio/song.wav
   3. build analysis/audio.json (real lyric onsets as the beat grid) and envelope_30fps.json
   4. write analysis/lyrics_mv.lrc (no BOM, no metadata rows -- 06 §3)
   5. paint procedural background plates (NO AI images, NO external art)  -> assets/bg/*.png
@@ -16,9 +16,13 @@ import argparse, json, math, pathlib, re, shutil, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CUTS = pathlib.Path(r'D:\岁己歌切')
-SESSION = json.loads((ROOT / 'songs' / '2026-11-09.json').read_text(encoding='utf-8'))
-VIDEO = SESSION['source_video']
-LRC_CACHE = {'faruxue': '_lrc_发如雪.json', 'huainvhai': '_lrc_坏女孩.json'}
+
+# Session is chosen per run (--date, or the song's own `date` field).  Nothing
+# here is pinned to 2026-11-09 any more: 11-10 and later sessions use the same
+# code path with their own songs/<date>.json and source_video.
+SEEDS = {'faruxue': 164, 'huainvhai': 2011,
+         'natianxiayule': 20261110, 'yiyangdeyueguang': 20090529,
+         'xiageluokoujian': 20091221}
 
 
 def run(args, quiet=True):
@@ -43,18 +47,27 @@ def parse_lrc(text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--song', required=True, choices=SESSION['whitelist'])
+    ap.add_argument('--date', default='', help='session date; defaults to the song config date')
+    ap.add_argument('--song', required=True)
     ap.add_argument('--skip-live', action='store_true', help='skip frame extraction (audio/analysis only)')
     a = ap.parse_args()
     sid = a.song
     cfg = json.loads((ROOT / 'songs' / f'{sid}.json').read_text(encoding='utf-8'))
+    date = a.date or cfg.get('date') or '2026-11-09'
+    SESSION = json.loads((ROOT / 'songs' / f'{date}.json').read_text(encoding='utf-8'))
+    if sid not in SESSION['whitelist']:
+        raise SystemExit(f'song {sid} is not in the {date} whitelist')
+    VIDEO = SESSION['source_video']
     meta = SESSION['songs'][sid]
-    print(f'[prepare] {cfg["title"]}  {meta["abs_start"]} -> {meta["abs_end"]}  ({cfg["duration"]} s)')
+    print(f'[prepare] {date} | {cfg["title"]}  {meta["abs_start"]} -> {meta["abs_end"]}  ({cfg["duration"]} s)')
 
     # ---- 1. self-contained LRC -------------------------------------------------
     lrc_path = ROOT / 'songs' / f'{sid}.lrc'
     if not lrc_path.exists():
-        d = json.loads((CUTS / '_media_cache' / LRC_CACHE[sid]).read_text(encoding='utf-8'))
+        staged = ROOT / 'songs' / '_lrc_cache' / f'_lrc_{cfg["title"]}.json'
+        if not staged.exists():
+            raise SystemExit(f'no staged LRC for {sid}; run tools/fetch_lrc_1110.py first')
+        d = json.loads(staged.read_text(encoding='utf-8'))
         lrc_path.write_text(d['lrc'], encoding='utf-8')
     lines = parse_lrc(lrc_path.read_text(encoding='utf-8'))
     assert lines and all(lines[i][0] <= lines[i + 1][0] for i in range(len(lines) - 1)), 'LRC not monotonic'
@@ -75,7 +88,7 @@ def main():
     (ROOT / 'analysis' / 'lyrics_mv.lrc').write_text(body + '\n', encoding='utf-8')
     # deliverable LRC with the ORIGINAL artist in the header (song-cut house rule)
     (ROOT / 'songs' / f'{sid}.deliver.lrc').write_text(
-        f'[ti:{cfg["title"]}]\n[ar:{cfg["artist"]}]\n[by:岁己SUI / 2026-11-09 直播]\n' + body + '\n', encoding='utf-8')
+        f'[ti:{cfg["title"]}]\n[ar:{cfg["artist"]}]\n[by:岁己SUI / {date} 直播]\n' + body + '\n', encoding='utf-8')
 
     # ---- 2. exact audio slice --------------------------------------------------
     wav = ROOT / 'audio' / 'song.wav'
@@ -178,7 +191,7 @@ def paint_plates(ROOT, cfg, Image, ImageDraw, ImageFilter):
     out.mkdir(parents=True, exist_ok=True)
     yy = np.linspace(0, 1, H, dtype=np.float32)[:, None]
     xx = np.linspace(0, 1, W, dtype=np.float32)[None, :]
-    rng = np.random.default_rng({'faruxue': 164, 'huainvhai': 2011}.get(cfg['id'], 7))
+    rng = np.random.default_rng(SEEDS.get(cfg['id'], 7))
 
     def hx(c):
         c = c.lstrip('#'); return np.array([int(c[i:i+2], 16) for i in (0, 2, 4)], np.float32)
@@ -193,7 +206,7 @@ def paint_plates(ROOT, cfg, Image, ImageDraw, ImageFilter):
     # gradient brightness, which read as one template repeated). Namespaced by song
     # id so preparing the second song cannot overwrite the first song's plates.
     grads = [(P['void'], P['mid']), (P['void'], P['ink']), (P['ink'], P['mid'])]
-    seed0 = {'faruxue': 164, 'huainvhai': 2011}.get(cfg['id'], 7)
+    seed0 = SEEDS.get(cfg['id'], 7)
     for idx, (suffix, (top, bot)) in enumerate(zip('abc', grads)):
         r2 = np.random.default_rng(seed0 * 31 + idx)
         img = Image.fromarray(base(top, bot, suffix), 'RGB')
@@ -239,6 +252,113 @@ def paint_plates(ROOT, cfg, Image, ImageDraw, ImageFilter):
                 for _ in range(90):
                     x, y = int(r2.random()*W), int(r2.random()*H); s = int(1+2*r2.random())
                     d.ellipse([x,y,x+s,y+s], fill=(217,178,106,int(20+55*r2.random())))
+        elif cfg.get('theme') == 'rain':
+            # 《那天下雨了》: windshield rain / rainbow / umbrella under a street lamp
+            if idx == 0:
+                for _ in range(520):
+                    x, y = int(r2.random()*W), int(r2.random()*H)
+                    ln = int(14+70*r2.random())
+                    d.line([(x,y),(x-int(ln*0.28),y+ln)], fill=(143,199,216,int(12+42*r2.random())), width=1)
+                for _ in range(130):
+                    x, y = int(r2.random()*W), int(r2.random()*H); rr = int(2+7*r2.random())
+                    d.ellipse([x-rr,y-rr,x+rr,y+rr], fill=(234,244,246,int(8+26*r2.random())))
+                for k in range(6, 0, -1):
+                    rr = 60*k
+                    d.ellipse([W*0.74-rr,H*0.68-rr,W*0.74+rr,H*0.68+rr], fill=(232,163,76,3))
+            elif idx == 1:
+                cx, cy = int(W*0.5), int(H*0.95)
+                cols = [(232,163,76,20),(143,199,216,20),(234,244,246,16),(159,110,196,18)]
+                for k, col in enumerate(cols):
+                    r = 250 + 62*k
+                    d.arc([cx-r,cy-r,cx+r,cy+r], 180, 360, fill=col, width=16)
+                for _ in range(220):
+                    x, y = int(r2.random()*W), int(r2.random()*H*0.72)
+                    d.ellipse([x,y,x+int(2+5*r2.random()),y+2], fill=(234,244,246,int(8+28*r2.random())))
+                for _ in range(7):
+                    y = int(H*(0.12+0.09*r2.random()))
+                    x = int(r2.random()*W)
+                    d.ellipse([x,y,x+420,y+90], fill=(30,58,72,12))
+            else:
+                ux, uy = int(W*0.62), int(H*0.46)
+                d.arc([ux-330,uy-250,ux+330,uy+250], 180, 360, fill=(232,163,76,52), width=12)
+                for k in range(-3, 4):
+                    d.line([(ux,uy),(ux+int(k*115),uy+int(230-28*abs(k)))], fill=(232,163,76,26), width=3)
+                d.line([(ux,uy),(ux,uy+430)], fill=(232,163,76,40), width=5)
+                for k in range(11, 0, -1):
+                    rr = 62*k
+                    d.ellipse([W*0.18-rr,H*0.24-rr,W*0.18+rr,H*0.24+rr], fill=(255,205,130,4))
+                for _ in range(180):
+                    x, y = int(r2.random()*W), int(r2.random()*H)
+                    d.line([(x,y),(x-4,y+int(12+40*r2.random()))], fill=(111,220,232,22), width=1)
+        elif cfg.get('theme') == 'moon':
+            # 《一样的月光》: moon through a window / long shadow / silver ripples
+            if idx == 0:
+                mx, my, mr = int(W*0.68), int(H*0.3), 210
+                for k in range(12, 0, -1):
+                    d.ellipse([mx-mr*k,my-mr*k,mx+mr*k,my+mr*k], fill=(238,242,255,3))
+                d.ellipse([mx-mr,my-mr,mx+mr,my+mr], fill=(238,242,255,40))
+                for gx in range(0, W, 320):
+                    d.rectangle([gx,0,gx+12,H], fill=(8,14,30,90))
+                d.rectangle([0,int(H*0.56),W,int(H*0.56)+12], fill=(8,14,30,90))
+                for _ in range(140):
+                    x, y = int(r2.random()*W), int(r2.random()*H)
+                    d.ellipse([x,y,x+2,y+2], fill=(238,242,255,int(10+40*r2.random())))
+            elif idx == 1:
+                for k in range(9):
+                    y = int(H*(0.62+0.045*k))
+                    d.line([(0,y),(W,y)], fill=(157,180,232,int(8+3*k)), width=2)
+                px, py = int(W*0.36), int(H*0.62)
+                d.polygon([(px,py),(px+70,py),(px+300,H),(px-190,H)], fill=(5,10,22,90))
+                d.ellipse([px-16,py-74,px+16,py-42], fill=(5,10,22,90))
+                for _ in range(9):
+                    x = int(r2.random()*W); y = int(H*(0.62+0.36*r2.random()))
+                    d.ellipse([x-40,y-6,x+40,y+6], fill=(157,180,232,7))
+            else:
+                cx, cy = int(W*0.5), int(H*0.55)
+                for k in range(1, 15):
+                    r = 62*k
+                    d.ellipse([cx-r,cy-int(r*0.62),cx+r,cy+int(r*0.62)], outline=(238,242,255,int(26-1*k)), width=2)
+                for _ in range(260):
+                    x, y = int(r2.random()*W), int(r2.random()*H)
+                    s = int(1+3*r2.random())
+                    d.ellipse([x,y,x+s,y+s], fill=(238,242,255,int(12+50*r2.random())))
+        elif cfg.get('theme') == 'city':
+            # 《下个，路口，见》: metro map / neon crossing / clock face
+            if idx == 0:
+                for k in range(7):
+                    y = int(H*(0.12+0.13*k))
+                    col = (240,111,168,70) if k % 2 == 0 else (99,201,222,70)
+                    d.line([(0,y),(W,y+int(60*r2.random()-30))], fill=col, width=8)
+                for k in range(6):
+                    x = int(W*(0.08+0.17*k))
+                    d.line([(x,0),(x+int(80*r2.random()-40),H)], fill=(232,196,138,44), width=6)
+                for _ in range(34):
+                    x, y = int(r2.random()*W), int(r2.random()*H); rr = 9
+                    d.ellipse([x-rr,y-rr,x+rr,y+rr], fill=(255,240,246,110))
+            elif idx == 1:
+                for _ in range(20):
+                    x, y = int(r2.random()*W), int(r2.random()*H*0.8)
+                    w, h = int(60+300*r2.random()), int(14+70*r2.random())
+                    col = (240,111,168,int(20+50*r2.random())) if r2.random() < .5 else (99,201,222,int(20+50*r2.random()))
+                    d.rectangle([x,y,x+w,y+h], fill=col)
+                for k in range(9):
+                    x = int(W*0.08+k*W*0.105)
+                    d.rectangle([x,int(H*0.82),x+int(W*0.048),H], fill=(255,240,246,16))
+                for _ in range(180):
+                    x, y = int(r2.random()*W), int(r2.random()*H)
+                    d.line([(x,y),(x+int(30*r2.random()),y)], fill=(255,240,246,18), width=1)
+            else:
+                cx, cy, r = int(W*0.5), int(H*0.5), 330
+                for k in range(3):
+                    d.ellipse([cx-r+18*k,cy-r+18*k,cx+r-18*k,cy+r-18*k], outline=(232,196,138,34), width=3)
+                for k in range(60):
+                    ang = 2*np.pi*k/60
+                    x0, y0 = cx+int((r-18)*np.cos(ang)), cy+int((r-18)*np.sin(ang))
+                    x1, y1 = cx+int((r-38)*np.cos(ang)), cy+int((r-38)*np.sin(ang))
+                    d.line([(x0,y0),(x1,y1)], fill=(255,240,246,70), width=3 if k % 5 == 0 else 1)
+                d.line([(cx,cy),(cx+int(r*0.5),cy-int(r*0.35))], fill=(240,111,168,150), width=8)
+                d.line([(cx,cy),(cx-int(r*0.2),cy-int(r*0.72))], fill=(99,201,222,150), width=6)
+                d.ellipse([cx-12,cy-12,cx+12,cy+12], fill=(255,240,246,160))
         else:
             if idx == 0:
                 # A - neon rain: magenta/cyan bars + wet diagonal streaks

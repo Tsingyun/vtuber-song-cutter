@@ -8,10 +8,12 @@
 
 ```bash
 cd D:\岁己歌切\official_pv
-node cut.mjs --date 2026-11-09                 # 渲染白名单里的全部曲目
-node cut.mjs --date 2026-11-09 --song faruxue  # 只渲一首
-node cut.mjs --date 2026-11-09 --audit-only    # 只准备素材 + 审计，不出片
+node cut.mjs --date <YYYY-MM-DD>                    # 渲染该日白名单里的全部曲目
+node cut.mjs --date 2026-11-10                       # 11-10：《那天下雨了》《一样的月光》《下个，路口，见》
+node cut.mjs --date 2026-11-10 --song natianxiayule   # 只渲一首
+node cut.mjs --date 2026-11-10 --audit-only          # 只准备素材 + 18 项运行时审计，不出片
 ```
+`prepare.py` 的场次、录播路径、白名单、`[by:]` 落款全部按 `--date`（或单曲 json 的 `date` 字段）解析，不再绑定任何固定日期。
 
 流水线**强制串行**：`prepare.py` → `audit_official.mjs`（运行时验收）→ `render_frames.mjs` → `ffprobe` → 交付。
 审计不通过就拒绝渲染，所以不会出现"成片交了才说官方能力没接上"。
@@ -34,8 +36,9 @@ official_pv/
   assets/live/<song>/frames/  只抽直播插入窗口的帧
   analysis/                   audio.json / envelope_30fps.json / lyrics_mv.lrc
   audio/song.wav              当前曲目的精确切片
-  songs/2026-11-09.json       日期 + 曲目白名单 + 录播绝对时间
+  songs/<date>.json           日期 + 曲目白名单 + 录播绝对时间
   songs/<id>.json             单曲视听设定（配色、段落、场景池、直播窗口）
+  songs/_lrc_cache/           官方 LRC / 原唱封面缓存与本场切点实证
   tools/
     prepare.py                素材准备
     audit_official.mjs        ★ 运行时验收（浏览器内真跑一遍）
