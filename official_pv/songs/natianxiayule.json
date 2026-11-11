@@ -479,14 +479,13 @@
         ],
         "bridge": [
           "dust",
-          "fill",
+          "grad",
           "custom"
         ],
         "climax": [
-          "fireflies",
-          "glow",
           "rays",
-          "cracks"
+          "glow",
+          "fireflies"
         ],
         "outro": [
           "feathers",
@@ -593,25 +592,61 @@
       "motif": "竖直雨线 + 圆弧（透明伞 / 虹）",
       "material": "细笔水彩 + 纸纹，平涂 + 单硬阴影",
       "role": "安静撑伞的少女，越过肩膀回望"
+    },
+    "char": {
+      "note": "两张用户原创立绘各出镜一次；不改图、不镜像、不剪影，只做位置/景别/入场动画。撑伞图落在 bridge 的揭晓句（165.35-169.72），伸手图落在 climax 的回应句（194.15-199.90）；两处都是歌词直接点名「伞」的位置，时间轴取自 analysis/lyrics_mv.lrc。",
+      "items": [
+        {
+          "img": "assets/char/natianxiayule_umbrella.png",
+          "t0": 165.35,
+          "t1": 169.72,
+          "form": "bust",
+          "side": "center",
+          "story": "bridge『原来看我被雨淋的那天 / 帮我撑伞也是你』—— 十年前那个人第一次现身。她在右侧，歌词走左侧边带，中间不打架；镜头极缓推近。",
+          "stage": {
+            "plate": "c",
+            "zoomFrom": 1.03,
+            "zoomTo": 1.085,
+            "vignette": 0.42,
+            "tint": "#1E3B48",
+            "tintA": 0.14,
+            "beatZoom": 0.004,
+            "post": {
+              "bloom": 0.16,
+              "bloomThreshold": 0.9,
+              "exposure": -0.02,
+              "grain": 0.05,
+              "boil": 0.8
+            }
+          }
+        },
+        {
+          "img": "assets/char/natianxiayule_reach.png",
+          "t0": 194.15,
+          "t1": 199.9,
+          "form": "full",
+          "side": "center",
+          "story": "climax『如果回到过去那一个下雨天 / 我会为了你把伞撑开』—— 这一次换成她伸手。全身远景接在前一个中景之后，同样的位置、更远的距离；镜头缓慢后退，彩虹弧从底部升起。",
+          "stage": {
+            "plate": "b",
+            "zoomFrom": 1.095,
+            "zoomTo": 1.015,
+            "vignette": 0.26,
+            "tint": "#1E3B48",
+            "tintA": 0.09,
+            "beatZoom": 0.006,
+            "post": {
+              "bloom": 0.14,
+              "bloomThreshold": 0.92,
+              "exposure": -0.07,
+              "grain": 0.045,
+              "boil": 0.8
+            }
+          }
+        }
+      ]
     }
   },
-  "char": {
-    "img": "assets/char/natianxiayule.png",
-    "count": 4,
-    "roles": [
-      "verse",
-      "chorus",
-      "climax"
-    ],
-    "forms": [
-      "full",
-      "rim",
-      "bust",
-      "sil"
-    ],
-    "lenRange": [
-      3.0,
-      4.8
-    ]
-  }
+  "opening": "typeCard",
+  "ending": "solid"
 }

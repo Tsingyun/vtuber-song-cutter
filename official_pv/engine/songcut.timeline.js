@@ -60,29 +60,38 @@
   // One AI illustration, drawn through the official `illust` character branch (scenes.js:70-95).
   // Six forms so the SAME png never reads as the same picture twice.
   function charParams(form, C, idx) {
-    const P = C.P, rng = C.rng;
-    const base = { img: C.charImg, anchor: [0.5, 1], sway: 0.010, breathe: 1, wave: { amp: 9, from: 0.3, q: 12 }, phase: idx * 1.7 };
-    const side = rng() < 0.5 ? -1 : 1;
+    const P = C.P, rng = C.rng, img = C.img || C.charImg;
+    const base = { img, anchor: [0.5, 1], sway: 0.010, breathe: 1, wave: { amp: 9, from: 0.3, q: 12 }, phase: idx * 1.7 };
+    // A film built from two illustrations pins each one to its own side of the frame; a
+    // single-illustration film still draws. `flip` is never used by default: mirroring the
+    // user's art would swap the character's own left/right details.
+    // 'center' parks the figure inside the centre gap that `centerFree` leaves open; left/right
+    // nudge it toward a band edge; undefined draws.
+    const cx = C.side === 'center' ? 0 : C.side === 'left' ? -1 : C.side === 'right' ? 1
+      : (rng() < 0.5 ? -1 : 1);
+    const cxw = C.side === 'center' ? 0 : 1;
     switch (form) {
-      case 'bust':   // half body, lyric band beside
-        return Object.assign(base, { x: W * (0.5 + 0.16 * side), y: H + 40, h: 1620, h2: 1664, ease: 'inOutSine',
-          in: { dur: 0.55, dy: 60, ds: -0.04 }, out: { at: C.dur - 0.45, dur: 0.4, dy: 40 } });
-      case 'close':  // face crop; the type layer passes in front
-        return Object.assign(base, { x: W * (0.5 + 0.1 * side), y: H + 180, h: 2380, h2: 2440, ease: 'inOutSine',
+      case 'bust':   // mid shot: crown ~90 px from the top, skirt bleeds off the bottom
+        return Object.assign(base, { x: W * (0.5 + 0.15 * cx * cxw), y: H + 250, h: 1240, h2: 1272, ease: 'inOutSine',
+          in: { dur: 0.60, dy: 60, ds: -0.04 }, out: { at: C.dur - 0.5, dur: 0.42, dy: 40 } });
+      case 'close':  // chest-up: 1560 px tall is as far as a 1536 px source can be pushed
+        return Object.assign(base, { x: W * (0.5 + 0.1 * cx * cxw), y: H + 560, h: 1560, h2: 1600, ease: 'inOutSine',
           in: { dur: 0.7, ds: 0.06 }, out: { at: C.dur - 0.5, dur: 0.45, ds: 0.03 }, front: true, q: 15 });
       case 'sil':    // full silhouette: prints the pose away, keeps the outline
-        return Object.assign(base, { x: W * (0.5 + 0.14 * side), y: H * 0.98, h: 1180, h2: 1120, ease: 'outSine',
+        return Object.assign(base, { x: W * (0.5 + 0.14 * cx * cxw), y: H * 0.98, h: 1180, h2: 1120, ease: 'outSine',
           sil: P.ink, alpha: 0.92, in: { dur: 0.6, dy: 30 }, out: { at: C.dur - 0.4, dur: 0.35, dy: 20 } });
       case 'rim':    // rim light only (the low-key workhorse)
-        return Object.assign(base, { x: W * (0.5 + 0.12 * side), y: H * 0.99, h: 1140, h2: 1160,
+        return Object.assign(base, { x: W * (0.5 + 0.12 * cx * cxw), y: H * 0.99, h: 1140, h2: 1160,
           rim: { color: P.warm || P.gold, off: [7, -4] }, in: { dur: 0.8, ds: 0.04 }, out: { at: C.dur - 0.5, dur: 0.45 } });
       case 'shadow': // cast shadow + tiny figure: distance, memory
-        return Object.assign(base, { x: W * (0.5 - 0.2 * side), y: H * 0.94, h: 620, h2: 600,
+        return Object.assign(base, { x: W * (0.5 - 0.2 * cx * cxw), y: H * 0.94, h: 620, h2: 600,
           shadow: { dx: 210 * side, dy: -10, color: P.void, a: 0.52 }, sway: 0.006,
           in: { dur: 0.7, dx: 40 * side }, out: { at: C.dur - 0.4, dur: 0.4, dx: 30 * side } });
-      default:       // 'full'
-        return Object.assign(base, { x: W * (0.5 + 0.1 * side), y: H + 20, h: 1010, h2: 960, ease: 'inOutSine',
-          in: { dur: 0.75, dy: 70, ds: -0.05 }, out: { at: C.dur - 0.5, dur: 0.45, dy: 50 } });
+      default:       // 'full' -> whole figure, wide shot, lots of air around her
+        // The source art is hard-cropped at its own bottom edge (margin 0), so the baseline
+        // sits 70 px BELOW the frame: the cut line is never on screen, at any breath/zoom.
+        return Object.assign(base, { x: W * (0.5 + 0.13 * cx * cxw), y: H + 70, h: 1010, h2: 972, ease: 'inOutSine',
+          in: { dur: 0.85, dy: 70, ds: -0.05 }, out: { at: C.dur - 0.55, dur: 0.5, dy: 50 } });
     }
   }
 
@@ -96,6 +105,25 @@
     switch (name) {
       // ---------------------------------------------------------------- scenes.js
       case 'illust': {
+        // ---- PORTRAIT STAGE. An illustration window is a composed shot, not a dice roll:
+        // its background plate, camera move, tint and fx ordering come from the direction,
+        // and every fx is drawn BEHIND the figure so nothing crosses her face.
+        if (ch && C.charStage) {
+          const stg = C.charStage;
+          const a = Object.assign(
+            stg.plate ? { bg: `assets/bg/plate_${C.cfg.id}_${stg.plate}.png` } : { grad: C.cfg.grad },
+            {
+              bgFrom: { zoom: stg.zoomFrom ?? 1.02 }, bgTo: { zoom: stg.zoomTo ?? 1.08 },
+              bgEase: 'inOutSine', beatZoom: stg.beatZoom ?? 0.004, shake: 0,
+              tint: [{ color: stg.tint || P.mid, a: stg.tintA ?? 0.16, comp: 'soft-light' }],
+              overlayGrad: stg.overlayGrad || null, overlayA: stg.overlayA ?? 1,
+              fxBack: fx, fx: [],
+              vignette: stg.vignette ?? 0.34,
+            });
+          a.chars = [ch];
+          if (stg.post) return { args: a, post: Object.assign({ lutA: act.lut, lutMix: C.lutMix }, stg.post) };
+          return { args: a };
+        }
         const usePlate = rng() < 0.55;
         const plate = `assets/bg/plate_${C.cfg.id}_${['a', 'b', 'c'][C.plateIdx % 3]}.png`;
         const a = Object.assign(
@@ -307,7 +335,13 @@
       };
       await mk('main', 0, 0);
       await mk('cf', 0, 3);
-      await mk('oncam', 0, 3, { centerFree: true });      // the ONLY centre-free plan (livewin)
+      await mk('oncam', 0, 3, { centerFree: true });      // centre-free: the live insert
+      // A portrait plan: same centre-free contract, but with the decoration turned right down
+      // so the type reads as a caption beside the figure instead of a poster over her.
+      await mk('portrait', 0, 9, {
+        centerFree: true, zoneW: 0.24,
+        fx: Object.assign({}, dir.type.fx, { decor: 0.14, density: 0.26, glitch: 0, koma: 12 }),
+      });
       const extraN = Math.max(0, (dir.type.plans || 6) - 3);
       for (let k = 0; k < extraN; k++) await mk('v' + (k + 1), 1 + (k % Math.max(1, styles.length - 1)), 5 + k * 4);
       // propagate each cut's scheme to its companion (upstream addPlan contract)
@@ -315,8 +349,22 @@
         const pl = JZ.plans[nm] && JZ.plans[nm].plan;
         if (pl) for (const c of pl.cuts) if (c.companion) c.companion.scheme = c.scheme;
       }
+      // JIZURA fills every gap longer than 1.3 s with an `interlude` cut and, half the time,
+      // draws the remaining seconds as a numeral at H*0.36 dead centre (jizura_engine.js:2378).
+      // On a portrait film that numeral lands on the figure's face, so interludes are pinned
+      // to the `rings` variant: the same breathing room, no number over the artwork.
+      for (const nm of planNames) {
+        const pl = JZ.plans[nm] && JZ.plans[nm].plan;
+        if (!pl) continue;
+        for (const c of pl.cuts) {
+          if (c.layout !== 'interlude') continue;
+          c.params = Object.assign({}, c.params, { variant: 'rings', showTitle: false });
+        }
+      }
     }
-    const planPool = planNames.filter(n => n !== 'oncam');
+    // `oncam` and `portrait` are reserved: they are chosen by role, never by dice.
+    const planPool = planNames.filter(n => n !== 'oncam' && n !== 'portrait');
+    const PORTRAIT_PLAN = planNames.includes('portrait') ? 'portrait' : 'cf';
     const pickPlan = () => planPool.length ? DIR.pick(planPool.map(n => n), rng) : 'main';
 
     // ------------------------------------------------------------ post looks from direction.grade
@@ -362,37 +410,65 @@
     // The illustration is USER-SUPPLIED, so it may not exist yet: probe it once and degrade to
     // "no character shots" instead of failing the whole build on a missing asset.
     const charCfg = dir.char || null;
-    let charImg = null, charMissing = null;
-    if (charCfg && charCfg.img) {
+    // Two shapes are supported, both drawn through the official `illust` character branch:
+    //   dir.char            -> ONE illustration, recurring in several forms
+    //   dir.char.items[]    -> an explicit LIST, each illustration used exactly once at a
+    //                          lyric moment the direction picked (t0/t1, form, side, stage)
+    const charItems = charCfg
+      ? (charCfg.items && charCfg.items.length ? charCfg.items
+        : (charCfg.img ? [{ img: charCfg.img, count: charCfg.count, roles: charCfg.roles,
+                            forms: charCfg.forms, lenRange: charCfg.lenRange, shots: charCfg.shots }] : []))
+      : [];
+    const charMissing = [];
+    const usable = [];
+    for (const it of charItems) {
+      if (!it || !it.img) continue;
       try {
-        const r = await fetch(Z.ROOT + charCfg.img, { method: 'HEAD' });
-        if (r.ok) charImg = charCfg.img; else charMissing = `${charCfg.img} (HTTP ${r.status})`;
-      } catch (e) { charMissing = `${charCfg.img} (${String(e).slice(0, 60)})`; }
+        const r = await fetch(Z.ROOT + it.img, { method: 'HEAD' });
+        if (r.ok) usable.push(it); else charMissing.push(`${it.img} (HTTP ${r.status})`);
+      } catch (e) { charMissing.push(`${it.img} (${String(e).slice(0, 60)})`); }
     }
+    const charImg = usable.length ? usable[0].img : null;
     const charShots = [];
-    if (charImg) {
+    if (usable.length) {
       const inLiveW = (t, pad = 0.4) => cfg.live.some(([a, b]) => t > a - pad && t < b + pad);
-      const wanted = charCfg.shots && charCfg.shots.length ? charCfg.shots : (() => {
+      const explicit = usable.filter(it => it.t0 != null && it.t1 != null);
+      let wanted;
+      if (explicit.length) {
+        wanted = explicit.map(it => ({
+          t0: +(+it.t0).toFixed(3), t1: +(+it.t1).toFixed(3), form: it.form || 'bust',
+          img: it.img, side: it.side || null, stage: it.stage || null, story: it.story || '',
+        }));
+      } else {
+        const spec = usable[0];
         const out = [];
-        const forms = charCfg.forms || ['full', 'bust', 'close', 'sil', 'rim', 'shadow'];
-        const n = Math.max(2, charCfg.count || 4);
-        const prefer = charCfg.roles || ['verse', 'chorus', 'climax', 'bridge'];
+        const forms = spec.forms || ['full', 'bust', 'close'];
+        const n = Math.max(1, spec.count || 2);
+        const prefer = spec.roles || ['verse', 'chorus', 'climax', 'bridge'];
         const cand = acts.filter(a => prefer.includes(a.role));
         const pool = cand.length ? cand : acts;
         for (let k = 0; k < n; k++) {
           const a = pool[Math.floor(rng() * pool.length) % pool.length];
           const ls = lines.filter(l => l.t > a.t0 + 1.0 && l.t < a.t1 - 2.2 && !inLiveW(l.t));
           const t0 = ls.length ? ls[Math.floor(rng() * ls.length) % ls.length].t : a.t0 + (a.t1 - a.t0) * 0.4;
-          const len = lerp(charCfg.lenRange?.[0] ?? 2.8, charCfg.lenRange?.[1] ?? 4.6, rng());
-          out.push({ t0: +t0.toFixed(3), t1: +(t0 + len).toFixed(3), form: forms[k % forms.length] });
+          const len = lerp(spec.lenRange?.[0] ?? 2.8, spec.lenRange?.[1] ?? 4.6, rng());
+          out.push({ t0: +t0.toFixed(3), t1: +(t0 + len).toFixed(3), form: forms[k % forms.length],
+                     img: usable[k % usable.length].img, side: null, stage: null, story: '' });
         }
         // resolve overlaps: keep the earlier, drop the later
         out.sort((x, y) => x.t0 - y.t0);
         const keep = [];
         for (const w of out) if (!keep.some(k => w.t0 < k.t1 + 0.35 && w.t1 > k.t0 - 0.35)) keep.push(w);
-        return keep;
-      })();
-      for (const w of wanted) if (!inLiveW((w.t0 + w.t1) / 2)) charShots.push(w);
+        wanted = keep;
+      }
+      for (const w of wanted) {
+        if (w.t1 <= w.t0) { charMissing.push(`${w.img}: window ${w.t0}-${w.t1} is empty`); continue; }
+        if (inLiveW((w.t0 + w.t1) / 2, explicit.length ? 0.05 : 0.4)) {
+          charMissing.push(`${w.img}: window ${w.t0}-${w.t1} collides with a live insert`);
+          continue;
+        }
+        charShots.push(w);
+      }
     }
     const charAt = t => charShots.find(w => t >= w.t0 && t < w.t1) || null;
 
@@ -409,8 +485,19 @@
     }
     for (const [a, b] of cfg.live) bounds.push(a, b);
     for (const w of charShots) bounds.push(w.t0, w.t1);          // a form change is always a cut
-    let B = [...new Set(bounds.map(t => +t.toFixed(3)))].sort((x, y) => x - y)
-      .filter((t, i, arr) => t <= cfg.duration && (i === 0 || t - arr[i - 1] >= minShot));
+    // A char window edge is a STRUCTURAL cut: it outranks the minShot filter, and a lyric cut
+    // landing right beside one yields to it -- otherwise the window would open mid-shot and the
+    // figure would start her entrance while the previous composition is still on screen.
+    const charEdge = t => charShots.some(w => Math.abs(t - w.t0) < 1e-3 || Math.abs(t - w.t1) < 1e-3);
+    const liveEdge = t => cfg.live.some(([a, b]) => Math.abs(t - a) < 1e-3 || Math.abs(t - b) < 1e-3);
+    const rawB = [...new Set(bounds.map(t => +t.toFixed(3)))].sort((x, y) => x - y).filter(t => t <= cfg.duration);
+    let B = [];
+    for (const t of rawB) {
+      const fixed = charEdge(t) || liveEdge(t) || B.length === 0;
+      if (!fixed && charShots.some(w => Math.abs(t - w.t0) < 0.40 || Math.abs(t - w.t1) < 0.40)) continue;
+      if (!fixed && B.length && t - B[B.length - 1] < minShot) continue;
+      B.push(t);
+    }
     if (B[B.length - 1] < cfg.duration) B.push(cfg.duration);
 
     const maxHold = st.maxHold ?? 6.4;
@@ -429,7 +516,6 @@
     split.push(B[B.length - 1]);
     B = [...new Set(split)].sort((x, y) => x - y);
     // a char window must not be split by the max-hold pass
-    const charEdge = t => charShots.some(w => Math.abs(t - w.t0) < 1e-3 || Math.abs(t - w.t1) < 1e-3);
     B = B.filter((t, i) => i === 0 || i === B.length - 1 || charEdge(t) || !charShots.some(w => t > w.t0 + 0.01 && t < w.t1 - 0.01));
 
     const TYPO = new Set(['typeCard', 'kanjiSlam', 'tunnel', 'afterimage', 'jz', 'titleRiff']);
@@ -521,13 +607,19 @@
         pickPlan,
         mode: (slot, list) => list[Math.floor(rng() * list.length) % list.length],
         charImg,
-        charEntry: cw ? charParams(cw.form, { P, dur, rng, charImg }, i) : null,
+        charEntry: cw ? charParams(cw.form, { P, dur, rng, img: cw.img, side: cw.side }, i) : null,
+        charStage: cw ? cw.stage : null,
       };
       const built = sceneArgs(scene, C);
       let { args, post, lyric = 'front', plan } = built;
 
       // ---------------- plan: seeded draw from THIS film's plan pool
-      if (lyric !== 'none') { plan = pickPlan(); bump(stats.plans, plan); }
+      // An illustration window reserves the centre of the frame: the figure is the subject, so
+      // the type layer goes to the side bands (`centerFree`, JIZURA's 「中央を空ける」 mode).
+      if (lyric !== 'none') {
+        plan = cw ? PORTRAIT_PLAN : pickPlan();
+        bump(stats.plans, plan);
+      }
 
       // ---------------- post: every shot carries its own params (01 §4)
       if (!post) {
@@ -580,10 +672,14 @@
 
     // ---- HARD GUARD: a centre-reserving JIZURA plan is legal ONLY on livewin ---------------
     const CF = new Set(window.JZ ? Object.keys(JZ.plans).filter(n => JZ.plans[n].plan.centerFree) : []);
+    // Centre-reserving type is legal in exactly two places: the live insert (it exists to give
+    // the stream window its middle) and an illustration window (the figure is the subject).
+    const mayReserveCentre = sh => sh.scene === 'livewin'
+      || (sh.scene === 'illust' && !!(sh.args && sh.args.chars && sh.args.chars.length));
     let centreReserveOutsideLive = 0;
     for (const sh of S) {
       const used = [sh.plan, sh.args && sh.args.plan].filter(Boolean);
-      if (sh.scene !== 'livewin' && used.some(p => CF.has(p))) {
+      if (!mayReserveCentre(sh) && used.some(p => CF.has(p))) {
         if (sh.plan && CF.has(sh.plan)) sh.plan = 'cf';
         if (sh.args && CF.has(sh.args.plan)) sh.args.plan = 'cf';
         centreReserveOutsideLive++;
@@ -614,7 +710,8 @@
       // new: proof that nothing was silently discarded, and what the film actually decided
       fxDeclared: [...fxDeclared].sort(), fxDropped: [...fxDropped].sort(),
       charShots: charShots.length, charForms: stats.forms, charImg: charImg || null,
-      charDeclared: charCfg ? charCfg.img : null, charMissing,
+      charWindows: charShots.map(w => ({ img: w.img, t0: w.t0, t1: w.t1, form: w.form, side: w.side, story: w.story })),
+      charDeclared: charItems.map(it => it.img), charMissing,
       actCount: acts.length, actRoles: acts.map(a => a.role),
       intensityCurve: acts.map(a => +a.intensity.toFixed(2)),
       cadence: acts.map(a => a.cadence),

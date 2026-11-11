@@ -89,7 +89,7 @@ official_pv/
 | `type` | JIZURA 的 27 套 style、`schemes`（light/dark）、plan 数量、逐片 DENY 增删、`centerDir` |
 | `grade` | LUT 池（含专属 `S_<id>`）、key（exposure）、bloom/grain/vignette/lutMix 曲线、节拍闪白开关 |
 | `opening / ending` | 开场与收尾由方向决定，不再恒定 `typeCard → afterimage` |
-| `char` | 单张 AI 立绘 + 出场窗口；同一张图有 `full/bust/close/sil/rim/shadow` 六种形态（官方 `illust` 的 chars 分支） |
+| `char` | 用户自供立绘 + 出场窗口。两种写法：`items[]`（每张图各用一次，各自钉在一句歌词上）或 `img`+`count`（一张图在多处换形态复用）；`full/bust/close/sil/rim/shadow` 六种形态全走官方 `illust` 的 chars 分支 |
 
 两道闸门，任一失败就拒绝出片：
 
@@ -123,8 +123,38 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
    - `axes` 把 12 轴答案写清楚，`direction_report` 用它算差异。
    - 素材依赖场景（`panels` `burst` `memories` `seq` `wetFloor` `train`）需要照片/片段素材，没有素材就别放进 `lexicon`。
 3. 把官方 LRC 放到 `songs/<id>.lrc`（首次运行时 `prepare.py` 也会从 `_media_cache` 自动取）。
-4. 可选：把立绘放到 `assets/char/<id>.png`（RGBA、≥1600 px 高、主体不碰画布边缘），
-   在 `char` 里写 `count` / `roles` / `forms`。素材缺失时立绘窗口自动关闭，不阻塞出片。
+4. 可选：把立绘放到 `assets/char/`（RGBA、≥1500 px 高、主体不碰画布左右上边缘），
+   在 `direction.char` 里声明出场窗口。素材缺失时立绘窗口自动关闭，不阻塞出片。
+
+## 立绘窗口（2026-11-11）
+
+立绘是**用户提供的成品图**，管线只做位置、景别、入场动画，**不改图、不镜像、不剪影**：
+`flip` 从不打开（镜像会交换角色自身的左右细节），`sil/rim/shadow` 只在明确要求时用。
+
+两种声明方式：
+
+```json
+"direction": { "char": { "items": [
+  { "img": "assets/char/x_umbrella.png", "t0": 165.35, "t1": 169.72,
+    "form": "bust", "side": "center",
+    "stage": { "plate": "c", "zoomFrom": 1.03, "zoomTo": 1.085, "vignette": 0.42,
+               "post": { "bloom": 0.16, "bloomThreshold": 0.90 } } }
+] } }
+```
+
+要点：
+
+- **时间轴以 `analysis/lyrics_mv.lrc` 为准**，不是 `songs/<id>.lrc`。后者是还没应用
+  `lrcOffset` 的原始歌词，两者差一个 offset（本曲 3.4 s）。按原始 LRC 写窗口会让立绘
+  整段错位到间奏里。
+- `form` 的高度受源图分辨率约束：`full` 1010 px、`bust` 1240 px、`close` 1560 px。
+  基线都放在画布下方（`H+70` / `H+250` / `H+560`），所以源图底边那条硬裁切线永远不出镜。
+- `side: "center"` 把人物停进 `centerFree` 留出的中间空档；`zoneW` 0.24 → 两侧各 460 px，
+  空档 1000 px，`bust`（宽 827）正好放得下。
+- 立绘镜头走 `portrait` plan：`centerFree` + 装饰压到 0.14，字进两侧边带，人物占中间。
+- `stage.post` 给这一镜单独的后处理。段落 bloom 曲线是为「字压在背景板上」调的，
+  白发型角色直接套会整片过曝成剪影，所以立绘镜固定 `bloom ≤ 0.16 / threshold ≥ 0.90`。
+- 窗口边缘是**结构切点**：会越过 `minShot` 过滤保留下来，旁边 0.4 s 内的歌词切点给它让位。
 5. `node cut.mjs --date <date> --song <id>`（会先跑 `direction_report` 再逐首 `prepare → audit → render`）。
 
 ## 交付规范

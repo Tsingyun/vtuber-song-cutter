@@ -37,10 +37,13 @@ const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 const errors = [];
 page.on('pageerror', e => errors.push('pageerror: ' + String(e).slice(0, 300)));
 page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 300)); });
+const badRes = [];
+page.on('response', r => { if (r.status() >= 400) badRes.push(`${r.status()} ${r.url()}`); });
 
 try {
   await page.goto(`${origin}/${url}`);
   const meta = await page.evaluate(() => window.ready);
+  await page.evaluate(list => { window.__badRes = list; }, badRes.map(u => u.replace(/^\d+ /, '')));
   const rep = await page.evaluate(async () => {
     const A = window.__cutAudit || {};
     const scripts = [...document.scripts].map(s => s.src).filter(Boolean).map(u => u.split('/').pop());
@@ -72,22 +75,27 @@ try {
     }
     // character asset probe: the single illustration is user-supplied, so verify it can
     // actually be drawn as a sprite (alpha + resolution), not just that the file exists.
-    let charProbe = null;
-    if (A.charImg) {
+    // Every user-supplied illustration must decode AND carry real alpha: a white-background
+    // export draws as a rectangle and no amount of post can hide it.
+    const charProbe = [];
+    const probed = new Set();
+    for (const w of (A.charWindows || [])) {
+      if (!w || !w.img || probed.has(w.img)) continue;
+      probed.add(w.img);
+      const name = w.img.split('/').pop();
       try {
-        const img = Z.imgSync(A.charImg) || Z.loaded.get(A.charImg);
-        if (!img) charProbe = { err: 'not preloaded' };
-        else {
-          const c = Z.canvas(img.width, img.height), cx = c.getContext('2d');
-          cx.drawImage(img, 0, 0);
-          const d = cx.getImageData(0, 0, img.width, img.height).data;
-          let solid = 0, semi = 0;
-          for (let i = 3; i < d.length; i += 4 * 89) { if (d[i] > 250) solid++; else if (d[i] > 8) semi++; }
-          const cor = [[0, 0], [img.width - 1, 0], [0, img.height - 1], [img.width - 1, img.height - 1]]
-            .map(([x0, y0]) => cx.getImageData(x0, y0, 1, 1).data[3]);
-          charProbe = { w: img.width, h: img.height, solidRatio: +(solid / Math.max(1, solid + semi)).toFixed(3), corners: cor };
-        }
-      } catch (e) { charProbe = { err: String(e).slice(0, 120) }; }
+        const img = Z.imgSync(w.img) || (Z.loaded && Z.loaded.get && Z.loaded.get(w.img));
+        if (!img) { charProbe.push({ name, err: 'not preloaded' }); continue; }
+        const c = Z.canvas(img.width, img.height), cx = c.getContext('2d');
+        cx.drawImage(img, 0, 0);
+        const d = cx.getImageData(0, 0, img.width, img.height).data;
+        let solid = 0, semi = 0, clear = 0;
+        for (let i = 3; i < d.length; i += 4 * 89) { if (d[i] > 250) solid++; else if (d[i] > 8) semi++; else clear++; }
+        const cor = [[0, 0], [img.width - 1, 0], [0, img.height - 1], [img.width - 1, img.height - 1]]
+          .map(([x0, y0]) => cx.getImageData(x0, y0, 1, 1).data[3]);
+        charProbe.push({ name, w: img.width, h: img.height,
+          clearRatio: +(clear / Math.max(1, solid + semi + clear)).toFixed(3), corners: cor });
+      } catch (e) { charProbe.push({ name, err: String(e).slice(0, 120) }); }
     }
     return {
       renderer: window.__zankoMeta.renderer, shotsMeta: window.__zankoMeta.shots,
@@ -111,7 +119,9 @@ try {
       direction: A.direction || null, seed: A.seed, directionMode: A.directionMode,
       jizuraStyles: A.jizuraStyles || [], schemes: A.schemes,
       charShots: A.charShots || 0, charForms: A.charForms || {}, charImg: A.charImg || null,
-      charDeclared: A.charDeclared || null, charMissing: A.charMissing || null, charProbe,
+      charDeclared: (A.charDeclared && A.charDeclared.length) ? A.charDeclared : null,
+      charMissing: (A.charMissing && A.charMissing.length) ? A.charMissing : null,
+      badResponses: [...new Set(window.__badRes || [])], charProbe,
       warpViolations: (Z.LIVEWIN && Z.LIVEWIN.audit && Z.LIVEWIN.audit.violations) || 0,
       warpCalls: (Z.LIVEWIN && Z.LIVEWIN.audit && Z.LIVEWIN.audit.calls) || 0,
     };
@@ -151,10 +161,17 @@ try {
       divergence.checked === 0 ? true : divergence.worst.differ >= 9,
       divergence.checked === 0 ? 'no other direction_*.json yet (run tools/direction_report.mjs)'
         : `worst: ${divergence.worst.vs} ${divergence.worst.differ}/${axisTotal} (same: ${divergence.worst.matching.join(',') || 'none'})`],
-    ['character asset drawable (or absent)', !rep.charDeclared || !!rep.charMissing || (rep.charProbe && !rep.charProbe.err && rep.charProbe.h >= 1200),
-      !rep.charDeclared ? 'not declared' : rep.charMissing ? `MISSING, degraded: ${rep.charMissing}` : JSON.stringify(rep.charProbe)],
-    ['character windows active when asset exists', !rep.charImg || rep.charShots > 0,
-      rep.charImg ? `${rep.charShots} windows ${JSON.stringify(rep.charForms)}` : 'no asset yet'],
+    ['character assets drawable + real alpha',
+      !rep.charDeclared ? true
+        : (rep.charProbe.length === rep.charDeclared.length
+           && rep.charProbe.every(p => !p.err && p.h >= 1200 && p.corners.every(a => a <= 16))),
+      !rep.charDeclared ? 'not declared'
+        : rep.charMissing ? `MISSING: ${rep.charMissing.join('; ')}`
+          : rep.charProbe.map(p => p.err ? `${p.name} ERR ${p.err}`
+              : `${p.name} ${p.w}x${p.h} alphaCorner=${p.corners.every(a => a <= 16) ? 'transparent' : 'OPAQUE'} clear=${p.clearRatio}`).join(' | ')],
+    ['character windows active when asset exists',
+      !rep.charDeclared || rep.charShots >= (rep.charDeclared || []).length,
+      rep.charDeclared ? `${rep.charShots} windows ${JSON.stringify(rep.charForms)} / ${rep.charDeclared.length} declared` : 'no asset yet'],
     ['centre-reserve plans only on live inserts', rep.centreFreePlans.length >= 1 && rep.centreReserveOutsideLive === 0 && rep.oncamShots === rep.liveShots,
       `centerFree=[${rep.centreFreePlans.join(',')}] outsideLive=${rep.centreReserveOutsideLive} oncam=${rep.oncamShots}/${rep.liveShots} live shots`],
     ['every shot has post', rep.shotsWithPost === rep.shots, `${rep.shotsWithPost}/${rep.shots}`],
@@ -178,7 +195,11 @@ try {
   console.log(`transitions: ${JSON.stringify(rep.transitions)}`);
   console.log(`plans      : ${JSON.stringify(rep.planCounts)}`);
   if (divergence.pairs.length) console.log(`divergence : ${divergence.pairs.map(p => `${p.vs} ${p.differ}/${axisTotal}`).join('  ')}`);
-  console.log(`character  : ${rep.charDeclared ? (rep.charMissing ? 'MISSING ' + rep.charMissing : `${rep.charShots} windows ${JSON.stringify(rep.charForms)} @ ${rep.charImg}`) : 'not declared'}`);
+  console.log(`character  : ${rep.charDeclared
+    ? (rep.charMissing ? 'MISSING ' + rep.charMissing.join('; ')
+      : `${rep.charShots} windows ${JSON.stringify(rep.charForms)} @ ${rep.charDeclared.map(x => x.split('/').pop()).join(', ')}`)
+    : 'not declared'}`);
+  console.log(`bad HTTP   : ${(badRes.length ? badRes : ['none']).slice(0, 6).join(' | ')}`);
   const out = path.resolve(ROOT, 'render', `audit_${song}.json`);
   fs.writeFileSync(out, JSON.stringify({ song, meta, report: rep, checks: checks.map(([n, ok, d]) => ({ name: n, pass: ok, detail: d })), errors }, null, 2));
   console.log(`\nreport -> ${out}`);

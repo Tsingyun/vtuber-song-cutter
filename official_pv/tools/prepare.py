@@ -204,8 +204,13 @@ def main():
         fdir.mkdir(parents=True, exist_ok=True)
         total = 0
         for wi, (w0, w1) in enumerate(cfg['live']):
-            base = round(w0 * 30) + 1
-            n = round((w1 - w0) * 30)
+            # livewin.js does `frameAt: t => Math.round(t*30)+1`. Python's round() is
+            # banker's rounding (round(1648.5) == 1648), so `round(w0*30)+1` landed one frame
+            # early and the last two frames of every window 404'd at render time.
+            # floor(x+0.5) reproduces Math.round for positive x.
+            js_round = lambda v: int(math.floor(v + 0.5))
+            base = js_round(w0 * 30) + 1
+            n = js_round(w1 * 30) + 1 - base + 1
             # crop=640:1080:640:0 keeps the singer centred; this is a CROP, never a stretch
             run(['ffmpeg', '-hide_banner', '-v', 'error', '-y',
                  '-ss', f'{meta["abs_start"] + w0:.3f}', '-t', f'{w1-w0:.3f}', '-i', VIDEO,
@@ -259,35 +264,73 @@ def write_song_palette(ROOT, cfg):
     print(f"[prepare] palette: {out['id']} ({out['key']}-key, {len(ramp)} stops)")
 
 
+# Draw heights used by engine/songcut.timeline.js charParams(); kept in one place so the audit
+# can warn when the source art is being upscaled past its own resolution.
+CHAR_DRAW_H = {'full': 1000, 'bust': 1240, 'close': 1560}
+
+
 def check_char_asset(ROOT, cfg):
-    """Validate the (user-supplied) single illustration before it is wired in.
+    """Validate every user-supplied illustration before it is wired in.
 
     Upstream 09 lists "sprite straight edge" and "alpha 252-254" as recurring failure modes,
     and both are invisible until you watch the render. Catch them here instead.
+
+    The art itself is NEVER touched: this is a read-only audit. When a subject is cropped by
+    its own canvas (extremely common in exports), the fix belongs in the direction's baseline
+    -- push the bottom of the figure past the frame so the cut edge never reaches the screen.
     """
-    p = ROOT / 'assets' / 'char' / f"{cfg['id']}.png"
-    if not p.exists():
-        print(f"[prepare] char: none at assets/char/{cfg['id']}.png -> character windows disabled for now")
+    # char lives inside `direction` (that is where engine/songcut.timeline.js reads it);
+    # the top-level form is kept as a fallback for older configs.
+    ch = (cfg.get('direction') or {}).get('char') or cfg.get('char') or {}
+    items = ch.get('items') or ([{'img': f"assets/char/{cfg['id']}.png"}] if ch.get('img') else [])
+    if not items:
+        print('[prepare] char: none declared -> character windows disabled')
         return
     try:
         from PIL import Image
     except ImportError:
-        print('[prepare] char: found but Pillow missing, cannot validate')
+        print('[prepare] char: declared but Pillow missing, cannot validate')
         return
-    im = Image.open(p)
-    print(f"[prepare] char: {p.name}  {im.size[0]}x{im.size[1]}  {im.mode}")
-    if im.mode not in ('RGBA', 'LA'):
-        print('[prepare] char: WARNING no alpha channel -- export RGBA or run a matte step, '
-              'otherwise the `sil` / `rim` forms will draw a rectangle')
-    else:
-        bb = im.getchannel('A').getbbox()
+    for it in items:
+        rel = it.get('img') or ''
+        fp = ROOT / rel
+        if not fp.exists():
+            print(f'[prepare] char: MISSING {rel} -> that window is disabled at runtime')
+            continue
+        im = Image.open(fp)
         w, h = im.size
-        if bb and (bb[0] <= 1 or bb[1] <= 1 or bb[2] >= w - 1 or bb[3] >= h - 1):
-            print(f'[prepare] char: WARNING subject touches the canvas edge {bb} -- official 09 '
-                  f'"sprite straight edge"; the `close` form will reveal a cut line')
-    if im.size[1] < 1600:
-        print(f'[prepare] char: WARNING height {im.size[1]} < 1600 -- the close-up form draws at '
-              f'h=2380 px, expect softness')
+        form = it.get('form', 'bust')
+        print(f'[prepare] char: {fp.name}  {w}x{h}  {im.mode}  form={form}  '
+              f'window={it.get("t0", "auto")}-{it.get("t1", "auto")}')
+        if im.mode not in ('RGBA', 'LA'):
+            print(f'[prepare] char: WARNING {fp.name} has NO alpha channel -- a sprite would draw '
+                  f'as a rectangle (sil/rim unusable)')
+        else:
+            al = im.getchannel('A')
+            # `getbbox()` counts a single alpha=1 pixel as content; exporters routinely leave
+            # such noise along an edge. Threshold at 32 (12% opacity) so only a real cut edge
+            # -- where the subject is genuinely sliced -- raises the warning.
+            bb = al.point(lambda v: 255 if v > 32 else 0).getbbox()
+            if bb:
+                m = (bb[0], bb[1], w - 1 - bb[2], h - 1 - bb[3])
+                print(f'[prepare] char: content bbox {bb}  margins L/R/T/B {m}')
+                if bb[1] <= 1 or bb[0] <= 1 or bb[2] >= w - 1:
+                    print(f'[prepare] char: WARNING {fp.name} touches a side/top edge -- official 09 '
+                          f'"sprite straight edge"; that edge must stay outside the frame')
+                if m[3] <= 0:
+                    print(f'[prepare] char: note {fp.name} is cropped by its own bottom edge '
+                          f'(margin 0); baseline is placed below the frame so the cut is unseen')
+            a_max = max(al.getextrema())
+            if a_max < 255:
+                print(f'[prepare] char: note alpha maxes at {a_max} (official 09 "alpha 252-254"); '
+                      f'harmless for sprite drawing, matters only for matte compositing')
+        draw_h = CHAR_DRAW_H.get(form, 1240)
+        if h < draw_h:
+            print(f'[prepare] char: WARNING source height {h} < draw height {draw_h} '
+                  f'({draw_h / h:.2f}x upscale) -- expect softness in the {form} form')
+        else:
+            print(f'[prepare] char: OK  {h}px source draws at {draw_h}px '
+                  f'({h / draw_h:.2f}x, downscale)')
 
 
 def paint_plates(ROOT, cfg, Image, ImageDraw, ImageFilter):

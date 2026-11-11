@@ -87,15 +87,19 @@
     },
     opening: 'typeCard',              // typeCard | titleRiff | converge | ink | solid
     ending: 'afterimage',             // afterimage | typeCard | solid | tunnel
-    char: null,                       // { img, shots: [...] } -- one AI illustration, many forms
+    char: {},                         // { items: [...] } -- user illustrations, one window each
+                                      // (or { img, shots } to recur one image in several forms)
     axes: {},                         // declarative axis answers, used by the divergence audit
   };
 
   // deep-merge that keeps arrays by replacement (a song's pattern must not concatenate)
   function merge(base, over) {
     if (Array.isArray(over) || over === null || typeof over !== 'object') return over === undefined ? base : over;
-    const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
-    for (const k of Object.keys(over)) out[k] = (k in base) ? merge(base[k], over[k]) : over[k];
+    // A `null` default (DEFAULTS.char, DEFAULTS.axes.*) used to throw on `k in base`: a null
+    // base is now treated as "nothing to inherit", which is what those defaults mean.
+    const objBase = (base && !Array.isArray(base) && typeof base === 'object') ? base : {};
+    const out = Object.assign({}, objBase);
+    for (const k of Object.keys(over)) out[k] = (k in objBase) ? merge(objBase[k], over[k]) : over[k];
     return out;
   }
 

@@ -312,3 +312,65 @@ SRT 首句「倔强的表情 / 一样的月光，怎么看得我越来越心慌�
 `--date` 透传给 prepare；新增 rain / moon / city 三套各不相同的程序化背景板母题，
 避免三首共用同一套「霓虹雨」。11-09 两首的既有分支保持原样，可继续重跑。
 
+## 12. 2026-11-11 立绘版《那天下雨了》（只动这一首）
+
+**边界**：只重做《那天下雨了》。《一样的月光》《下个，路口，见》的 mp4 时间戳保持
+`11-11 10:29 / 10:31` 未变，`songs/*.json`、`songs/*.palette.json` 未动。
+
+### 12.1 视觉设计
+
+沿用 `direction` 已定下的轴，不另起一套：低-key 阴青 `#07121A/#1E3B48` + 单一暖金
+`#E8A34C`、细笔水彩＋纸纹、母题「竖雨线 + 圆弧（伞/虹）」、世界「雨后市郊车站 / 车窗外 /
+积水」、时间弧「阴 → 雨停 → 一道很淡的彩虹」。段落 10 段、强度曲线
+`0.19 0.36 0.45 0.78 0.34 0.43 0.78 0.30 0.97 0.22`，与另外两首的骨架互不相同。
+
+本次新增的只有**两处人像**：把伞和彩虹这两个母题从「背景比喻」升格为「人物在场」。
+
+### 12.2 两张立绘的落点
+
+| 图 | 窗口 | 所在段 | 对应歌词（`analysis/lyrics_mv.lrc`） | 处理 |
+|---|---|---|---|---|
+| 撑透明伞 | 165.35–169.72 | bridge | 「原来看我被雨淋的那天 / 帮我撑伞也是你」 | `bust` 中景、居中、缓推 1.030→1.085、背景 `plate_c`（路灯下的伞骨暖光） |
+| 伸手（无伞） | 194.15–199.90 | climax | 「如果回到过去那一个下雨天 / 我会为了你把伞撑开」 | `full` 全身、居中、缓拉 1.095→1.015、背景 `plate_b`（雨停彩虹弧） |
+
+叙事上是一组因果：**过去她替你撑伞 → 现在你替她撑伞**。两处都落在歌词直接点名「伞」的
+位置，不是装饰性插入。一近一远、一推一拉，同一位置换景别，不做镜像（镜像会交换角色
+自身的左右细节）。
+
+**图本身零改动**：直接 `cp` 原件（sha1 `474b6b46` / `3de11843`），不重绘、不抠像、不超分。
+两张源图 1024×1536、RGBA、四角透明（实测透明占比 42.8% / 40.0%）。源图底边是**硬裁切**
+（底部 alpha 252、303 px 宽），因此三个景别的基线全部放在画布下方（`H+70 / H+250 / H+560`），
+那条切线在任何呼吸/推拉幅度下都不会出镜。
+
+### 12.3 引擎改动（5 个文件）
+
+| 文件 | 改动 |
+|---|---|
+| `engine/songcut.timeline.js` | `direction.char.items[]`（多图各一次）；`charParams` 支持逐窗 `img` / `side`（新增 `center`）／景别高度按 1536 px 源图重算；`illust` 新增 **portrait stage**（背景板/运镜/tint/vignette/独立 post，fx 全放人物之后）；窗口边缘升级为**结构切点**；新增 `portrait` plan（`centerFree` + `zoneW` 0.24 + `decor` 0.14）；interlude 卡固定 `rings` |
+| `engine/direction.js` | `merge()` 在 base 为 `null` 时不再抛错（`DEFAULTS.char` 从 `null` 改 `{}`） |
+| `tools/prepare.py` | `check_char_asset` 支持 `items[]`、读 `direction.char`、alpha 阈值 32（噪点不算触边）、与绘制高度比对；live 帧号改用 `floor(x+0.5)` 复刻 JS `Math.round` |
+| `tools/audit_official.mjs` | 立绘检查改为「每张图都解码 + 四角透明 + 高度达标」；窗口数 = 声明数；非 200 响应带 URL 输出 |
+| `songs/natianxiayule.json` | 写 `direction.char`（两张图 + 窗口 + stage + story）；`ending` 改 `solid`；bridge/climax 的 fx 池收窄 |
+
+### 12.4 本轮修掉的三个真 bug
+
+1. **`merge()` 遇 `null` base 崩**（`k in base`）。`DEFAULTS.char` 是 `null`，一写
+   `direction.char` 就 `TypeError`。改成「null base 视为无继承」。
+2. **live 帧号整体早 1 帧**。`prepare.py` 用 Python `round()`（银行家舍入，
+   `round(1648.5)==1648`），引擎用 `Math.round(t*30)+1`，每个窗口末尾两帧 404，
+   审计因此报 `console 404`。改为 `floor(x+0.5)`，帧数 102 → 103/窗。
+3. **`char` 写错层级**。`direction.js` 只读 `cfg.direction`，写在文件顶层等于没写，
+   立绘窗口静默为空。同时 `check_char_asset` 只认顶层，前后不一致。
+
+### 12.5 验证
+
+`audit_official.mjs` **22/22 PASS**：25 场景注册 / 11 个真用到、逐镜冒烟 65/65 帧零异常、
+`fxDropped=[]`、13 类转场命中 8 类、7 个 JIZURA plan（含 `portrait`）、
+`centerFree=[oncam,portrait]` 且 `outsideLive=0`、live 9.3%、零形变、无 404、真实 GPU。
+
+出片：`1920x1080 / 30fps / 6594 帧 / 219.80 s / 33.61 Mb/s / 923 MB`，
+渲染 105.8 fps（62.3 s）+ 混流 6.7 s。抽帧复核两张立绘：形象完整、无白框、
+无切边、曝光正常。
+
+`manifest.json` 先备份再合并：新片条目替换本曲，另两首原样保留。
+
