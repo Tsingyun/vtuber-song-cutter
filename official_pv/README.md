@@ -126,20 +126,25 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
 4. 可选：把立绘放到 `assets/char/`（RGBA、≥1500 px 高、主体不碰画布左右上边缘），
    在 `direction.char` 里声明出场窗口。素材缺失时立绘窗口自动关闭，不阻塞出片。
 
-## 立绘窗口（2026-11-11）
+## 立绘窗口（2026-11-11，2026-11-11 14:00 重排）
 
 立绘是**用户提供的成品图**，管线只做位置、景别、入场动画，**不改图、不镜像、不剪影**：
 `flip` 从不打开（镜像会交换角色自身的左右细节），`sil/rim/shadow` 只在明确要求时用。
 
-两种声明方式：
+`direction.char.items[]` 是**窗口清单**，一张图可以出现多次（同一素材、不同段落、不同机位），
+每窗独立 `t0/t1/form/side/h/y/stage`：
 
 ```json
-"direction": { "char": { "items": [
-  { "img": "assets/char/x_umbrella.png", "t0": 165.35, "t1": 169.72,
-    "form": "bust", "side": "center",
-    "stage": { "plate": "c", "zoomFrom": 1.03, "zoomTo": 1.085, "vignette": 0.42,
-               "post": { "bloom": 0.16, "bloomThreshold": 0.90 } } }
-] } }
+"direction": { "char": {
+  "zoneW": 0.36,
+  "items": [
+    { "img": "assets/char/x_umbrella.png", "t0": 0, "t1": 9.6, "form": "full",
+      "side": "center", "h": 880, "y": 1220,
+      "stage": { "plate": "c", "zoomFrom": 1.10, "zoomTo": 1.02, "vignette": 0.44,
+                 "ground": { "color": "#03080D", "h": 130, "a": 0.5,
+                             "sheen": "#E8A34C", "sheenY": 8, "sheenH": 260, "sheenA": 0.045 },
+                 "post": { "bloom": 0.15, "bloomThreshold": 0.92 } } }
+  ] } }
 ```
 
 要点：
@@ -147,14 +152,29 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
 - **时间轴以 `analysis/lyrics_mv.lrc` 为准**，不是 `songs/<id>.lrc`。后者是还没应用
   `lrcOffset` 的原始歌词，两者差一个 offset（本曲 3.4 s）。按原始 LRC 写窗口会让立绘
   整段错位到间奏里。
-- `form` 的高度受源图分辨率约束：`full` 1010 px、`bust` 1240 px、`close` 1560 px。
-  基线都放在画布下方（`H+70` / `H+250` / `H+560`），所以源图底边那条硬裁切线永远不出镜。
-- `side: "center"` 把人物停进 `centerFree` 留出的中间空档；`zoneW` 0.24 → 两侧各 460 px，
-  空档 1000 px，`bust`（宽 827）正好放得下。
-- 立绘镜头走 `portrait` plan：`centerFree` + 装饰压到 0.14，字进两侧边带，人物占中间。
+- **窗口必须避开 `cfg.live` 的直播插入段**（显式窗口只查中心点，边缘重叠不会被拦），
+  否则窗口会被 livewin 镜头切成两半。
+- **`h` / `y` 覆盖景别**：`form` 的默认高度（`full` 1010 / `bust` 1240 / `close` 1560）
+  是按「人物可以很大」写的，套进 36% 侧带会压字。显式 `h`（整图绘制高度，宽 = `h×1024/1536`）
+  与 `y`（底边基线）让人物精确落在中间空档里。
+- **排版带宽度按官方**：JIZURA README「中央を空ける（キャラクター用）」写死 16:9 横版两侧各
+  约 **36%**（21:9 是 30%），两带共用**同一 layout / 运动 / 装饰 / 运镜**、后半句延后
+  `delay` 出现（`splitCut`），并且**不用「大一字」背景**（引擎自动 `bigChar=false`）。
+  旧值 `zoneW: 0.24` 是自定的，会把字挤成窄条、还让人物长出空档。`direction.char.zoneW` 可覆盖。
+- **立绘镜的 layout 池要单独收窄**（`PORTRAIT_LAYOUTS = center / mixed / quote / lowerThird`）。
+  全片池里的 `orbit / spiral / dropCap / tunnel / circleWords / contour / curtain` 会把整句
+  绕成圈或喷满带，`stack` 会把同一句叠成好几层、`type` 会排成竖柱——在人物旁边全是噪声。
+- **`side: "center"`** 把人物停进 `centerFree` 的中间空档（`x` 可再给相对偏移）。
+- **`stage.ground` 是无腿立绘的落地层**。源图底边就是身体的硬裁切（margin 0），底边一旦在
+  画面内可辨，人物就读作「被腰斩 / 悬空」。做法是三件套：
+  1. `y` 让底边沉到画框外（裙摆那截收窄段彻底出镜）；
+  2. `ground` 在画面最底铺一层薄雾（**h 130 / a 0.5**，浓雾反而会在裙摆上切出一条截断线）；
+  3. `sheen` 在底部打一条极淡的反光，把「消失」变成「站在雨夜的湿地上」。
 - `stage.post` 给这一镜单独的后处理。段落 bloom 曲线是为「字压在背景板上」调的，
-  白发型角色直接套会整片过曝成剪影，所以立绘镜固定 `bloom ≤ 0.16 / threshold ≥ 0.90`。
+  白发型角色直接套会整片过曝成剪影，所以立绘镜固定 `bloom ≤ 0.17 / threshold ≥ 0.90`。
 - 窗口边缘是**结构切点**：会越过 `minShot` 过滤保留下来，旁边 0.4 s 内的歌词切点给它让位。
+- 开场要让立绘就是第一镜：`direction.opening = "illust"`，且第一个窗口 `t0 = 0`——
+  opening 只在「第一镜的场景名不等于它」时才替换，所以窗口覆盖首镜时不会被顶掉。
 5. `node cut.mjs --date <date> --song <id>`（会先跑 `direction_report` 再逐首 `prepare → audit → render`）。
 
 ## 参数陷阱：`fx` 的 `size` 不都是像素

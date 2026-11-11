@@ -324,7 +324,9 @@ def check_char_asset(ROOT, cfg):
             if a_max < 255:
                 print(f'[prepare] char: note alpha maxes at {a_max} (official 09 "alpha 252-254"); '
                       f'harmless for sprite drawing, matters only for matte compositing')
-        draw_h = CHAR_DRAW_H.get(form, 1240)
+        # `h` on the window wins over the per-form default: a portrait film pins its own
+        # drawing height so the figure fits the 36% centreFree bands (engine charParams `fit`).
+        draw_h = int(it['h']) if it.get('h') else CHAR_DRAW_H.get(form, 1240)
         if h < draw_h:
             print(f'[prepare] char: WARNING source height {h} < draw height {draw_h} '
                   f'({draw_h / h:.2f}x upscale) -- expect softness in the {form} form')

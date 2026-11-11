@@ -73,28 +73,37 @@
     const cx = C.side === 'center' ? 0 : C.side === 'left' ? -1 : C.side === 'right' ? 1
       : (rng() < 0.5 ? -1 : 1);
     const cxw = C.side === 'center' ? 0 : 1;
+    // `direction.char.items[]` may pin the drawing height `h` and the baseline `y` per window.
+    // The source art is 1024x1536 with ZERO bottom margin, so the form defaults below are tied
+    // to that ratio; a window that must fit the 36% `centerFree` bands sets `h`/`y` instead.
+    const fit = o => {
+      if (C.h != null) { o.h = +C.h; o.h2 = +(o.h * 1.028).toFixed(1); }
+      if (C.y != null) o.y = +C.y;
+      if (C.x != null) o.x = W * (0.5 + C.x);
+      return o;
+    };
     switch (form) {
       case 'bust':   // mid shot: crown ~90 px from the top, skirt bleeds off the bottom
-        return Object.assign(base, { x: W * (0.5 + 0.15 * cx * cxw), y: H + 250, h: 1240, h2: 1272, ease: 'inOutSine',
-          in: { dur: 0.60, dy: 60, ds: -0.04 }, out: { at: C.dur - 0.5, dur: 0.42, dy: 40 } });
+        return fit(Object.assign(base, { x: W * (0.5 + 0.15 * cx * cxw), y: H + 250, h: 1240, h2: 1272, ease: 'inOutSine',
+          in: { dur: 0.60, dy: 60, ds: -0.04 }, out: { at: C.dur - 0.5, dur: 0.42, dy: 40 } }));
       case 'close':  // chest-up: 1560 px tall is as far as a 1536 px source can be pushed
-        return Object.assign(base, { x: W * (0.5 + 0.1 * cx * cxw), y: H + 560, h: 1560, h2: 1600, ease: 'inOutSine',
-          in: { dur: 0.7, ds: 0.06 }, out: { at: C.dur - 0.5, dur: 0.45, ds: 0.03 }, front: true, q: 15 });
+        return fit(Object.assign(base, { x: W * (0.5 + 0.1 * cx * cxw), y: H + 560, h: 1560, h2: 1600, ease: 'inOutSine',
+          in: { dur: 0.7, ds: 0.06 }, out: { at: C.dur - 0.5, dur: 0.45, ds: 0.03 }, front: true, q: 15 }));
       case 'sil':    // full silhouette: prints the pose away, keeps the outline
-        return Object.assign(base, { x: W * (0.5 + 0.14 * cx * cxw), y: H * 0.98, h: 1180, h2: 1120, ease: 'outSine',
-          sil: P.ink, alpha: 0.92, in: { dur: 0.6, dy: 30 }, out: { at: C.dur - 0.4, dur: 0.35, dy: 20 } });
+        return fit(Object.assign(base, { x: W * (0.5 + 0.14 * cx * cxw), y: H * 0.98, h: 1180, h2: 1120, ease: 'outSine',
+          sil: P.ink, alpha: 0.92, in: { dur: 0.6, dy: 30 }, out: { at: C.dur - 0.4, dur: 0.35, dy: 20 } }));
       case 'rim':    // rim light only (the low-key workhorse)
-        return Object.assign(base, { x: W * (0.5 + 0.12 * cx * cxw), y: H * 0.99, h: 1140, h2: 1160,
-          rim: { color: P.warm || P.gold, off: [7, -4] }, in: { dur: 0.8, ds: 0.04 }, out: { at: C.dur - 0.5, dur: 0.45 } });
+        return fit(Object.assign(base, { x: W * (0.5 + 0.12 * cx * cxw), y: H * 0.99, h: 1140, h2: 1160,
+          rim: { color: P.warm || P.gold, off: [7, -4] }, in: { dur: 0.8, ds: 0.04 }, out: { at: C.dur - 0.5, dur: 0.45 } }));
       case 'shadow': // cast shadow + tiny figure: distance, memory
-        return Object.assign(base, { x: W * (0.5 - 0.2 * cx * cxw), y: H * 0.94, h: 620, h2: 600,
+        return fit(Object.assign(base, { x: W * (0.5 - 0.2 * cx * cxw), y: H * 0.94, h: 620, h2: 600,
           shadow: { dx: 210 * side, dy: -10, color: P.void, a: 0.52 }, sway: 0.006,
-          in: { dur: 0.7, dx: 40 * side }, out: { at: C.dur - 0.4, dur: 0.4, dx: 30 * side } });
+          in: { dur: 0.7, dx: 40 * side }, out: { at: C.dur - 0.4, dur: 0.4, dx: 30 * side } }));
       default:       // 'full' -> whole figure, wide shot, lots of air around her
         // The source art is hard-cropped at its own bottom edge (margin 0), so the baseline
         // sits 70 px BELOW the frame: the cut line is never on screen, at any breath/zoom.
-        return Object.assign(base, { x: W * (0.5 + 0.13 * cx * cxw), y: H + 70, h: 1010, h2: 972, ease: 'inOutSine',
-          in: { dur: 0.85, dy: 70, ds: -0.05 }, out: { at: C.dur - 0.55, dur: 0.5, dy: 50 } });
+        return fit(Object.assign(base, { x: W * (0.5 + 0.13 * cx * cxw), y: H + 70, h: 1010, h2: 972, ease: 'inOutSine',
+          in: { dur: 0.85, dy: 70, ds: -0.05 }, out: { at: C.dur - 0.55, dur: 0.5, dy: 50 } }));
     }
   }
 
@@ -113,6 +122,33 @@
         // and every fx is drawn BEHIND the figure so nothing crosses her face.
         if (ch && C.charStage) {
           const stg = C.charStage;
+          // ---- GROUND. A leg-less illustration is a bust crop by construction: the PNG's own
+          // bottom edge IS the end of her body, so wherever that edge reads as an edge she looks
+          // sawn in half / hovering. The baseline is already pushed below the frame; this layer
+          // swallows whatever edge is left in floor mist and sets a wet-floor sheen under her, so
+          // the crop reads as "standing in the rain" instead of "floating in the dark".
+          const groundFx = [];
+          if (stg.ground) {
+            const gd = stg.ground, gc = gd.color || '#08131C';
+            groundFx.push({ type: 'custom', fn: ctx => {
+              const hh = Math.round(gd.h ?? 260), ga = gd.a ?? 0.92;
+              const gr = ctx.createLinearGradient(0, H, 0, H - hh);
+              gr.addColorStop(0, Z.rgba(gc, ga));
+              gr.addColorStop(0.42, Z.rgba(gc, ga * 0.66));
+              gr.addColorStop(1, Z.rgba(gc, 0));
+              ctx.save();
+              ctx.fillStyle = gr; ctx.fillRect(0, H - hh, W, hh);
+              if (gd.sheen) {
+                const sy = H - (gd.sheenY ?? 40), sh = gd.sheenH ?? 96;
+                const sg = ctx.createLinearGradient(0, sy, 0, sy - sh);
+                sg.addColorStop(0, Z.rgba(gd.sheen, gd.sheenA ?? 0.16));
+                sg.addColorStop(1, Z.rgba(gd.sheen, 0));
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.fillStyle = sg; ctx.fillRect(0, sy - sh, W, sh);
+              }
+              ctx.restore();
+            } });
+          }
           const a = Object.assign(
             stg.plate ? { bg: `assets/bg/plate_${C.cfg.id}_${stg.plate}.png` } : { grad: C.cfg.grad },
             {
@@ -120,7 +156,7 @@
               bgEase: 'inOutSine', beatZoom: stg.beatZoom ?? 0.004, shake: 0,
               tint: [{ color: stg.tint || P.mid, a: stg.tintA ?? 0.16, comp: 'soft-light' }],
               overlayGrad: stg.overlayGrad || null, overlayA: stg.overlayA ?? 1,
-              fxBack: fx, fx: [],
+              fxBack: fx, fx: groundFx,
               vignette: stg.vignette ?? 0.34,
             });
           a.chars = [ch];
@@ -341,8 +377,30 @@
       await mk('oncam', 0, 3, { centerFree: true });      // centre-free: the live insert
       // A portrait plan: same centre-free contract, but with the decoration turned right down
       // so the type reads as a caption beside the figure instead of a poster over her.
+      // 「中央を空ける」 official band width: JIZURA's README fixes it at about 36% of the frame
+      // width for a 16:9 landscape (30% for 21:9), and the two bands share ONE layout / motion /
+      // decoration / camera with the second half entering `delay` later (splitCut). `zoneW: 0.24`
+      // was ours, not the spec: it squeezed the type into narrow strips and let the figure grow
+      // past the reserved gap. `direction.char.zoneW` may still override it per film.
+      const PORTRAIT_ZONE = +(dir.char && dir.char.zoneW) || 0.36;
+      // 「中央を空ける」 is a TEXT BLOCK contract: the line is split in two and each half sits
+      // as ordinary horizontal type in its band. The film-wide layout pool still contains
+      // compositional showpieces (orbit / spiral / dropCap / tunnel / circleWords / contour /
+      // curtain) which wrap the line into a circle or spray it across the band -- on a portrait
+      // shot that buries the figure. A portrait plan therefore keeps only reading layouts.
+      // `stack` repeats the same line in several piled copies and `type` draws vertical
+      // columns: both read as noise beside a figure. Reading layouts only.
+      const PORTRAIT_LAYOUTS = new Set(['center', 'mixed', 'quote', 'lowerThird']);
+      const portraitEnabled = {};
+      for (const g of Object.keys(enabled)) portraitEnabled[g] = Object.assign({}, enabled[g]);
+      if (portraitEnabled.layout) {
+        for (const k of Object.keys(portraitEnabled.layout)) {
+          if (!PORTRAIT_LAYOUTS.has(k)) portraitEnabled.layout[k] = false;
+        }
+      }
       await mk('portrait', 0, 9, {
-        centerFree: true, zoneW: 0.24,
+        centerFree: true, zoneW: PORTRAIT_ZONE,
+        enabled: portraitEnabled,
         fx: Object.assign({}, dir.type.fx, { decor: 0.14, density: 0.26, glitch: 0, koma: 12 }),
       });
       const extraN = Math.max(0, (dir.type.plans || 6) - 3);
@@ -441,6 +499,7 @@
         wanted = explicit.map(it => ({
           t0: +(+it.t0).toFixed(3), t1: +(+it.t1).toFixed(3), form: it.form || 'bust',
           img: it.img, side: it.side || null, stage: it.stage || null, story: it.story || '',
+          h: it.h != null ? +it.h : null, y: it.y != null ? +it.y : null, x: it.x != null ? +it.x : null,
         }));
       } else {
         const spec = usable[0];
@@ -610,7 +669,7 @@
         pickPlan,
         mode: (slot, list) => list[Math.floor(rng() * list.length) % list.length],
         charImg,
-        charEntry: cw ? charParams(cw.form, { P, dur, rng, img: cw.img, side: cw.side }, i) : null,
+        charEntry: cw ? charParams(cw.form, { P, dur, rng, img: cw.img, side: cw.side, h: cw.h, y: cw.y, x: cw.x }, i) : null,
         charStage: cw ? cw.stage : null,
       };
       const built = sceneArgs(scene, C);

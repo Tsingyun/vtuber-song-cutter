@@ -591,7 +591,7 @@
       "flashOnSection": false,
       "shakeOnClimax": false
     },
-    "opening": "typeCard",
+    "opening": "illust",
     "ending": "afterimage",
     "axes": {
       "world": "雨后市郊车站 · 候车月台 / 车窗 / 积水",
@@ -602,23 +602,175 @@
       "role": "安静撑伞的少女，越过肩膀回望"
     },
     "char": {
-      "note": "两张用户原创立绘各出镜一次；不改图、不镜像、不剪影，只做位置/景别/入场动画。撑伞图落在 bridge 的揭晓句（165.35-169.72），伸手图落在 climax 的回应句（194.15-199.90）；两处都是歌词直接点名「伞」的位置，时间轴取自 analysis/lyrics_mv.lrc。",
+      "note": "两张用户原创立绘交替出场，共 6 个窗口、合计 63.0 s（占全片 28.7%），全部避开 6 段直播插入；不改图、不镜像、不剪影，只做位置/景别/入场动画与落地处理。撑伞图＝「当时 / 她替你撑伞」（开场、chorus1、bridge），伸手图＝「现在 / 她伸手向你」（verse1、verse2、climax）。时间轴取自 analysis/lyrics_mv.lrc。",
+      "zoneW": 0.36,
       "items": [
         {
           "img": "assets/char/natianxiayule_umbrella.png",
-          "t0": 165.35,
-          "t1": 169.72,
-          "form": "bust",
+          "t0": 0.0,
+          "t1": 9.6,
+          "form": "full",
           "side": "center",
-          "story": "bridge『原来看我被雨淋的那天 / 帮我撑伞也是你』—— 十年前那个人第一次现身。她在右侧，歌词走左侧边带，中间不打架；镜头极缓推近。",
+          "h": 880,
+          "y": 1220,
+          "story": "开场：前奏还没有一句词，先让她站在雨里。这一次是「当时」——她替你撑着伞，所以镜头是从近处缓缓退开，像观众刚刚认出她。标题与水印不抢人物。",
           "stage": {
             "plate": "c",
-            "zoomFrom": 1.03,
-            "zoomTo": 1.085,
-            "vignette": 0.42,
+            "zoomFrom": 1.1,
+            "zoomTo": 1.02,
+            "vignette": 0.44,
             "tint": "#1E3B48",
-            "tintA": 0.14,
+            "tintA": 0.12,
+            "beatZoom": 0.003,
+            "ground": {
+              "color": "#03080D",
+              "h": 130,
+              "a": 0.5,
+              "sheen": "#E8A34C",
+              "sheenY": 8,
+              "sheenH": 260,
+              "sheenA": 0.045
+            },
+            "post": {
+              "bloom": 0.15,
+              "bloomThreshold": 0.92,
+              "exposure": -0.03,
+              "grain": 0.048,
+              "boil": 0.8
+            }
+          }
+        },
+        {
+          "img": "assets/char/natianxiayule_reach.png",
+          "t0": 25.4,
+          "t1": 37.6,
+          "form": "full",
+          "side": "center",
+          "h": 920,
+          "y": 1260,
+          "story": "verse1『车子缓缓的开 你慢慢走来 / 我竟然看著你发呆』—— 换成伸手那张：她从雨里走近、朝镜头伸出手，正好接住「你慢慢走来」。缓推。",
+          "stage": {
+            "plate": "a",
+            "zoomFrom": 1.02,
+            "zoomTo": 1.07,
+            "vignette": 0.36,
+            "tint": "#1E3B48",
+            "tintA": 0.12,
+            "beatZoom": 0.005,
+            "ground": {
+              "color": "#040C12",
+              "h": 130,
+              "a": 0.5,
+              "sheen": "#8FD3E8",
+              "sheenY": 8,
+              "sheenH": 260,
+              "sheenA": 0.045
+            },
+            "post": {
+              "bloom": 0.16,
+              "bloomThreshold": 0.9,
+              "exposure": -0.05,
+              "grain": 0.05,
+              "boil": 0.8
+            }
+          }
+        },
+        {
+          "img": "assets/char/natianxiayule_umbrella.png",
+          "t0": 62.0,
+          "t1": 74.5,
+          "form": "full",
+          "side": "center",
+          "h": 900,
+          "y": 1240,
+          "story": "chorus1『雪白的天空等待彩虹出现』—— 撑伞那张配彩虹弧背景板（plate_b），镜头推近，伞面把彩虹切开。",
+          "stage": {
+            "plate": "b",
+            "zoomFrom": 1.05,
+            "zoomTo": 1.11,
+            "vignette": 0.34,
+            "tint": "#1E3B48",
+            "tintA": 0.12,
+            "beatZoom": 0.006,
+            "ground": {
+              "color": "#050D14",
+              "h": 130,
+              "a": 0.5,
+              "sheen": "#E8A34C",
+              "sheenY": 8,
+              "sheenH": 260,
+              "sheenA": 0.045
+            },
+            "post": {
+              "bloom": 0.17,
+              "bloomThreshold": 0.9,
+              "exposure": -0.04,
+              "grain": 0.052,
+              "boil": 0.8
+            }
+          }
+        },
+        {
+          "img": "assets/char/natianxiayule_reach.png",
+          "t0": 100.0,
+          "t1": 112.5,
+          "form": "full",
+          "side": "center",
+          "h": 920,
+          "y": 1260,
+          "story": "verse2『乡间的麦芽田 害羞的脸』—— 伸手那张回场，机位比 verse1 更近一点，情绪从「她走来」变成「她听见了」。",
+          "stage": {
+            "plate": "a",
+            "zoomFrom": 1.03,
+            "zoomTo": 1.08,
+            "vignette": 0.38,
+            "tint": "#1E3B48",
+            "tintA": 0.12,
+            "beatZoom": 0.005,
+            "ground": {
+              "color": "#040C12",
+              "h": 130,
+              "a": 0.5,
+              "sheen": "#8FD3E8",
+              "sheenY": 8,
+              "sheenH": 260,
+              "sheenA": 0.045
+            },
+            "post": {
+              "bloom": 0.16,
+              "bloomThreshold": 0.91,
+              "exposure": -0.05,
+              "grain": 0.05,
+              "boil": 0.8
+            }
+          }
+        },
+        {
+          "img": "assets/char/natianxiayule_umbrella.png",
+          "t0": 165.3,
+          "t1": 173.5,
+          "form": "full",
+          "side": "center",
+          "h": 900,
+          "y": 1240,
+          "story": "bridge『原来看我被雨淋的那天 / 帮我撑伞也是你』—— 全曲的揭晓句，伞一定要在场。路灯暖光（plate_c），极缓推。",
+          "stage": {
+            "plate": "c",
+            "zoomFrom": 1.04,
+            "zoomTo": 1.1,
+            "vignette": 0.44,
+            "tint": "#1E3B48",
+            "tintA": 0.12,
             "beatZoom": 0.004,
+            "ground": {
+              "color": "#03080D",
+              "h": 130,
+              "a": 0.5,
+              "sheen": "#E8A34C",
+              "sheenY": 8,
+              "sheenH": 260,
+              "sheenA": 0.045
+            },
             "post": {
               "bloom": 0.16,
               "bloomThreshold": 0.9,
@@ -630,19 +782,30 @@
         },
         {
           "img": "assets/char/natianxiayule_reach.png",
-          "t0": 194.15,
-          "t1": 199.9,
+          "t0": 194.0,
+          "t1": 202.0,
           "form": "full",
           "side": "center",
-          "story": "climax『如果回到过去那一个下雨天 / 我会为了你把伞撑开』—— 这一次换成她伸手。全身远景接在前一个中景之后，同样的位置、更远的距离；镜头缓慢后退，彩虹弧从底部升起。",
+          "h": 940,
+          "y": 1280,
+          "story": "climax『如果回到过去那一个下雨天 / 我会为了你把伞撑开』—— 她伸手向你，镜头缓缓后退，彩虹弧升到伞下面。这次是「现在」。",
           "stage": {
             "plate": "b",
-            "zoomFrom": 1.095,
-            "zoomTo": 1.015,
-            "vignette": 0.26,
+            "zoomFrom": 1.1,
+            "zoomTo": 1.03,
+            "vignette": 0.3,
             "tint": "#1E3B48",
-            "tintA": 0.09,
+            "tintA": 0.12,
             "beatZoom": 0.006,
+            "ground": {
+              "color": "#050D14",
+              "h": 130,
+              "a": 0.5,
+              "sheen": "#E8A34C",
+              "sheenY": 8,
+              "sheenH": 260,
+              "sheenA": 0.045
+            },
             "post": {
               "bloom": 0.14,
               "bloomThreshold": 0.92,

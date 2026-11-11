@@ -163,7 +163,7 @@ try {
         : `worst: ${divergence.worst.vs} ${divergence.worst.differ}/${axisTotal} (same: ${divergence.worst.matching.join(',') || 'none'})`],
     ['character assets drawable + real alpha',
       !rep.charDeclared ? true
-        : (rep.charProbe.length === rep.charDeclared.length
+        : (rep.charProbe.length === new Set(rep.charDeclared).size
            && rep.charProbe.every(p => !p.err && p.h >= 1200 && p.corners.every(a => a <= 16))),
       !rep.charDeclared ? 'not declared'
         : rep.charMissing ? `MISSING: ${rep.charMissing.join('; ')}`
