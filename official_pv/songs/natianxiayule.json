@@ -543,6 +543,14 @@
             "cursorClick",
             "notifBell"
           ]
+        },
+        "bg": {
+          "add": [
+            "triTess",
+            "tornPaper",
+            "marble",
+            "paperCut"
+          ]
         }
       },
       "centerDir": "tb"

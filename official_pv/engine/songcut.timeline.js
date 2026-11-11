@@ -45,7 +45,10 @@
       case 'fireflies': return { type: 'fireflies', n: Math.round(12 + 34 * inten), area: [120, H * 0.35, W - 120, H], alpha: 0.6 * q, color: P.glow };
       case 'rain':      return { type: 'rain', n: Math.round(90 + 150 * inten), angle: 0.18, speed: 260, len: 26, color: P.accent };
       case 'dust':      return { type: 'dust', n: Math.round(18 + 36 * inten), color: Z.rgba(P.glow, 0.16) };
-      case 'feathers':  return { type: 'feathers', n: Math.round(10 + 26 * inten), size: 16, color: P.glow, line: false };
+      // D.feathers (core/draw.js:159) draws a fixed ~90 px quill and multiplies it by `size`, so `size` is a
+      // SCALE, not a pixel height. This used to pass 16, which scaled every quill to ~1450 px: 30 of those
+      // covered the frame in pale slabs with a 35 px black outline. 0.18 gives the intended ~16 px feather.
+      case 'feathers':  return { type: 'feathers', n: Math.round(10 + 26 * inten), size: 0.18, color: P.glow, line: false };
       case 'rays':      return { type: 'rays', x: W * (0.35 + 0.3 * v), y: H * 0.16, n: 7, len: 1500, color: P.accent, a: 0.15 * q, seed: 3 + C.i };
       case 'glow':      return { type: 'glow', x: W * (0.3 + 0.4 * v), y: H * 0.42, r: 260, color: P.accent, a: 0.20 * q };
       case 'cracks':    return { type: 'cracks', at: 0.15, dur: 0.9, n: 18, reach: 900, color: P.warm || P.magenta, seed: 1 + C.i };

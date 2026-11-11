@@ -157,6 +157,32 @@ Node 20+（Playwright 已装）、Python 3.10+（numpy / soundfile / Pillow）�
 - 窗口边缘是**结构切点**：会越过 `minShot` 过滤保留下来，旁边 0.4 s 内的歌词切点给它让位。
 5. `node cut.mjs --date <date> --song <id>`（会先跑 `direction_report` 再逐首 `prepare → audit → render`）。
 
+## 参数陷阱：`fx` 的 `size` 不都是像素
+
+`builtinFx()`（`engine/songcut.timeline.js:40`）里各 fx 的 `size` 语义**并不统一**：
+
+| fx | `size` 语义 | 合理值 |
+|---|---|---|
+| `embers` | 半径 px | 2–4 |
+| `feathers` | **相对 90 px 原始羽片的缩放** | 0.1–0.4 |
+
+`feathers` 曾经传 `size: 16`（当像素用），每片羽片被放大到 ≈1450 px、描边同步放大到 35 px，
+`n=30` 片叠起来就是满屏白底黑边的大叶片——**整片 15% 时长被吃掉**，而且先被误判成
+JIZURA 亮底背景。改特效参数前先读 `core/draw.js` 里那一项的基准尺寸，别按名字猜。
+
+## `manifest.json` 被单曲重渲覆盖时
+
+`manifest.json` 在整套流程末尾一次性写出（只包含本次跑的歌）。单曲 `--song <id>` 重渲会把它
+覆盖成一首。用工具重建，不要手写：
+
+```bash
+node tools/rebuild_manifest.mjs 2026-11-10
+```
+
+它按 `songs/<date>.json` 的 `whitelist` 逐首 `ffprobe` 实测（分辨率/帧数/码率/体积）、
+从 `songs/<id>.json` 取原唱与版权、从 `_audit_<id>.json` 取 `officialScenesUsed`；
+白名单里有文件缺失就**拒绝写入**，不会产出一份「看起来完整」的 manifest。
+
 ## 交付规范
 
 成片落在 `D:\岁己歌切\cuts\<date>\official\`，`manifest.json` **只包含白名单曲目**。
