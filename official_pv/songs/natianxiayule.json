@@ -817,7 +817,5 @@
         }
       ]
     }
-  },
-  "opening": "typeCard",
-  "ending": "solid"
+  }
 }

@@ -110,6 +110,9 @@ checks.push(['no placeholder / debug text on screen', junk.length === 0, junk.sl
 `mean < 12` 超过 0.5 s 就报警（"这不是设计好的黑场就是坏帧"，人工复核一次即可）。
 这两条加起来不到 30 行，能把这一类问题永久堵死。
 
+> **本轮实测后修正**：上面这条数值方案**被否决**，换成结构性检查 `every shot reference resolves`。
+> 原因与实测数据见 §7.2——合法镜头的亮度分布完全覆盖了占位卡，任何阈值都只能二选一。
+
 **影响范围**：整个 `official_pv` 的证明链——现在所有"审计 PASS"的说法都缺一块。
 
 ---
@@ -407,6 +410,8 @@ for i, (t, _) in enumerate(lines):
 
 ## 5. 建议的修复顺序
 
+**状态（2026-11-15 03:45）**：第一批、第二批、3.6 已完成并复渲，见 §7。第三、四批未动。
+
 **第一批（半小时，纯收益）**
 1. 1.3 `side` → `cx`（3 行）
 2. 1.2 审计加"占位文本 + 近空帧"两条检查（~30 行）→ 让 1.1 暴露出来
@@ -440,3 +445,66 @@ for i, (t, _) in enumerate(lines):
 - 成片抽帧：`ffmpeg -ss <t> -frames:v 1`，存于 `render/_audit/`。
 - 官方对照：`D:/岁己歌切/_ref/vocaloid-style-mv-pipeline/skills/vocaloid-style-mv/{template,references}`，
   按行尾归一化后逐文件 diff。
+
+---
+
+## 7. 修复记录（2026-11-15 03:20–03:45）
+
+### 7.1 已修
+
+| 编号 | 改动 | 文件 | 反证方式 |
+|---|---|---|---|
+| 1.1 | `ref` 真的复用已建镜头：往回 1–3 个（跳过 `ref` 与 `livewin`，前者防递归、后者帧不可复渲）；`at` 取"观众最后看到的那一帧" `min(t0, prev.t1 − 1/30)`；**不再传 `meltAt/meltEnd`**——上游那两项是绝对时间，原来传的 0.3 / 0.9 是分数，等于一入场就已化完；`mode` 收敛为 `melt` / `freeze`（`tear`/`burn` 根本不是 meta.js 认识的值，只会静默落到 freeze） | `engine/songcut.timeline.js` | 把 `shot` 改回 `null` 重跑审计 → 两条新检查同时 FAIL 并点名 s005/s010/s025/s028；改回即 PASS |
+| 1.2 | 审计新增两条检查：`no placeholder / debug text on screen`（hook `fillText` 抓 `/no shot\|missing scene\|undefined\|NaN\|Infinity/`）与 `every shot reference resolves`（`ref`/`burst`/`montage`/`freeze` 必须给出存在的 shot id） | `tools/audit_official.mjs` | 同上，坏代码 FAIL / 好代码 PASS，双向验证 |
+| 1.3 | `side` → `cx`（`shadow` 形态的三处） | `engine/songcut.timeline.js` | 该分支不再引用作用域外变量 |
+| 2.4 | 删顶层死键；并在 `direction.normalize` 增加校验：顶层与 `direction.*` 同名键值不同即抛错 | `songs/natianxiayule.json`、`engine/direction.js` | 顶层键已不存在；`opening`/`ending` 现只从 `direction.*` 读取 |
+| 2.6 | 立绘窗口两两不相交 + 窗口区间与 live 区间不相交（不再只测中点，pad 0.05 与原有中点测试一致） | `engine/songcut.timeline.js` | 6 个窗口全部通过（`charShots=6/6`），无一个被误杀 |
+| 3.6 | `deliver.lrc` 存在性检查从"渲染完成后"提前到渲染之前 | `cut.mjs` | — |
+
+### 7.2 被否决的方案（重要）
+
+审计初稿建议用「下采样 32×18，`std < 3` 且 `mean < 12`」检测死气帧。**实测否决**：
+
+| 样本 | mean | std | 48×27 不同色数 |
+|---|---|---|---|
+| 占位卡 s010 | 14.4 | 3.0 | 4 |
+| 占位卡 s005 | 16.0 | 19.1 | — |
+| 占位卡 s028 | 17.8 | 23.7 | — |
+| **合法** afterimage s057 | **5.7** | 20.5 | 29 |
+| **合法** illust s058 | 17.7 | 4.7 | 20 |
+
+合法镜头的分布完全覆盖占位卡：`afterimage` 比占位卡更暗，`illust` 比它更平。任何阈值都只能在
+漏检与误杀之间二选一。换成结构性检查后零误报，且在构建期就能抓。
+
+**结论：一条不能区分好坏的检查比没有检查更糟**——它会训练所有人忽略审计。所以这里宁可只留一条
+确实能报警的检查，也不留一条看着全面的假检查。
+
+### 7.3 修复过程中新发现的两处
+
+- **`cut.mjs` 用 `--song` 局部重渲会把 manifest 从 3 首缩成 1 首**（本次实测踩中）。已改为 merge：
+  未渲染的条目从旧 manifest 保留，且必须 mp4 真的在目录里才保留，manifest 不能比文件活得久。
+  2026-11-10 的 manifest 已按磁盘事实（ffprobe 三支 mp4 + 配置 + `_audit_*.json`）重建，`bit_rate`
+  与原值逐位一致（34,342,925）。
+- **源录播被清理后 `prepare.py` 无解**：`D:/录播/25788785-岁己SUI/2026-11-10/` 已不存在。新增
+  `cut.mjs --skip-prepare`，并断言 `audio/song.wav`、`analysis/audio.json`、`analysis/envelope_30fps.json`、
+  `assets/live/<id>/frames` 齐全，同时打印 wav 的 mtime——复用可以，盲用不行。
+
+### 7.4 复渲结果
+
+```
+node cut.mjs --date 2026-11-10 --song natianxiayule --skip-prepare
+```
+
+- 审计 **24 项全 PASS**（原 22 项 + 2 项新检查），25 个官方场景注册 / 9 个使用
+- 6594 帧 · 219.8 s · 1920×1080 30/1 · 34.34 Mb/s · 944 MB
+- 渲染 80.47 fps（81.9 s 渲 + 7.4 s mux），与上一版同量级
+- 交付 `cuts/2026-11-10/official/【岁己SUI】那天下雨了【20261110歌切】.mp4`；另两首 mp4 与 lrc 的
+  mtime 仍为 11-11 10:29 / 10:31，**未被触碰**
+- 抽帧复核四个原 `ref` 镜头：17.86 / 18.90 s 为冻结帧 + 裂纹展开；43.05 / 94.16 / 95.60 s 为列式溶解；
+  114.62 s 为另一处溶解。**四段都不再有英文字符**（原为 `ref: no shot undefined`）
+
+### 7.5 仍未做（等指示）
+
+第三批（2.2 plan 降到 4–5 并按段落固定 / 3.1.1 字形预热 / 3.1.2 sprite warp 缓存 / 2.3 重生成哈希清单）、
+第四批（3.2 关 `preserveDrawingBuffer` + `texSubImage2D` / 3.3 真 beat grid / 2.1 立绘窗口内切点 / 3.4 竖版）、
+以及 2.5 的 `sceneArgs` schema 校验（`panels`/`burst`/`solid`/`jz` 四处契约不符）。

@@ -16,6 +16,11 @@ import { ROOT, cliArg, cliFlag } from './tools/kit_env.mjs';
 const date = cliArg('date', '2026-11-09');
 const only = cliArg('song', '');
 const auditOnly = cliFlag('audit-only');
+// Re-render an already-prepared song. The source recording is routinely deleted by the
+// transcription pipeline once it has been processed, so prepare.py cannot always re-extract the
+// audio; reusing the prepared set is legitimate (the engine changed, the song did not) but it is
+// ASSERTED below -- never assumed -- and the mtime is printed so a stale set is visible.
+const skipPrepare = cliFlag('skip-prepare');
 const session = JSON.parse(fs.readFileSync(path.join(ROOT, 'songs', `${date}.json`), 'utf8'));
 const ids = only ? [only] : session.whitelist;
 for (const id of ids) if (!session.whitelist.includes(id)) { console.error(`song ${id} is not in the ${date} whitelist`); process.exit(2); }
@@ -71,7 +76,20 @@ for (const id of ids) {
   const meta = session.songs[id];
   console.log(`\n############  ${cfg.title}  ·  ${cfg.artist}  ·  ${cfg.duration}s  ############`);
 
-  run('python', ['tools/prepare.py', '--date', date, '--song', id], `PREPARE ${id}`);
+  // `deliver.lrc` used to be copied only AFTER the render finished -- a missing file meant
+  // wasting the whole render. Everything that can fail cheaply is checked before any frame.
+  const deliverLrc = path.join(ROOT, 'songs', `${id}.deliver.lrc`);
+  if (!fs.existsSync(deliverLrc)) { console.error(`preflight: missing ${deliverLrc}`); process.exit(2); }
+
+  if (skipPrepare) {
+    const need = ['audio/song.wav', 'analysis/audio.json', 'analysis/envelope_30fps.json', `assets/live/${id}/frames`];
+    const miss = need.filter(p => !fs.existsSync(path.join(ROOT, p)));
+    if (miss.length) { console.error('--skip-prepare: missing prepared assets: ' + miss.join(', ')); process.exit(2); }
+    console.log(`[prepare] reused (no re-extract) -- song.wav mtime ${fs.statSync(path.join(ROOT, 'audio/song.wav')).mtime.toISOString()}`);
+  } else {
+    run('python', ['tools/prepare.py', '--date', date, '--song', id], `PREPARE ${id}`);
+  }
+
   run(process.execPath, ['tools/audit_official.mjs', '--song', id], `OFFICIAL-CAPABILITY AUDIT ${id}`);
   const audit = JSON.parse(fs.readFileSync(path.join(ROOT, 'render', `audit_${id}.json`), 'utf8'));
   const failed = audit.checks.filter(c => !c.pass);
@@ -103,7 +121,7 @@ for (const id of ids) {
   const base = meta.file;
   const mp4 = path.join(outDir, `${base}.mp4`), lrc = path.join(outDir, `${base}.lrc`);
   fs.copyFileSync(tmpOut, mp4); fs.rmSync(tmpOut);
-  fs.copyFileSync(path.join(ROOT, 'songs', `${id}.deliver.lrc`), lrc);
+  fs.copyFileSync(deliverLrc, lrc);
   fs.copyFileSync(path.join(ROOT, 'render', `audit_${id}.json`), path.join(outDir, `_audit_${id}.json`));
   delivered.push({
     id, title: cfg.title, original_artist: cfg.artist, credit: cfg.credit,
@@ -117,16 +135,28 @@ for (const id of ids) {
   console.log(`DELIVERED -> ${mp4}`);
 }
 
-// manifest contains EXACTLY the whitelist, nothing else
+// The manifest must describe everything that is actually in the delivery directory -- and nothing
+// else. A `--song` run only renders ONE song of the session, so it has to MERGE into the existing
+// manifest: rewriting it from the freshly-rendered list alone silently drops the other songs'
+// records even though their mp4s are still sitting in the same folder.
 const outDir = deliveryDir(date);
 if (!auditOnly) {
+  let songs = delivered;
+  if (only) {
+    let prev = [];
+    try { prev = JSON.parse(fs.readFileSync(path.join(outDir, 'manifest.json'), 'utf8')).songs || []; } catch { /* first run */ }
+    const kept = prev.filter(s => !delivered.some(d => d.id === s.id));
+    // an entry is only kept if its mp4 is really there, so the manifest cannot outlive a file
+    songs = [...delivered, ...kept.filter(s => fs.existsSync(path.join(outDir, s.file)))]
+      .sort((a, b) => session.whitelist.indexOf(a.id) - session.whitelist.indexOf(b.id));
+  }
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({
     date, generated_by: 'official_pv/cut.mjs',
     upstream: 'https://github.com/EGSECDA/vocaloid-style-mv-pipeline',
     verified_against_local_clone: '13b380dab077d4c8ea956825c9693c720e0c2b91',
     completeness_report: 'official_pv/docs/COMPLETENESS.md',
-    songs: delivered,
+    songs,
   }, null, 2), 'utf8');
-  console.log(`\n=== DONE: ${delivered.length} song(s) ===`);
-  for (const d of delivered) console.log(`  ${d.title}  ${d.duration}s  ${(d.size/1e6).toFixed(0)} MB  ${d.scenes_used.length} official scenes`);
+  console.log(`\n=== DONE: ${delivered.length} song(s) rendered, ${songs.length} in manifest ===`);
+  for (const d of songs) console.log(`  ${d.title}  ${d.duration}s  ${(d.size / 1e6).toFixed(0)} MB  ${d.scenes_used.length} official scenes`);
 }

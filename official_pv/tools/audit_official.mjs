@@ -67,11 +67,42 @@ try {
     // FULL-TIMELINE smoke render. One frame per shot is not enough: a scene can be
     // fine at its first midpoint and explode later (a palette key used by only some
     // fx factories). Render EVERY shot midpoint and collect any exception.
-    const smoke = { tried: 0, errors: [] };
+    //
+    // Two things are ALSO measured here, because "it rendered without throwing" turned out to be
+    // compatible with broadcasting a debug card for 7.5% of the film:
+    //   1. every string that reaches the canvas. `missing()` in meta.js paints
+    //      "ref: no shot undefined" -- a scene that silently fell back to its placeholder is
+    //      invisible to every other check here, but it is plain text on screen.
+    //   2. every shot argument that names another shot. `ref` / `burst` / `montage` take a `shot`
+    //      id; a missing or wrong one is the exact cause of (1), and it is decidable at build time.
+    // A photometric "dead air" test was tried and REJECTED: measured on this film, the placeholder
+    // shots sit at mean 14-22 / std 3-38 / 4 distinct colours, while a legitimate near-black
+    // `afterimage` sits at mean 5.7 / std 20.5 / 29 colours -- the distributions overlap, so any
+    // threshold would either miss the bug or fail good films. A check that cannot separate is worse
+    // than no check: it teaches everyone to ignore the audit.
+    const drawnText = [];
+    const proto = CanvasRenderingContext2D.prototype;
+    const origFillText = proto.fillText;
+    proto.fillText = function (s, ...a) { drawnText.push(String(s)); return origFillText.call(this, s, ...a); };
+    const smoke = { tried: 0, errors: [], junkText: [] };
     for (const sh of Z.SHOTS) {
       const t = (sh.t0 + sh.t1) / 2;
+      drawnText.length = 0;
       try { await window.renderFrame(t); smoke.tried++; }
-      catch (e) { smoke.errors.push(`${sh.id}@${t.toFixed(2)} ${sh.scene}: ${String(e).slice(0, 160)}`); }
+      catch (e) { smoke.errors.push(`${sh.id}@${t.toFixed(2)} ${sh.scene}: ${String(e).slice(0, 160)}`); continue; }
+      const junk = [...new Set(drawnText.filter(s => /no shot|missing scene|undefined|NaN|Infinity/i.test(s)))];
+      if (junk.length) smoke.junkText.push(`${sh.id} ${sh.scene}: ${junk.slice(0, 3).join(' / ')}`);
+    }
+    proto.fillText = origFillText;
+
+    // shot-argument integrity: a scene that says "play shot X" must name a shot that exists.
+    const SHOT_REF_SCENES = new Set(['ref', 'burst', 'montage', 'freeze']);
+    const badShotRefs = [];
+    for (const sh of Z.SHOTS) {
+      const a = sh.args || {};
+      if (SHOT_REF_SCENES.has(sh.scene) && !a.shot) { badShotRefs.push(`${sh.id} ${sh.scene}: shot is ${a.shot === null ? 'null' : 'missing'}`); continue; }
+      if (a.shot != null && !Z.shotById(a.shot)) badShotRefs.push(`${sh.id} ${sh.scene}: shot=${a.shot} does not exist`);
+      if (sh.scene === 'burst' && Array.isArray(a.cuts) && !a.cuts.length) badShotRefs.push(`${sh.id} burst: cuts is empty`);
     }
     // character asset probe: the single illustration is user-supplied, so verify it can
     // actually be drawn as a sprite (alpha + resolution), not just that the file exists.
@@ -102,7 +133,7 @@ try {
       scripts, officialFilesLoaded: officialFiles.filter(f => scripts.includes(f)),
       registeredScenes: registered.length, registered: registered.sort(),
       officialScenesUsed: A.officialScenesUsed || [], sceneCounts: A.scenes || {},
-      missingScenes: missing, drawn, smoke,
+      missingScenes: missing, drawn, smoke, badShotRefs,
       fxTypes, fxTypeCounts: A.fxTypes || {}, customFactories: A.customFactories || {},
       transTypes, transitions: A.transitions || {},
       jizuraPlans: A.jizuraPlans || [], planCounts: A.plans || {},
@@ -151,6 +182,10 @@ try {
     ['every distinct scene executed', !rep.drawn.some(d => d.includes('!ERR')), rep.drawn.join(', ')],
     ['every shot renders without exception', rep.smoke.errors.length === 0,
       `${rep.smoke.tried}/${rep.shots} frames` + (rep.smoke.errors.length ? ' :: ' + rep.smoke.errors.slice(0, 3).join(' | ') : '')],
+    ['no placeholder / debug text on screen', (rep.smoke.junkText || []).length === 0,
+      (rep.smoke.junkText || []).length ? rep.smoke.junkText.slice(0, 4).join(' | ') : 'clean'],
+    ['every shot reference resolves', (rep.badShotRefs || []).length === 0,
+      (rep.badShotRefs || []).length ? rep.badShotRefs.slice(0, 4).join(' | ') : 'all shot args point at a real shot'],
     ['>=6 built-in fx types', rep.fxTypes.length >= 6, rep.fxTypes.join(', ')],
     ['no declared fx silently dropped', rep.fxDropped.length === 0,
       rep.fxDropped.length ? rep.fxDropped.join(',') : `declared: ${rep.fxDeclared.join(',') || 'none'}`],

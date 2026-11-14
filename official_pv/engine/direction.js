@@ -237,6 +237,17 @@
   // ---------------------------------------------------------------- normalise a song config
   function normalize(cfg, songId) {
     const src = cfg.direction || {};
+    // Only `direction.*` is read (songcut reads `dir.opening` / `dir.ending`). A same-named key
+    // left at the TOP level of the song config is a dead key -- it looks like configuration and
+    // silently does nothing, which is exactly how "set ending to solid" once produced no change.
+    // Empty values are ignored; a real disagreement is a hard error, not a warning.
+    for (const k of ['opening', 'ending']) {
+      const top = cfg[k], own = src[k];
+      if (top == null || top === '') continue;
+      if (own != null && own !== top) {
+        throw new Error(`songs/${cfg.id || songId}.json: "${k}" is "${top}" at the top level but "${own}" in direction.* -- only direction.${k} is read; delete the top-level key`);
+      }
+    }
     const d = merge(DEFAULTS, src);
     d.seed = (d.seed == null) ? (Z.hash(...String(cfg.id || songId).split('').map(c => c.charCodeAt(0))) >>> 0) : d.seed;
     // 02 §13: a high-key film must not inherit the low-key post look

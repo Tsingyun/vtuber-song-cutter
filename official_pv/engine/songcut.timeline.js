@@ -96,9 +96,11 @@
         return fit(Object.assign(base, { x: W * (0.5 + 0.12 * cx * cxw), y: H * 0.99, h: 1140, h2: 1160,
           rim: { color: P.warm || P.gold, off: [7, -4] }, in: { dur: 0.8, ds: 0.04 }, out: { at: C.dur - 0.5, dur: 0.45 } }));
       case 'shadow': // cast shadow + tiny figure: distance, memory
+        // `cx` (-1/0/1) is the side; there is no `side` in this scope -- reading one here used to
+        // throw ReferenceError the first time a film asked for this form.
         return fit(Object.assign(base, { x: W * (0.5 - 0.2 * cx * cxw), y: H * 0.94, h: 620, h2: 600,
-          shadow: { dx: 210 * side, dy: -10, color: P.void, a: 0.52 }, sway: 0.006,
-          in: { dur: 0.7, dx: 40 * side }, out: { at: C.dur - 0.4, dur: 0.4, dx: 30 * side } }));
+          shadow: { dx: 210 * cx, dy: -10, color: P.void, a: 0.52 }, sway: 0.006,
+          in: { dur: 0.7, dx: 40 * cx }, out: { at: C.dur - 0.4, dur: 0.4, dx: 30 * cx } }));
       default:       // 'full' -> whole figure, wide shot, lots of air around her
         // The source art is hard-cropped at its own bottom edge (margin 0), so the baseline
         // sits 70 px BELOW the frame: the cut line is never on screen, at any breath/zoom.
@@ -257,8 +259,31 @@
         return { args: { panels: 3 + (i % 3), every: 2, speed: 0.8, roll: 0.2, rim: P.accent, grade: 0.2, hud: false, flash: false, lead: 0.15 } };
       case 'burst':
         return { args: { seed: 41 + i, at: C.t0 + 0.2, hold: 0.1, rate: 2, desat: 0.2, push: 0.05, jitter: 0.3, drip: false, cuts: [], shot: null, span: 1 } };
-      case 'ref':
-        return { args: { mode: C.mode('ref', ['melt', 'tear', 'burn']), meltAt: 0.3, meltEnd: 0.9, cols: 14 + (i % 3) * 4, depth: 0.4, seed: 11 + i } };
+      case 'ref': {
+        // 05 §8: `ref` re-renders ANOTHER shot -- it is "a shot about a shot". Its `shot` id is
+        // mandatory; without one meta.js falls back to `missing()`, which paints a DEBUG PLACEHOLDER
+        // ("ref: no shot undefined") and would be broadcast for the whole shot. So pick one for
+        // real: walk back 1-3 already-built shots. Never a `ref` (no recursion) and never a
+        // `livewin` (its frames are decoded per frame, not re-renderable).
+        const pool = (C.shots || []).filter(s => s.scene !== 'ref' && s.scene !== 'livewin');
+        if (!pool.length) throw new Error(`ref (${C.id || '?'}): no earlier shot to re-render`);
+        const back = Math.min(pool.length, 1 + (i % 3));
+        const prev = pool[pool.length - back];
+        // `at` is the LAST frame the viewer actually saw of it -- not this shot's t0, which may sit
+        // past the source shot's end. `meltAt`/`meltEnd` are ABSOLUTE times upstream; omitting them
+        // lets meta.js use its own T0+0.45 / T1 defaults.
+        const at = +Math.max(prev.t0, Math.min(C.t0, prev.t1 - 1 / 30)).toFixed(4);
+        const mode = C.mode('ref', ['melt', 'freeze']);
+        if (mode === 'melt') {
+          return { args: { shot: prev.id, mode, at, live: false, seed: 11 + i,
+                           cols: 28 + (i % 3) * 6, depth: 0.95 } };
+        }
+        // freeze: hold the frame, then crack it -- a 3-5 s still with nothing happening is exactly
+        // what 09 §2 calls dead air, so the crack is part of the spec, not an option.
+        return { args: { shot: prev.id, mode, at, live: false, desat: 0.82, push: 0.03, split: 7,
+                         crackAt: +(C.t0 + C.dur * 0.42).toFixed(3), crackXY: [W * 0.55, H * 0.42],
+                         crackAngle: -0.55, crackSeed: 23 + i } };
+      }
 
       default:
         return { args: { grad: C.cfg.grad, fx } };
@@ -523,10 +548,30 @@
         for (const w of out) if (!keep.some(k => w.t0 < k.t1 + 0.35 && w.t1 > k.t0 - 0.35)) keep.push(w);
         wanted = keep;
       }
+      // Two invariants, both previously unchecked. A window that fails either one does not just
+      // look wrong -- it silently eats footage:
+      //   1. two windows must not overlap. `charAt()` returns the FIRST match, so the later window
+      //      would never appear at all, while still reserving its space in the cut grid.
+      //   2. a window must not straddle a live insert. `charEdge()` outranks `liveEdge()`, so the
+      //      max-hold pass (below) keeps only the window edges and the live insert's boundary is
+      //      DELETED -- the insert is swallowed by the illustration shot, and the audit's
+      //      `livePct` check only measures an upper bound, so it reports nothing.
+      const LIVE_PAD = 0.05;                     // same pad the explicit midpoint test used
+      const clashLive = w => cfg.live.find(([a, b]) => w.t1 + LIVE_PAD > a && w.t0 - LIVE_PAD < b);
       for (const w of wanted) {
         if (w.t1 <= w.t0) { charMissing.push(`${w.img}: window ${w.t0}-${w.t1} is empty`); continue; }
         if (inLiveW((w.t0 + w.t1) / 2, explicit.length ? 0.05 : 0.4)) {
           charMissing.push(`${w.img}: window ${w.t0}-${w.t1} collides with a live insert`);
+          continue;
+        }
+        const lv = clashLive(w);
+        if (lv) {
+          charMissing.push(`${w.img}: window ${w.t0}-${w.t1} straddles live insert ${lv[0]}-${lv[1]}`);
+          continue;
+        }
+        const ov = charShots.find(k => w.t0 < k.t1 && w.t1 > k.t0);
+        if (ov) {
+          charMissing.push(`${w.img}: window ${w.t0}-${w.t1} overlaps ${ov.img} ${ov.t0}-${ov.t1}`);
           continue;
         }
         charShots.push(w);
@@ -662,12 +707,13 @@
       }
 
       const C = {
-        cfg, P, act, i, t0, t1, dur, intensity: act.intensity, look: act.look, key,
+        cfg, P, act, i, id, t0, t1, dur, intensity: act.intensity, look: act.look, key,
         fxList, glyphs4, rng, plateIdx: plateIdx++,
         plate: k => `assets/bg/plate_${cfg.id}_${k}.png`,
         lutMix: +lerp(g.lutMixCurve[0], g.lutMixCurve[1], act.intensity).toFixed(3),
         pickPlan,
         mode: (slot, list) => list[Math.floor(rng() * list.length) % list.length],
+        shots: S,                       // already-built shots -- `ref` re-renders one of these
         charImg,
         charEntry: cw ? charParams(cw.form, { P, dur, rng, img: cw.img, side: cw.side, h: cw.h, y: cw.y, x: cw.x }, i) : null,
         charStage: cw ? cw.stage : null,
