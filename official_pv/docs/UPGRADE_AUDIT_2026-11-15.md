@@ -1,0 +1,522 @@
+# 全量升级排查 · 2026-11-15
+
+> 范围：本项目 `official_pv/` 全部自有代码（10.7k 行）+ 工具链（1.6k 行）+ 配置（2.4k 行）
+> + 上游 10 份规范 / SKILL.md / README / `examples/zanko` 示例工程（3.3k 行）+ 外部同类项目调研。
+> 原则：**能实测的不推断**。凡是"某处可能有问题"，都跑一遍或抽一帧确认；凡是否证掉的，记在 §8。
+
+---
+
+## 0. 摘要
+
+三个 P0，都不是代码风格问题，而是**已经在成片里**或**正在系统性削弱全片**：
+
+| # | 问题 | 影响 | 状态 |
+|---|---|---|---|
+| 1 | **节拍网格是假的**：`audio.json.beats` 填的是 97 个歌词行首，官方契约要求 onset-snapped 节拍网格（《残光》486 个，我们应有 322 个） | 全片所有 beat 驱动失效：`pulse`/`bar`/`downPulse`/`beatZoom`/`beatBloom`/`beatCA`/`kanjiSlam` 一拍一字/JIZURA 节拍动效 | 已在成片 |
+| 2 | **`winning_phase` 把秒当索引**：`downbeat_info.winning_phase=1.6761`（秒）被当作 beat 索引传进 `makeClock` | `inBar()` 在 2199 个采样点里**一次都不等于 0**；`downPulse()` **恒为 0**；`bar()` 出现 **-1** | 已在成片 |
+| 3 | **《残光》的字面量泄漏进画面**：`ember` 小字打字机写死 `'残光 / ZANKŌ'`，`titleRiff` 四角 HUD 默认 `「残光」ZANKŌ — afterglow / BPM 131 / 踏切 No.7 / 35°41′N 139°46′E / 03:44` | 《发如雪》1 镜、《坏女孩》2 镜、《下个，路口，见》2 镜 | 已在成片 |
+| 4 | **12 轴差异化审计是字符串比对**：`signature()` 的 `world/timeArc/material/role` 四个轴直接取配置里手写的散文（`songs/*.json:596` 的 `axes` 块），`palette/motif` 散文优先，其余 6 轴也是配置派生 —— **没有一轴看画面** | "两片相差 ≥9 轴"= "两份 JSON 写得不一样"；防同质化的核心保障实际不存在 | 审计失效 |
+
+一句话：**上一轮修掉了"画面上的英文调试字"，但没发现画面上还印着另一部作品的标题；而"差异化"这道防线，守的是 JSON 不是画面。**
+
+---
+
+## 1. P0 — 必修（影响成片正确性）
+
+### 1.1 节拍网格：97 个歌词行首 vs 应有 322 拍
+
+**官方契约**（`03-audio-and-lyrics.md`）：
+
+```
+L49  | beats         | 486 times, onset-snapped | hits: cuts, flashes, slams
+L50  | beats_smooth  | same indices, jitter-free spline grid | continuous motion
+L51  | downbeat_info.winning_phase | 1 → downbeat = beats[k] with k%4==1 | Z.makeClock(…, winning_phase)
+L53  | downbeats     | 122 times | bar hits
+L85  Z.clock = Z.makeClock(audio.beats, audio.bpm, audio.downbeat_info.winning_phase)
+```
+
+《残光》3.73 min @131 bpm = 489 拍，文档记 486 → **完全对应**。
+我们 219.8 s @88 bpm = **322 拍**，实际 `beats` = **97**（`render/_clockcheck.mjs` 实测 `nBeats=97`）。
+
+来源在 `tools/prepare.py:103`，注释自己写着 `beats = REAL lyric onsets + midpoints`。
+
+**实测后果**（`render/_beatcheck.mjs`）：
+
+```
+clock beats total = 97 (should be ~322 for 219.8s @88bpm)
+  s013 dur=1.79s beatsInShot=2 glyphs=4
+  s017 dur=2.85s beatsInShot=1 glyphs=4
+  s021 dur=3.41s beatsInShot=1 glyphs=4   ← 配了 4 个字，镜头内只有 1 拍
+  s031 dur=3.09s beatsInShot=2 glyphs=4
+  ...
+```
+
+`typo.js:394-396` 用 `shotBeats(S)` 过滤镜头内的 beat 当字形索引 → 镜头内只有 1 拍时 `k` 恒为 0 →
+**只显示 `glyphs[0]`**。抽帧复核 s021（77.90–81.31 s，字表「呆 车 书 晴」）：
+78.30 s 是「呆」，80.91 s **还是「呆」**。四个字只打出第一个，后三个从未出现。
+
+同一根源影响 `main.js:190` 的时钟、JIZURA 的 `plan.beats`（`jizura_engine.js:3937` `beatAt`）、
+以及 `beatZoom / beatBloom / beatCA / beatBump / glow.beat / tunnel / road.dolly`。
+
+**数据其实已经算出来了**：`audio.json` 里有 `downbeats`（80 个，间隔稳定 2.727 s = 4×0.6818，
+即 88 bpm 的完整小节）和 `onsets_strong`（220 个），**两个数组从未被任何代码读取**（grep 全项目 0 处）。
+
+**修法**（`prepare.py`，约 30 行）：
+- `beats` 改为 `downbeats` 展开 4 拍/小节 → 320 点；
+- 现有"歌词行首 + 中点"另存 `lyricOnsets`（`songcut.timeline.js` 与 `JZ.setAudio` 改读它）；
+- 其余字段不动。`main.js` 无需改。
+
+**风险**：修完所有节拍类效果强度都要重调（`beatCA 2.0` 在 0.68 s 一拍下会过密）。
+建议先在《那天下雨了》单曲上试，确认观感后再推到另两首。
+
+**验证手段**：`render/_beatcheck.mjs` 已留档，改完重跑应显示 `nBeats≈320`、`beatsInShot≈4-5`。
+
+### 1.2 `winning_phase` 单位错：秒当索引
+
+`tools/prepare.py` 写 `winning_phase: 1.6761`（`downbeat_info.note` 自称"measured from the PCM onset envelope"），
+`main.js:190` 原样传给 `Z.makeClock(beats, bpm, downbeatIndex0)`，
+而 `util.js:71,81` 把它当**索引**用：
+
+```js
+const beatNo = t => idx(t) - downbeatIndex0;          // 整数 - 1.6761 = 永远小数
+at: n => beats[n + downbeatIndex0] ?? ...
+```
+
+官方定义（`03 L51`）是 `1 → downbeat = beats[k] with k % 4 == 1`，即 **0–3 的相位索引**。
+
+**实测**（`render/_clockcheck.mjs`，2199 个采样点）：
+
+| t | idx | beatNo | bar | inBar | downPulse |
+|---|---|---|---|---|---|
+| 10 | 1 | -0.676 | **-1** | 3.324 | 0 |
+| 30 | 8 | 6.324 | 1 | 2.324 | 0 |
+| 50 | 21 | 19.324 | 4 | 3.324 | 0 |
+| 80 | 38 | 36.324 | 9 | 0.324 | 0 |
+| 120 | 56 | 54.324 | 13 | 2.324 | 0 |
+| 180 | 81 | 79.324 | 19 | 3.324 | 0 |
+
+`inBar(t) === 0` 命中 **0 / 2199 次**；`downPulse` 全为 0；`bar()` 出现负数。
+
+`downPulse` 被 `typo.js:793`（kanjiSlam 的 `dpulse`）、`tunnel`、`road` 使用 → 这些"小节重拍"效果全部静默失效。
+
+**修法**：`prepare.py` 输出 `winning_phase: <0..3 的整数>`（相位落在第几拍），另存 `phase_time` 保留秒值。
+或者更稳：既然 1.1 会把 `beats` 换成规整网格，`winning_phase` 此时可以固定为 0（网格从 downbeat 起铺）。
+
+### 1.3 《残光》字面量泄漏（3 首歌、5 个镜头）
+
+| 场景 | 硬编码位置 | 是否可被 args 覆盖 | 用到它的片子 |
+|---|---|---|---|
+| `ember` | `intro.js:344` `const title = '残光 / ZANKŌ'` | **否**，函数内写死 | 发如雪 ×1、坏女孩 ×2 |
+| `titleRiff` | `intro.js:875-876` HUD 默认 `title/when/bpm/geo/place/len` | 是（`S.args.hud`），但 songcut 没传 | 下个，路口，见 ×2 |
+
+`titleRiff` 默认值原文：
+
+```js
+{ title: '「残光」 ZANKŌ — afterglow', when: 'DUSK / 逢魔が時', bpm: 'BPM 131 · 4/4',
+  geo: '35°41′N 139°46′E', place: '踏切 No.7 — 上り', len: '03:44' }
+```
+
+`songcut.timeline.js:201-205` 的 `titleRiff` 分支只传了 `seed/whiteAt/grain/variant/char/sky`，
+**没有 `hud`** → 全用残光默认。而且 `glyphs` 也没传，默认 `['残','光']` 被 slam 上屏。
+
+**修法**：
+- `titleRiff`：在 `sceneArgs` 里补 `hud: { title: cfg.title, bpm: `BPM ${cfg.bpm} · 4/4`, place: 歌手/场次, len: mm:ss }`，
+  并补 `glyphs: cfg.glyphs.slice(0,2)`、`ruby: false`、`sub: cfg.titleSub`；
+- `ember`：`intro.js:344` 是**官方原样文件**，改它必须登记为 modified。两条路：
+  (a) 改 `intro.js:344` 为 `S.args.hudTitle || '残光 / ZANKŌ'`，songcut 传 `hudTitle: cfg.title`（改官方文件，21→22 行）；
+  (b) 弃用 `ember`，`lexicon` 里换 `converge`/`solid`（不改官方文件，但少一种开场）。
+  倾向 (a)——这是"官方原样"里少数真正阻碍复用的一处，和 `render_frames.mjs` 的补丁性质相同。
+
+**验证手段**：抽 `ember` / `titleRiff` 镜头帧，肉眼确认无"残光"二字。**这两处必须在重出片前修掉。**
+
+### 1.4 12 轴差异化审计核对的是配置字符串，不是画面
+
+`engine/direction.js:276-302` 的 `signature()`：
+
+```js
+world:    A.world    || null,                       // A = cfg.direction.axes，配置里手写的散文
+timeArc:  A.timeArc  || null,
+material: A.material || null,
+role:     A.role     || null,
+palette:  A.palette  || (cfg.palette ? Object.values(cfg.palette).slice(0,4).join('') : null),
+motif:    A.motif    || (cfg.motifs || []).slice(0,3).join('/'),
+key:      A.key      || (d.grade.exposure > 0.15 ? 'high' : 'low'),
+type:     `${styles.join('+')}|${schemes}|${plans}p`,
+trans:    dedupe(acts.flatMap(a => a.trans)).sort().join(','),
+cadence:  acts.map(a => a.cadence).join(''),
+density:  String(d.structure.density),
+ending:   d.ending,
+```
+
+`songs/natianxiayule.json:596` 的 `axes` 块实际内容：
+
+```json
+{ "world": "雨后市郊车站 · 候车月台 / 车窗 / 积水",
+  "timeArc": "阴 → 雨停 → 一道很淡的彩虹",
+  "palette": "冷青灰 #07121A/#1E3B48 + 单一暖金 #E8A34C",
+  "motif": "竖直雨线 + 圆弧（透明伞 / 虹）",
+  "material": "细笔水彩 + 纸纹，平涂 + 单硬阴影",
+  "role": "安静撑伞的少女，越过肩膀回望" }
+```
+
+也就是说：**12 个轴里 4 个是手写散文，2 个散文优先，其余 6 个也是配置值**。
+`DIR.diff()` 数的是字符串不相等，`audit_official.mjs:190` 报出的 `worst: 11/12` 只是
+"两首歌的 JSON 写得很不一样"。
+
+这与上一轮的 `ref: no shot undefined` 是同一类失效（审计 PASS ≠ 画面正确），但更隐蔽：
+axes 本来就是"设计意图"，写得漂亮就必然通过，**永远不会 FAIL**。
+
+官方 `02 §10` 的本意是**成片之间的观感差异**，不是台账差异。
+
+**更糟的是它不对称**：实测 3 首长片（`natianxiayule` / `xiageluokoujian` / `yiyangdeyueguang`）
+都写了 `axes` 块，所以 12 轴都有值；而 2 首旧片（`faruxue` / `huainvhai`）**没有写**，
+这 4 轴恒为 `null` → 它们之间最多只能差 7 轴，永远达不到 `>= 9` 的门槛。
+
+也就是说：**这道门禁奖励"把设计说明写进 JSON"，惩罚"没写文档"**，与画面质量无关。
+写了就过，不写就挂 —— 这比"永远 PASS"更危险，因为它会诱导以后每次改片先补文案。
+
+**修法**（按成本递增）：
+- (a) 立刻做：把这条检查改名为 `declared divergence`，并在 `COMPLETENESS.md` 里写明
+  "这是意图层差异，不是画面差异"，避免继续拿它当质量证据；
+- (b) 低成本硬指标：把 4 个散文轴换成可核验量 —— `world` → 该片 bg plate 的主色相直方图，
+  `role` → 是否有 `chars` + 人物占比，`material` → 全片 `grain/boil` 均值，`timeArc` → 段落 LUT 序列；
+- (c) 根治：两片各抽 12 帧（每段一帧），算色相分布 / 平均亮度 / 运动强度（相邻帧差分）三条量，
+  要求至少两条的距离超过阈值。这才是"画面不同质"的证据。
+
+**验证手段**：本轮已确认 `axes` 无一处引用画面数据（grep `signature(` 的入参只有 `cfg` 与 `acts`）。
+
+---
+
+## 2. P1 — 应修（影响观感与可维护性）
+
+### 2.1 排版库被继承了《残光》的 254 条禁令
+
+`songcut.timeline.js:339-367` 的 `DENY` 表逐组与官方 demo 对比：
+
+| 组 | 我们 | 官方 demo | 差异 |
+|---|---|---|---|
+| layout | 110 | 106 | 我们多禁 `condensed / glitchGrid / huge / shadowPlay` |
+| fx | 34 | 34 | 完全相同 |
+| decor | 56 | 53 | 多禁 `dataColumns / rainStreaks / timecodeBar` |
+| cam / treat / enter / exit / bg | 8/8/5/3/21 | 同 | 完全相同 |
+
+**254 条里 246 条（97%）是《残光》的偏好，被原样继承。**
+
+后果（`render/_layoutdump.mjs` 实测）：
+
+| 能力组 | 注册总数 | 禁后可用 | 本片实际用到 |
+|---|---|---|---|
+| layout | 186 | 75（40%） | **39（21%）** |
+| decor | 130 | 74 | 3 |
+| bg | 66 | 45 | 33 |
+| fx | 69 | 35 | 7 内建 + 4 自定义 |
+| treat | 62 | 54 | — |
+| enter / exit | 125 / 109 | 120 / 106 | — |
+
+而用户第一条需求原文是"**不要照搬官方案例、旧作品或现有视频模板**"。
+`06 §5` 也写明 deny-list 是 "the STARTING point … adapt per film"。
+
+**建议**：按段落重新过一遍 110 条 layout 禁令，把"残光式的叙事理由"与"通用的可读性理由"分开。
+例如 `huge / condensed` 是为"大字溢出"禁的（真问题），`orbit / spiral / tunnel / circleWords`
+是为"人物被字淹没"禁的（只对身体镜头成立，非立绘镜不必禁）。
+
+### 2.2 chorus 段节奏比官方慢一档
+
+官方（`05 §3`）：`chorus 0.9–2 s`、`verse 2.5–5 s`、`maxHold ~7 s`。
+
+实测 57 镜：`median 3.25 s`、`p95 12.2 s`、`max 12.5 s`。
+
+| 段落 | 我们的镜头长 | 官方建议 |
+|---|---|---|
+| chorus（48.39–84.71 等） | 3.0–3.4 s | 0.9–2 s |
+| verse | 3.0–3.6 s | 2.5–5 s ✓ |
+| 立绘窗口 | 8.0–12.5 s ×6 | ≤7 s ✗ |
+
+根因：`songcut.timeline.js:582-592` 的切点**只来自歌词行首**（`step = act.cadence`，chorus 取 1 =
+每行一刀），而中文慢歌一行约 3 s。**修 1.1 之后这里自然可以按拍切**
+（chorus 一行 4–5 拍 → 2–4 刀），这也是 1.1 的连带收益。
+
+### 2.3 超过 7 s 的六个立绘镜头，且注释与代码自相矛盾
+
+文件头 `songcut.timeline.js:25` 自己写着 `09 §2 cuts on lyric onsets, no shot longer than 7 s`，
+`:610` `maxHold = 6.4`，但 `:626` 的豁免把立绘窗口内的切点全删了：
+
+```js
+B = B.filter((t, i) => i === 0 || i === B.length - 1 || charEdge(t)
+  || !charShots.some(w => t > w.t0 + 0.01 && t < w.t1 - 0.01));
+```
+
+实测 6 个 >7 s：`s001 9.6 / s008 12.2 / s019 12.5 / s027 12.5 / s044 8.2 / s053 8.0`，全是带 `chars` 的 illust。
+
+豁免本身有理由（入场动画绑 `C.dur`，中间切会重播入场），但**没人记录这个例外**，
+注释还在声称遵守 7 s。两个修法：
+- (a) 把 `charParams` 的 `in/out` 从"镜头相对时间"改成"窗口绝对时间"，窗口内切点就不再重播入场（约 20 行，治本）；
+- (b) 至少把注释改成"立绘窗口豁免 maxHold，共 6 例"，让审计能区分"违规"和"登记过的例外"。
+
+### 2.4 两个碎片镜头
+
+`s016 0.53 s`、`s018 0.80 s` —— 都是结构切点（live 窗 / 立绘窗）把前一镜截断的副产品。
+`minShot = 0.62` 只管歌词切点，不管结构切点。官方 chorus 下限 0.9 s。
+建议：结构切点也过一遍 `minShot`，被截短到 <0.9 s 的前一镜直接吞掉（并入再前一镜）。
+
+### 2.5 竖版（9:16）有骨架但没接线
+
+`engine/vertical.js`（120 行，官方原样）+ `vertical.html` 都在，但：
+
+| 问题 | 证据 |
+|---|---|
+| 默认 timeline 指向不存在的文件 | `vertical.html:38` 默认 `tl=timeline.js`，我们只有 `songcut.timeline.js` |
+| `Z.VERTICAL_CFG` 从未被设置 | grep 全项目 0 处 → 用残光默认：`title:'残光'`、`full:['s01','s02','s03','s64','s65','s66']`（我们是 `s001…` 三位格式，**一个都不匹配**，连结尾卡都会被裁成 6:5 图带） |
+| `planMap` 只映射 4 个 plan | `{main,cf,noir,mono}`，我们有 7 个，`oncam/portrait/v1/v2/v3` 全部 fallback 到 `v_main`（立绘镜的中央预留语义会丢） |
+| 渲染器默认 `#out` 是 `display:none` | `render_frames.mjs` 的 selector 需显式 `#vout`，否则 `getBoundingClientRect()` 为 0 |
+
+官方 `08 §5` 要求 9:16 竖版交付。现在等于"官方能力完全没用上"。
+工作量：配一份 `VERTICAL_CFG` + 扩 `planMap` + 给渲染器加 `--vertical` 开关（约半天）。
+
+### 2.6 哈希清单与实际不符（我上轮的判断也要更正）
+
+逐文件 `diff`（`\r\n` 归一化后）实测：
+
+| 文件 | 变更行数 | 清单里被标为 |
+|---|---|---|
+| `engine/core/gl.js` | 6 | identical ❌ |
+| `engine/core/main.js` | 21 | identical ❌ |
+| `engine/index.html` | 21 | local_only ❌（上游 template 有同名文件） |
+| `engine/vertical.html` | 4 | local_only ❌（同上） |
+| `tools/render_frames.mjs` | 已登记 | modified ✓ |
+
+所以真实是 **23 identical / 5 modified**，清单写的 `25 / 1`。
+`docs/COMPLETENESS.md` §1「只有 1 个官方文件被修改」随之失效。
+
+**更正说明**：我上一轮报告写"真实 23 / 3"，漏了 `index.html` 与 `vertical.html`
+（当时误以为它们是"新增"，实际上游 template 里就有）。这次实测 diff 行数后更正为 23 / 5。
+
+### 2.7 `Z.LOOKS[*].boil` 被写死值覆盖
+
+`songcut.timeline.js:459-467` 定义了每段的 `boil: intro 0.7 / verse 0.9 / pre 1.0 / chorus 1.2 / bridge 0.8 / climax 1.3`，
+`main.js:134` 也确实按 `Z.LOOKS[sec.look]` 合并进 post。但 `songcut.timeline.js:742` 的默认 post：
+
+```js
+boil: TYPO.has(scene) ? 0 : 1.0,
+```
+
+`Object.assign({}, base, sp)` 里 `sp` 覆盖 `base` → **17 个镜头被钉在 1.0**（实测分布：`1` ×17、
+`0.6` ×9（livewin 写死）、`0.8` ×6（立绘 stage）、`0` ×3（排版）、`null` ×22）。
+段落强度对 boil 的调节等于没用。
+
+修法：`boil: TYPO.has(scene) ? 0 : (g.looks && g.looks[act.look]?.boil) ?? 1.0`。
+
+### 2.8 `direction.type.plans = 6` 实际产出 7 个 plan
+
+`songcut.timeline.js:431`：`const extraN = Math.max(0, (dir.type.plans || 6) - 3);`
+固定 4 个（`main/cf/oncam/portrait`）+ `extraN` 个 → 写 6 得 7。
+字段语义是"额外几个"还是"总共几个"，配置者无从得知。建议改名为 `extraPlans` 或改实现为 `plans - 4`。
+
+### 2.9 preload 全有或全无 → 一张图缺失整页白屏
+
+`assets.js:30` `await Promise.all(uniq.map(...))`，`decode()` 在 404 时 `throw`，
+`main.js:197` `await Z.preload(urls)` **没有 try/catch** → 任何一张图 404，`window.ready` reject，整页白屏。
+
+当前不触发（所有 preload 路径都存在），但 `kanjiSlam` 的 preset 默认指向
+`assets/char/profile_sing.png` 与 `assets/bg/bg_sky.png`（**两者都不存在**），
+一旦某首歌的 `lexicon` 引用 `kanjiSlam` 又忘了覆盖 `char`/`bg`，就是白屏而非"少画一个人"。
+
+建议：`main.js:197` 改成逐张 `try/catch` 并计数，把缺失清单打进 `__cutAudit`，让审计报警而不是整页崩。
+
+### 2.10 文档滞后（`COMPLETENESS.md` 的自述已过期）
+
+| 自述 | 实际 |
+|---|---|
+| 18 项检查（§5）/ 22 项（§12.5） | 24 项 |
+| 官方场景 11 个 | 9 个 |
+| 5 个 JIZURA plan | 7 个 |
+| `MAX_HOLD = 7 s`（§6） | 代码里 6.4，且有 6 个镜头突破 |
+| live 6 窗 × 3.4 s（§11.3） | 9 个 live 镜头 / 20.4 s / 9.3% |
+| 「只有 1 个官方文件被修改」 | 5 个 |
+
+文档本身写得很好（有反证、有实测），但**数字没人跟着改**。
+建议在 `cut.mjs` 出片成功后自动把本次 audit 的关键数字回写进文档末节，避免手抄。
+
+### 2.11 转场是随机抽签，不是剪辑决定
+
+`songcut.timeline.js:749`：
+
+```js
+const tt = (act.trans && act.trans.length) ? act.trans[Math.floor(rng() * act.trans.length) % act.trans.length] : 'cut';
+```
+
+每个镜头从所属段落的 `act.trans` 池里**按种子随机**取一个转场。
+官方 `01 §4` 要求「a transition **when it's motivated**」，`examples/zanko/timeline.js` 是逐镜手写的
+（`trans: { type: 'black', dur: 0.3 }` 明确挂在具体镜头上）。
+
+我们的做法保证了"确定性"（同种子同结果），但不保证"动机"：
+段落池里 3 个候选，同段落内 20 个镜头会被随机摊开，转场与前后画面无关。
+
+实测分布（`audit_natianxiayule.json`）：`transitions` 8 类共命中 48 次，
+`xfade / wipe / iris` 合计占多数，`shatter / irisClose / flash / cut` 一次没用。
+
+**修法**：把 `act.trans` 从"候选池"改成"按段落内位置取"——段落首刀固定 `black`/`ink`，
+段落收尾固定 `shatter`/`flash`，中间按强度插值挑。这不增加工作量，只是把随机换成语义。
+
+### 2.12 `signature` 时刻表写好了，但没有任何代码消费
+
+`songs/natianxiayule.json` 顶层有 5 条：
+
+```json
+[{"t":0.0,"note":"title card on the first bar (T21 quiet card)"},
+ {"t":48.39,"note":"first chorus: per-beat kanji slam"},
+ {"t":125.92,"note":"chorus 2 returns (ember + shatter)"},
+ {"t":181.29,"note":"last chorus / climax"},
+ {"t":208.5,"note":"end on a retinal afterimage of the title"}]
+```
+
+数量符合官方 `01 §39`「5–10 signature moments mapped to times」。
+但全项目 grep：`cfg.signature` **零引用** —— engine 用的是 `DIR.signature(cfg, acts)`（12 轴签名），
+同名字不同物。这 5 条纯粹是注释。
+
+**修法**（低成本、高收益）：让它们真的**钉住**镜头——
+`t` 落在哪个镜头内，就强制该镜头的 `post.bloom / trans.type / lyric plan` 用"签名档"，
+并在 `audit` 里检查"每个签名点确实有一个不同寻常的镜头"。这才是 `01 §59` 说的 "Mark the signature moments"。
+
+---
+
+## 3. P2 — 可选（收益明确但非必需）
+
+| # | 项 | 说明 |
+|---|---|---|
+| 3.1 | 真 beat 网格之后的强度重调 | 0.68 s/拍下，`beatCA 2.0`、`beatBloom 0.14` 会明显过密，需按段落降一档 |
+| 3.2 | 字形预热 | `typo.js` 的 `glyphArt()` 懒光栅，首次命中 218–280 ms；`init` 里预光栅全部 glyph×style，8 个镜头约省 18 s 墙钟 |
+| 3.3 | `D.sprite` 的 `wave` 按 12 fps 缓存 | 现在每帧 90 次 `drawImage`，`wave.q = 12` 意味着 29/30 帧结果相同 |
+| 3.4 | live 帧降到 960×540 | 画面里只占 486×872 一小窗，1080p 源是纯浪费，612 次解码的开销可砍到 1/4 |
+| 3.5 | 关 `preserveDrawingBuffer` + `texSubImage2D` | `gl.js` 每帧 3 次 `texImage2D` 全尺寸重分配（约 25 MB/帧） |
+| 3.6 | `prepare.py` 的 `CUTS` 绝对路径 / `SEEDS` 硬编码 | 加新歌要改代码；`CUTS = pathlib.Path(r'D:\岁己歌切')` 仍在 |
+| 3.7 | `E = Z.ease` 未使用 | `songcut.timeline.js:29`，grep 计数 0 |
+| 3.8 | 无 lint | 一条 `no-undef` 就能抓住上轮的 `side`；建议加 `eslint --no-eslintrc --rule '{"no-undef":"error"}'` 到 `cut.mjs` 前置步骤 |
+| 3.9 | `package.json` 无 `cut` 入口 | 现在只能 `node cut.mjs` |
+| 3.10 | 场景参数契约 4 处不符 | `panels` 传 number（`songcut:257`）、`burst` 空 `cuts`（`:259`）、`solid`/`jz` 传了它们不读的 `chars`（`:184/:186`）。当前词表未引用，属潜伏 |
+| 3.11 | `memories` 场景会崩 | `sceneArgs` 若给它传 `photos: string`，`meta.js` 里 `for (const P of a.photos)` 会逐字符迭代。当前未引用，潜伏 |
+| 3.12 | 立绘窗口内切点（与 2.3 的 (a) 同源） | 窗口 8–12.5 s 内插一刀，需要 in/out 绑窗口时间 |
+
+---
+
+## 4. 与官方规范的差距总表
+
+| 规范 | 出处 | 我们的状态 | 判定 |
+|---|---|---|---|
+| `beats` = onset-snapped 节拍网格 | 03 §L49 | 97 个歌词行首（应 322） | ❌ P0 |
+| `winning_phase` = 0..3 索引 | 03 §L51 | 1.6761（秒） | ❌ P0 |
+| `downbeats` / `onsets_strong` 供场景读 | 03 §L53、L103 | 算了但从未读 | ❌ P1 |
+| 不得残留另一部作品的字面量 | 09 §2 无死气/无占位 | ember/titleRiff 打「残光」 | ❌ P0 |
+| chorus 0.9–2 s / verse 2.5–5 s | 05 §3 | chorus 3.0–3.4 s | ❌ P1 |
+| 单镜 ≤ ~7 s | 01 §4 / maxHold 6.4 | 6 个 8–12.5 s | ❌ P1（有豁免但未登记） |
+| 60–80 镜（3–4 min） | 05 §3 | 57 | ⚠️ 略少 |
+| deny-list 需 per-film 适配 | 06 §5 | 继承残光 246/254 条 | ❌ P1 |
+| 25 个官方场景优先适配 | 05 §8 | 用 9 个 | ⚠️ |
+| `lyric:'none'` 只给排版场景 | 06 §6 | 17 处，全部合规 | ✅ |
+| 每镜独立 post | 01 §4 | 57/57 | ✅ |
+| 12 轴差异 ≥9 | 02 §10 | 数字达标（两两 11–12），但轴值全部来自配置字符串，不看画面 | ❌ 见 1.4 |
+| 中央を空ける 36% | JIZURA README:166 | `zoneW 0.36`，`outsideLive=0` | ✅ |
+| 9:16 竖版交付 | 08 §5 | 有代码，未配置未产出 | ❌ P1 |
+| 1–2 段 Blender 3D | 07 全文 | 一镜未用（`blender_*` 工具未引入） | ⚠️ 可选 |
+| 角色 motion prop（飘带等） | 02 §75 | 立绘是静态素材，无 motion prop 概念 | ⚠️ 素材限制 |
+| 官方源未被改动 | 哈希清单 | 实际 5 个 modified，清单写 1 个 | ❌ P1 |
+| 无占位 / 无调试字 | 09 §2 | 上轮已修（24 项审计含两条新检查） | ✅ |
+
+---
+
+## 5. 外部可借鉴（调研结论，非本仓库）
+
+| 项目 / 技法 | 对本管线的意义 | 建议 |
+|---|---|---|
+| **Mediabunny**（WebCodecs 的 mp4 muxer） | 现在 `VideoFrame → Encoder → POST 到 node → .h264 → setts 重打时间戳 → concat + mux` 五步，可在浏览器内一次 mux 带音轨的 mp4 | 值得试：能删掉 `setts` 与 `concat` 两步，`render_frames.mjs` 的补丁也少一半 |
+| **pdoom-video**（逐帧自适应子帧） | 解决"高复杂度帧拖慢整片"的思路 | 我们不缺吞吐（80 fps），暂不需要 |
+| line boil 的"8 drawings 循环 + 法线正弦位移" | 我们现在的 boil 是**整屏 value-noise 位移**（`gl.js:83-87`，noise 周期 `res/34`，12 fps 重种），不是笔画抖动 | **不建议照搬**：我们没有笔画级几何（全部 rasterize 进 FBO）。但可把 noise 频率提到笔画尺度（8–12 px）让观感更像"线条抖"而非"果冻晃"，成本 2 行 |
+| rough.js / 手绘风几何库 | 只对"新画的几何图形"有效 | 不适用（我们的素材是 PNG 与字形） |
+| BudouX / 中日文断行 | 理论上改善行首孤立 | **本片无收益**：`lyrics_mv.lrc` 里中文标点 0 个，JIZURA 也不做禁则，没有触发现象 |
+
+---
+
+## 6. 建议执行顺序
+
+**第一批（半天，修 P0，必须重出片）**
+1. 1.3 残光字面量（`titleRiff` 补 `hud`/`glyphs`；`ember` 的 `intro.js:344` 参数化）
+2. 1.2 `winning_phase` 改 0..3 索引
+3. 1.1 `prepare.py` 生成真 beat 网格 + `lyricOnsets` 分家
+4. 1.4 先把那条门禁改名为 `declared divergence` 并在文档写明口径（5 分钟，防止继续拿它当质量证据）
+5. 重出《那天下雨了》，抽帧确认：kanjiSlam 打出 4 个字、`downPulse` 非 0、无"残光"
+
+**第二批（1 天，观感）**
+5. 2.2 chorus 按拍切（依赖第一批）
+6. 2.4 碎片镜头
+7. 2.7 `LOOKS.boil` 接线
+8. 2.1 重新审议 110 条 layout 禁令（先列一张"禁令 → 理由 → 是否只对身体镜头成立"的表给用户过目）
+9. 2.11 转场从随机抽签改成语义化（段落首/尾/中间三档）
+10. 2.12 signature moments 真正钉住镜头
+
+**第三批（1 天，工程）**
+11. 1.4 的 (b)/(c)：把 4 个散文轴换成可核验量，或抽帧算画面距离
+12. 2.9 preload 容错
+13. 2.6 重生成哈希清单（23/5，含 `why`）
+14. 3.8 lint 前置
+15. 2.10 文档数字自动回写
+
+**第四批（可选）**
+16. 2.5 竖版接线
+17. 3.2 / 3.3 / 3.4 性能
+18. Mediabunny 试点
+
+---
+
+## 7. 本期核实方法
+
+| 手段 | 脚本 | 用途 |
+|---|---|---|
+| 镜头元数据导出 | `tools/probe_shots.mjs` | 57 镜的时长/场景/plan/boil 分布 |
+| 时钟体检 | `tools/probe_clock.mjs` | `bar/inBar/downPulse` 实际取值 |
+| 节拍体检 | `tools/probe_beats.mjs` | 镜头内 beat 数 vs glyph 数 |
+| JIZURA 能力普查 | `tools/probe_jizura.mjs` | 186 layout 用了几个 |
+| 抽帧 | `ffmpeg` / 引擎直渲 | kanjiSlam 是否只打一个字 |
+| 逐文件 diff | `diff`（`\r\n` 归一化） | 哈希清单真实性 |
+
+四个脚本已经放进 `tools/`（不再是临时文件），可随时重跑复现：`node tools/probe_clock.mjs` 等，
+都只读不写。`probe_beats.mjs` 会往 `render/_probe_beats/` 落几张抽帧。
+
+---
+
+## 8. 被否证的结论（记下来，避免下次重犯）
+
+本轮排查中一度认为是问题、实测后**不成立**的四条：
+
+| 一度认为 | 实测 | 结论 |
+|---|---|---|
+| `vertical.html` 缺 mulberry32 确定性注入，竖版不可复现 | `vertical.html:14` 有注入，与 `index.html:14` 完全相同；我之前读 diff 时把注释行当成了代码行 | 否证 |
+| 两个 `?tl=` 白名单正则不等价（`[^\w./-]` vs `[^\w./_-]`） | 实测 `'songcut.timeline.js'.replace(...)` 两者输出相同——`\w` 本身包含 `_` | 否证 |
+| `songs/xiageluokoujian.json` 顶层 `char` 指向不存在的图 | 该键 `items: []` 为空数组，是空壳死键，不是断链 | 否证（降级为死键） |
+| `audit_*.json` 里的成片尺寸是编造的 | `cuts/` 目录当前为空（mtime 2026-11-15 12:53），文件是被清理掉的，不是审计撒谎 | 否证（改为"无法复核"） |
+
+另外两条是**排查过程中由协作者提出、经我逐条核实后否证**的，一并记下（因为它们看起来都很像真 bug）：
+
+| 一度认为 | 实测 | 结论 |
+|---|---|---|
+| `vertical.html` 的 `?tl=` 白名单 `[^\w./-]` 不含下划线，会把 `songcut.timeline.js` 改写成 `songcuttimeline.js` 导致 404 | `\w` 本身包含 `_`，实测两种写法输出完全相同 | 否证（真问题只是默认值 `tl=timeline.js` 指向上游文件名） |
+| 5 首歌的配置全部没有 `direction.axes`，5 个轴恒 `null`，`diff` 上限 7 < 门槛 9，门禁数学上永不可达 | 3 首主力片（`natianxiayule`/`xiageluokoujian`/`yiyangdeyueguang`）**都有** axes 块；只有 2 首 11-09 旧片没有 | 否证（但"奖励写文档"的不对称是真的，见 1.4） |
+| `signature` 只有 5 条，低于官方 6–10 的下限 | 官方 `01 §39` 原文是 **5–10**，5 条合规 | 否证（真问题是它没人消费，见 2.12） |
+
+同时更正我上一轮的两处：
+
+- 真实 modified 数是 **5** 不是 3（漏了 `index.html`、`vertical.html`，它们在上游 template 里存在）；
+- 上轮说"`ref` 的 `meltAt/meltEnd` 原来传的是分数"，这个判断成立，但**只对 `melt` 模式**；
+  `freeze` 模式不读这两个值，所以影响面比当时描述的窄。
+
+---
+
+## 9. 交付目录当前状态（与代码无关，但影响复核）
+
+`D:/岁己歌切/cuts/` 当前**完全为空**（目录 mtime `2026-11-15 12:53`）。因此：
+
+- 本轮无法对成片做字节级复核（上一轮记录的 6594 帧 / 944 MB 等数字属于历史快照）；
+- `render/audit_*.json` 里的 `file_size` 断言在当前磁盘上找不到对应文件；
+- `README.md` §2 与 `manifest.json` 里的交付清单同样只能视为历史记录。
+
+按目录边界铁律，`cuts/` 顶部属于另一条并行渲染路径，本轮**未做任何读写**，仅 `ls` 观察。
+后续重出片时，`cut.mjs` 会重建 `cuts/<date>/official/`。
