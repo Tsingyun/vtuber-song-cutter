@@ -273,8 +273,32 @@
   // ---------------------------------------------------------------- 12-axis signature
   // Materialises what the film actually decided, so two songs can be compared mechanically.
   // Used by tools/audit_official.mjs -> window.__cutAudit.direction.signature.
-  function signature(cfg, acts) {
+  //
+  // `ctx` is optional and carries what the config alone cannot know:
+  //   ctx.shots  the built shot list (songcut.timeline.js sets Z.SHOTS at :796, before calling
+  //              this at :801) -> cadence measured as lyric lines per REAL cut
+  //   ctx.lines  parsed LRC rows -> fallback cadence against an assumed 3.0 s cut
+  //              (tools/probe_axes.mjs has lines but no shots; 3.0 s is the measured median)
+  function signature(cfg, acts, ctx) {
     const d = cfg.direction, A = d.axes || {};
+    const cshots = (ctx && ctx.shots) || null;
+    const clines = (ctx && ctx.lines) || null;
+    // `cadence` was a dead axis. The field only exists on acts built by buildActs()/makeAct()
+    // (direction.js:221), and the DEFAULT structure.mode is 'manual' (direction.js:47), so a
+    // film with hand-written cfg.acts used nine keys that do not include cadence. The old
+    // `acts.map(a => a.cadence).join('')` then produced "" for every manual film, and diff()
+    // scored the axis as identical no matter how differently they were cut. Measured before
+    // this change: faruxue 0/10 and huainvhai 0/8 acts carried a cadence.
+    // A cut that spans no lyric line at all is the slowest cadence we can express -> 4.
+    const cadenceOf = a => {
+      if (a.cadence != null) return a.cadence;
+      const nL = clines ? clines.filter(l => l.t >= a.t0 - 1e-6 && l.t < a.t1).length : 0;
+      if (!nL) return 4;
+      const nCut = cshots
+        ? cshots.filter(s => s.t0 < a.t1 - 1e-6 && s.t1 > a.t0 + 1e-6).length
+        : Math.max(1, Math.round((a.t1 - a.t0) / 3.0));
+      return clampI(Math.round(nL / Math.max(1, nCut)), 1, 4);
+    };
     const roles = acts.map(a => a.role);
     const counts = {};
     for (const r of roles) counts[r] = (counts[r] || 0) + 1;
@@ -290,7 +314,7 @@
       role: A.role || null,
       type: `${(d.type.styles || []).join('+')}|${d.type.schemes}|${d.type.plans}p`,
       trans: dedupe(acts.flatMap(a => a.trans || [])).sort().join(','),
-      cadence: acts.map(a => a.cadence).join(''),
+      cadence: acts.map(cadenceOf).join(''),
       density: String(d.structure.density),
       ending: d.ending,
       // structural fingerprints (not one of the 12, but they are what "templated" looked like)

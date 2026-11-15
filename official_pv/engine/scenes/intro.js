@@ -22,6 +22,43 @@
   const DAWN = { void: '#07051a', ink: '#120d24', shadow: '#3a2d63', dusk: '#9a6aa0', verm: '#e0707e', sunset: '#f3a6a0', glow: '#ffd9b0', hi: '#fffaf0', core: '#ffffff' };
   const CYAN = '#39C6E0';
 
+  // ================================================================== the active film
+  // Upstream ships these scenes with the 残光 example baked into their defaults -- that is the
+  // film `examples/zanko` renders, so the literals were never a bug *there*. Our engine renders
+  // other songs, and the defaults are not inert: they reach the screen. Left alone they printed
+  // 「残光」 ZANKŌ / BPM 131 / 踏切 No.7 / 03:44 over 《发如雪》(ember ×1), 《坏女孩》(ember ×2)
+  // and 《下个，路口，见》(titleRiff ×2). Z.TITLE / Z.TITLE_SUB / Z.CREDIT are assigned by
+  // songcut.timeline.js:336 before any draw(), so defaults can follow the ACTIVE film and still
+  // reproduce the upstream example exactly when Z.TITLE is unset or literally '残光'.
+  // Anything we cannot know truthfully (location, time of day) resolves to '' -> hud() measures a
+  // zero-width string and draws nothing, rather than inventing a Tokyo coordinate.
+  const isZanko = () => !Z.TITLE || Z.TITLE === '残光';
+  const filmTitle = () => Z.TITLE || '残光';
+  const filmSub = () => Z.TITLE_SUB || (isZanko() ? 'afterglow' : '');
+  const filmLen = () => {
+    const s = (Z.audio && Z.audio.duration) || 0;
+    if (!(s > 0)) return '';
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.round(s % 60)).padStart(2, '0');
+  };
+  // the corner strings every title scene writes; args.hud still wins field by field
+  const filmHud = () => {
+    const bpm = (Z.audio && Z.audio.bpm) || 0;
+    return {
+      title: `「${filmTitle()}」${filmSub() ? ' ' + filmSub() : ''}`,
+      bpm: bpm ? `BPM ${Math.round(bpm)} · 4/4` : '',
+      len: filmLen(),
+      // 残光-specific and unknowable for a song cut: only emitted when the film IS 残光
+      when: isZanko() ? 'DUSK / 逢魔が時' : '',
+      geo: isZanko() ? '35°41′N 139°46′E' : '',
+      place: isZanko() ? '踏切 No.7 — 上り' : '',
+    };
+  };
+  // the two monumental glyphs the lockup is built around: args.glyphs, else the film's own title
+  const filmGlyphs = () => {
+    const cs = [...filmTitle()].filter(c => /[\u3400-\u9FFF]/.test(c)).slice(0, 2);
+    return cs.length === 2 ? cs : ['残', '光'];
+  };
+
   // ================================================================== motion helpers
   // CSS cubic-bezier easing (Newton, bisection fallback)
   function bezier(x1, y1, x2, y2) {
@@ -342,7 +379,9 @@
 
   function emberHud(ctx, S, level, P = P1, alpha = 1) {
     const t = S.t, x = 96, y = H - 108;
-    const title = '残光 / ZANKŌ', n = Math.floor(clamp((t - 0.62) * 8.5, 0, 99)), chars = [...title];
+    // args.hudTitle wins; otherwise the ACTIVE film, else the upstream 残光 example
+    const title = S.args.hudTitle || `${filmTitle()} / ${filmSub() || filmTitle()}`;
+    const n = Math.floor(clamp((t - 0.62) * 8.5, 0, 99)), chars = [...title];
     const shown = chars.slice(0, n).join('');
     ctx.save(); ctx.globalAlpha *= alpha;
     const w = hud(ctx, shown, x, y, { size: 22, color: P.glow, alpha: 0.9 });
@@ -798,7 +837,7 @@
     let push = 0; for (const b of Bs) push += 14 * EZ.out(seg(t, b, 0.25));
     push *= 1 - lockK;
     const exitOut = EZ.in(seg(t, at(cue.exit), 0.4));
-    const [g0, g1] = S.args.glyphs || ['残', '光'];   // the two title glyphs (args.glyphs)
+    const [g0, g1] = S.args.glyphs || filmGlyphs();   // the two title glyphs (args.glyphs)
     const showZan = t < tk || splitK > 0;             // 光 replaces 残 until the split
     const list = [];
     // after 光 has slammed, 残 slides back in from beyond the left edge on the split
@@ -838,7 +877,7 @@
     ctx.save(); ctx.globalAlpha *= alpha;
     // ruby: one mora at a time, rising into place (args.ruby: the reading of each glyph, centred over it)
     const ruby = [];
-    (a.ruby === false ? [] : a.ruby || ['ざん', 'こう']).slice(0, 2).forEach((rd, j) => {
+    (a.ruby === false || (!a.ruby && !isZanko()) ? [] : a.ruby || ['ざん', 'こう']).slice(0, 2).forEach((rd, j) => {
       const chs = [...rd]; chs.forEach((ch, i) => ruby.push([ch, j ? kx : zx, (i - (chs.length - 1) / 2) * 2]));
     });
     ruby.forEach(([ch, base, side], i) => {
@@ -851,7 +890,7 @@
     const k2 = EZ.out(seg(t, tl + 0.3, 1.4));
     if (k2 > 0) {
       ctx.save(); ctx.globalAlpha *= clamp(k2 * 2); D.font(ctx, LK.subSize, 'serif', 300); ctx.letterSpacing = (lerp(46, 14, k2)).toFixed(1) + 'px';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = P.hi; ctx.fillText(a.sub ?? 'afterglow', LK.x + lerp(23, 7, k2), LK.subY); ctx.restore();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = P.hi; ctx.fillText(a.sub ?? filmSub(), LK.x + lerp(23, 7, k2), LK.subY); ctx.restore();
       // rule + end ticks
       const rk = EZ.out(seg(t, tl + 0.2, 0.8)), rw = 290 * rk;
       ctx.strokeStyle = rgba(P.hi, 0.4); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(LK.x - rw, LK.subY + 34); ctx.lineTo(LK.x + rw, LK.subY + 34);
@@ -871,9 +910,10 @@
     const m = 96, top = 78, bot = H - 70;
     ctx.save(); ctx.globalAlpha *= alpha;
     const t1 = at(cue.hud), t2 = at(cue.hud2);
-    // corner strings (args.hud overrides any of them; len = the song length shown before the running clock)
-    const HS = Object.assign({ title: '「残光」 ZANKŌ — afterglow', when: outro ? 'DAWN / 夜明け' : 'DUSK / 逢魔が時', bpm: 'BPM 131 · 4/4',
-      geo: '35°41′N 139°46′E', place: '踏切 No.7 — 上り', len: '03:44' }, S.args.hud || {});
+    // corner strings (args.hud overrides any of them; len = the song length shown before the
+    // running clock). Defaults follow the ACTIVE film -- see the note above filmHud().
+    const HS = Object.assign(filmHud(), S.args.hud || {});
+    if (isZanko() && outro && !(S.args.hud && 'when' in S.args.hud)) HS.when = 'DAWN / 夜明け';
     hud(ctx, scramble(HS.title, t, t1, 30, 1), m, top, { size: 20, color: P.hi, alpha: 0.8 });
     hud(ctx, scramble(HS.when, t, t1 + 0.12, 30, 2), m, top + 26, { size: 16, color: P.glow, alpha: 0.6 });
     hud(ctx, scramble(HS.bpm, t, t1 + 0.05, 30, 3), W - m, top, { size: 20, color: P.hi, alpha: 0.8, align: 'right' });
@@ -1028,10 +1068,13 @@
 
   // ================================================================== afterimage (shot 66): the negative of the title on the retina
   function lockupMask(a) {
-    const key = 'mask|' + (a.text || '残光') + '|' + (a.sub || 'afterglow') + '|' + (a.char || '');
+    // text/sub default to the ACTIVE film (songcut passes both explicitly; this keeps the
+    // upstream 残光 example working while never stamping 残光 onto another song's last frame)
+    const text = a.text || filmTitle(), sub = a.sub || filmSub();
+    const key = 'mask|' + text + '|' + sub + '|' + (a.char || '');
     let c = texCache.get(key); if (c) return c;
     c = Z.canvas(W, H); const x = c.getContext('2d');
-    const chars = [...(a.text || '残光')];
+    const chars = [...text];
     x.fillStyle = '#fff';
     x.beginPath(); x.arc(LK.x, LK.y, LK.r, 0, TAU); x.fill();
     const img = Z.imgSync(a.char || 'assets/char/REF_master.png');
@@ -1039,7 +1082,7 @@
     glyph(x, chars[0], LK.x - LK.gdx, LK.y, LK.gsize, { fill: '#fff' });
     if (chars[1]) glyph(x, chars[1], LK.x + LK.gdx, LK.y, LK.gsize, { fill: '#fff' });
     D.font(x, LK.subSize, 'serif', 300); x.letterSpacing = '14px'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.globalAlpha = 0.8;
-    x.fillText(a.sub || 'afterglow', LK.x + 7, LK.subY);
+    x.fillText(sub || 'afterglow', LK.x + 7, LK.subY);
     texCache.set(key, c); return c;
   }
   function ghosts(a, color) {
@@ -1083,7 +1126,7 @@
     const ck = E.inOutSine(seg(lt, 0.75, 0.8)) * (1 - E.inOutSine(seg(lt, dur - 0.95, 0.75)));
     if (ck > 0.003) {
       ctx.save(); ctx.globalAlpha = 0.78 * ck; D.font(ctx, 24, 'gothic', 400); ctx.letterSpacing = '5px'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#a9c3cc'; ctx.fillText(a.credit || '「残光」 — MV', CX + 3, H - 96); ctx.restore();
+      ctx.fillStyle = '#a9c3cc'; ctx.fillText(a.credit || Z.CREDIT || `「${filmTitle()}」 — MV`, CX + 3, H - 96); ctx.restore();
     }
   }
   Z.scene('afterimage', { preload: a => [a.char || 'assets/char/REF_master.png'], init: loadFonts, draw: afterDraw });

@@ -4,7 +4,8 @@
 Steps (all deterministic, all local):
   1. copy the song's LRC into songs/<id>.lrc (self-contained source of truth)
   2. cut the exact audio slice out of the session recording -> audio/song.wav
-  3. build analysis/audio.json (real lyric onsets as the beat grid) and envelope_30fps.json
+  3. build analysis/audio.json (onset-snapped beat grid + lyricOnsets kept apart) and
+     envelope_30fps.json
   4. write analysis/lyrics_mv.lrc (no BOM, no metadata rows -- 06 §3)
   5. paint procedural background plates (NO AI images, NO external art)  -> assets/bg/*.png
   6. extract ONLY the short live-insert windows as cropped frames -> assets/live/<id>/frames/
@@ -100,14 +101,15 @@ def main():
     # ---- 2b. bespoke palette for THIS film (02 §"build new palettes for every film") ----
     write_song_palette(ROOT, cfg)
 
-    # ---- 3. beats = REAL lyric onsets + midpoints -------------------------------
-    beats = []
-    for i, (t, _) in enumerate(lines):
-        beats.append(round(t, 3))
-        if i + 1 < len(lines):
-            mid = (t + lines[i + 1][0]) / 2
-            if mid - t > 0.45: beats.append(round(mid, 3))
-    beats = sorted(set(b for b in beats if 0 <= b <= cfg['duration']))
+    # ---- 3. lyric onsets are NOT the beat grid ---------------------------------
+    # Upstream 03 §L49: `beats` is "486 times, onset-snapped" -- one entry per BEAT.
+    # The old build wrote the LRC line onsets (+ midpoints) here, i.e. 97 entries for a
+    # 219.8 s / 88 bpm film that needs ~322. Everything downstream ran at 1/3 rate:
+    # kanjiSlam's one-glyph-per-beat (4 glyphs, 1 fired), downPulse, JIZURA's beat fx and
+    # meta.js' "cut every N beats". The two lists are now separate keys:
+    #   lyricOnsets -> phrase edges, for scenes that want "this line starts here"
+    #   beats       -> the real grid, built in 3c from the PCM onset envelope
+    lyric_onsets = [round(t, 3) for t, _ in lines]
     sections = [{'index': i, 'start': ac['t0'], 'end': ac['t1'], 'look': ac['look'], 'id': ac['id']}
                 for i, ac in enumerate(cfg.get('acts') or [])]
 
@@ -152,19 +154,81 @@ def main():
                 peaks.append((t, float(onset_raw[i])))
     peaks.sort(key=lambda p: -p[1])
     impacts = sorted(round(t, 3) for t, _ in peaks[:8])
-    onsets_strong = sorted(round(t, 3) for t, v in peaks[:220])
+    # intro.js:64 `strongOnsets()` does `.filter(o => o.t > t0 && o.strength >= thr)`, i.e. it
+    # wants OBJECTS. This list used to hold bare floats, so that filter compared undefined and
+    # always returned [], making `hitsT` (intro.js:497) permanently empty -- a silent no-op,
+    # not a crash. Emit the shape the only consumer actually reads.
+    onsets_strong = sorted(({'t': round(t, 3), 'strength': round(v, 3)} for t, v in peaks[:220]),
+                           key=lambda o: o['t'])
+
+    # ---- 3c. beat grid: nominal BPM grid, off-beats snapped to real onsets -------------
+    # Downbeats stay exactly where `best_ph` put them: that phase was chosen by maximising
+    # onset energy over 192 candidates, so it is already onset-driven and must not drift.
+    # Only the three beats between two downbeats get snapped, within ±28% of a beat.
+    # Consequence, stated plainly: beats[4k] == downbeats[k] by construction, so the official
+    # 0..3 phase index (03 §L51) is 0 for every film this script produces. That is correct,
+    # not an assumption -- see the derivation below, which reads it back off the data.
+    peak_t = np.array(sorted(t for t, _ in peaks), dtype=np.float64)
+    nominal = []
+    for k in range(int(math.ceil((cfg['duration'] - best_ph) / spb)) + 1):
+        nom = best_ph + k * spb
+        if nom > cfg['duration'] - 0.02:
+            break
+        nominal.append(nom)
+    beats = []
+    for k, nom in enumerate(nominal):
+        # Downbeats are pinned to the measured phase -- that phase already won a 192-candidate
+        # search over onset energy, so it must not drift. Only the 3 beats in between move.
+        t = nom
+        if k % 4 and peak_t.size:
+            j = int(np.searchsorted(peak_t, nom))
+            cand = peak_t[max(0, j - 1):j + 1]
+            if cand.size:
+                near = float(cand[int(np.argmin(np.abs(cand - nom)))])
+                if abs(near - nom) <= 0.28 * spb:
+                    t = near
+        # Bounded to 35% of a beat from each neighbour: one beat per index, always. Dropping a
+        # beat would shift every later index by one, so `beats[k*4+j]` in `bars` and the whole
+        # bar/downbeat mapping would silently slide -- the same class of failure as the
+        # seconds-as-index bug this block exists to fix.
+        lo = (nominal[k - 1] + 0.35 * spb) if k else nom - 0.28 * spb
+        hi = (nominal[k + 1] - 0.35 * spb) if k + 1 < len(nominal) else nom + 0.28 * spb
+        beats.append(min(max(t, lo), hi))
+    beats = [round(t, 3) for t in beats]
+    assert len(beats) == len(nominal) and len(beats) >= 2, \
+        f'beat grid lost indices ({len(beats)} of {len(nominal)}) -- bars would slide'
+
+    # read the phase index back off the grid instead of hardcoding 0
+    phase_idx = 0
+    for i, b in enumerate(beats):
+        if any(abs(b - d) < 1e-6 for d in downbeats):
+            phase_idx = i % 4
+            break
+    snapped = sum(1 for k in range(1, len(beats)) if k % 4 and k < len(beats)
+                  and abs(beats[k] - (best_ph + k * spb)) > 1e-3)
 
     audio = {
-        'duration': cfg['duration'], 'bpm': bpm, 'beats': beats, 'downbeats': downbeats,
+        'duration': cfg['duration'], 'bpm': bpm, 'beats': beats, 'lyricOnsets': lyric_onsets,
+        'downbeats': downbeats,
         'bars': [{'index': k, 'start': t, 'beats': [k * 4 + j for j in range(4)]} for k, t in enumerate(downbeats)],
         'sections': sections, 'stops': [], 'impacts': impacts,
         'onsets_strong': onsets_strong,
-        'downbeat_info': {'winning_phase': round(best_ph, 4), 'bpm': bpm,
-                          'note': 'phase measured from the PCM onset envelope, not assumed'},
-        'note': 'beat grid = official-LRC onsets + midpoints; downbeats from real onset energy',
+        # 03 §L51: winning_phase is an INDEX into `beats` in 0..3 (1 => downbeat where k%4==1).
+        # This key used to hold `best_ph` -- a TIME IN SECONDS (1.6761 for the 88 bpm film).
+        # main.js passed it straight into makeClock() as `downbeatIndex0`, which shifted every
+        # beat number by ~1.7 and pushed inBar() off the grid entirely (measured: inBar()==0
+        # never occurred in 2199 samples; bar() went negative). Seconds are kept separately
+        # for diagnostics, under a name nobody can mistake for an index.
+        'downbeat_info': {'winning_phase': phase_idx, 'phase_seconds': round(best_ph, 4),
+                          'bpm': bpm, 'note': 'winning_phase = 0..3 beat index (03 §L51); '
+                                              'phase_seconds = measured downbeat offset in s'},
+        'note': 'beats = nominal BPM grid with off-beats snapped to onsets; '
+                'lyricOnsets = LRC phrase starts; downbeats from real onset energy',
     }
     (ROOT / 'analysis' / 'audio.json').write_text(json.dumps(audio, ensure_ascii=False, indent=1), encoding='utf-8')
-    print(f'[prepare] downbeats: {len(downbeats)} (phase {best_ph:.3f}s @ {bpm:g} bpm, {bar:.2f}s/bar), strong onsets: {len(onsets_strong)}')
+    print(f'[prepare] grid: {len(beats)} beats @ {bpm:g} bpm ({spb:.3f} s/beat), '
+          f'{len(downbeats)} downbeats (phase {best_ph:.3f} s -> index {phase_idx}), '
+          f'{snapped} off-beats snapped, {len(onsets_strong)} onsets, {len(lyric_onsets)} lyric lines')
 
     # cheap 3-band split: smoothing differs, enough for env.low / mid / high driven fx
     def smooth(v, k):
@@ -175,7 +239,7 @@ def main():
            'mid': np.clip(mid, 0, 1).tolist(), 'high': np.clip(high, 0, 1).tolist(),
            'onset': onset_raw.tolist(), 'vocal': rmsn.tolist()}
     (ROOT / 'analysis' / 'envelope_30fps.json').write_text(json.dumps(env), encoding='utf-8')
-    # ---- 3c. opening-audio guard (QA round 2) -----------------------------------------
+    # ---- 3d. opening-audio guard (QA round 2) -----------------------------------------
     # The delivered cut must START with music, not 12 s of digital silence. Check the real
     # PCM we just cut, skipping the first 0.5 s so a transient click cannot mask dead air.
     head = mono[int(sr * 0.5):int(sr * 2.5)]

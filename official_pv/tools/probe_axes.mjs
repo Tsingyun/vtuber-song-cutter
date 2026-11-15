@@ -68,7 +68,10 @@ function measure(DIR, id) {
   return {
     id, mode, lines: lines.length, acts: acts.length,
     withCadence: acts.filter(a => a.cadence != null).length,
-    sig: DIR.signature(cfg, acts),
+    // signature() now takes an optional ctx so the cadence axis can be MEASURED instead of
+    // read off the config. The engine passes {shots, lines}; here we have no built shot list,
+    // so cadence falls back to lines-per-assumed-3.0 s-cut (the measured median shot length).
+    sig: DIR.signature(cfg, acts, { lines }),
   };
 }
 
@@ -114,10 +117,13 @@ const ids = (want.length ? want : fs.readdirSync(SONG_DIR)
 const rows = ids.map(id => measure(DIR, id));
 
 console.log(`\n== ${rows.length} songs ==`);
-console.log('id'.padEnd(W) + 'mode'.padEnd(8) + 'lrc'.padStart(5) + 'acts'.padStart(6) + 'cadence-acts'.padStart(14));
+console.log('id'.padEnd(W) + 'mode'.padEnd(8) + 'lrc'.padStart(5) + 'acts'.padStart(6)
+  + 'declared'.padStart(10) + '  cadence (resolved by signature())');
 for (const r of rows) {
+  const note = r.withCadence === 0 ? '  <-- all inferred' : (r.withCadence < r.acts ? '  <-- partly inferred' : '');
   console.log(r.id.padEnd(W) + r.mode.padEnd(8) + String(r.lines).padStart(5)
-    + String(r.acts).padStart(6) + String(r.withCadence).padStart(6) + (r.withCadence === 0 ? '  <-- DEAD' : ''));
+    + String(r.acts).padStart(6) + String(r.withCadence).padStart(10)
+    + '  ' + r.sig.cadence + note);
 }
 
 const deadAxes = DIR.AXES.filter(ax => rows.every(r => r.sig[ax] == null || r.sig[ax] === ''));

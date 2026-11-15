@@ -182,12 +182,35 @@
   }
 
   // ---------------------------------------------------------------- boot
+  // Upstream 03 §L51 defines `winning_phase` as a 0..3 INDEX into `beats` (1 => the downbeat
+  // is at beats[k] with k%4==1), NOT as a time. prepare.py used to write the measured phase in
+  // SECONDS here (1.6761 for the 88 bpm film) and this line passed it straight through as
+  // `downbeatIndex0` -> every beat number was offset by ~1.7, so inBar() never returned 0 and
+  // downPulse() was dead for the whole film. Derive the index from the data whenever it is not
+  // already a valid one, so an old analysis/audio.json cannot silently poison the grid.
+  function beatPhase(audio) {
+    const beats = audio.beats || [], dbs = audio.downbeats || [];
+    const stored = audio.downbeat_info && audio.downbeat_info.winning_phase;
+    const asIndex = Number.isInteger(stored) && stored >= 0 && stored <= 3;
+    if (asIndex) return stored;
+    if (!beats.length || !dbs.length) return 0;
+    if (stored !== undefined) {
+      console.warn(`[clock] downbeat_info.winning_phase=${JSON.stringify(stored)} is not a 0..3 index `
+        + `(03 §L51); deriving it from beats vs downbeats instead. Re-run tools/prepare.py.`);
+    }
+    const tol = (60 / (audio.bpm || 120)) * 0.35;              // a third of a beat
+    for (let i = 0; i < beats.length; i++) {
+      for (const d of dbs) if (Math.abs(beats[i] - d) <= tol) return i % 4;
+    }
+    return 0;
+  }
+
   window.__zankoMeta = { duration: 224.32, fps: 30 };
   window.ready = (async () => {
     const rendererName = Z.post.init(out);
     const audio = await loadJSON('analysis/audio.json');
     Z.audio = audio;
-    Z.clock = Z.makeClock(audio.beats, audio.bpm, (audio.downbeat_info && audio.downbeat_info.winning_phase) || 0);
+    Z.clock = Z.makeClock(audio.beats, audio.bpm, beatPhase(audio));
     try { Z.env = Z.makeEnv(await loadJSON('analysis/envelope_30fps.json')); } catch (e) { console.warn('no envelope', e); Z.env = Z.makeEnv(null); }
     await buildLutAtlas();
     if (Z.setup) await Z.setup(audio);                           // timeline.js: sections, looks, JIZURA plans, shots

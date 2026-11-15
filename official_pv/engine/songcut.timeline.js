@@ -195,13 +195,18 @@
           post: S2 => Object.assign(Z.INTRO.post.afterimage(S2), { boil: 0 }), lyric: 'none' };
       case 'ember':
         return { args: { mode: C.mode('ember', ['breathe', 'hold', 'rise']), seed: 5 + i, stops: [[C.t0 + 0.10, C.t0 + 0.18]],
-            char: C.charImg || NO_IMAGE, sky: C.plate('c'), bg: C.plate('b') },
+            char: C.charImg || NO_IMAGE, sky: C.plate('c'), bg: C.plate('b'),
+            // intro.js:345 used to hardcode '残光 / ZANKŌ' here, with no way to override it
+            hudTitle: C.cfg.titleSub ? `${C.cfg.title} / ${C.cfg.titleSub}` : C.cfg.title },
           post: S2 => Object.assign(Z.INTRO.post.ember(S2), { lutA: act.lut, lutMix: C.lutMix }) };
       case 'titleRiff':
         // upstream titlePreload() wants a character AND a sky plate (it falls back to
         // assets/char/REF_master.png + assets/bg/bg_sky.png, neither of which exists here).
+        // The four corner strings and the two monumental glyphs are 残光's by default -- pass
+        // this film's own, and disable the Japanese ruby (it read ざん/こう under our glyphs).
         return { args: { seed: 11 + i, whiteAt: 0.5, grain: 0.5, variant: C.mode('titleVar', ['intro']),
-            char: C.charImg || NO_IMAGE, sky: C.plate('a') }, lyric: 'none' };
+            char: C.charImg || NO_IMAGE, sky: C.plate('a'),
+            glyphs: FILM_GLYPHS, ruby: false, sub: C.cfg.titleSub || '', hud: FILM_HUD }, lyric: 'none' };
 
       // ---------------------------------------------------------------- typo.js
       case 'kanjiSlam':
@@ -325,6 +330,29 @@
       violet: '#8E7CC3', magenta: '#E8557F' };
     cfg.palette = Object.assign({}, PAL_DEFAULT, cfg.palette);
     const P = cfg.palette;
+
+    // ------------------------------------------------------------ title-scene HUD
+    // The intro scenes (ember / titleRiff / afterimage) ship with the 残光 example baked into
+    // their defaults -- BPM 131, 踏切 No.7, 35°41′N 139°46′E, 03:44, 「残光」 ZANKŌ, ruby
+    // ざん/こう. Those reached the screen on 3 of our 5 films because songcut never passed the
+    // override args the scenes already accepted. Everything below is real data from
+    // songs/<id>.json; a field we genuinely do not have (a location, a time of day) is left
+    // out so hud() measures a zero-width string instead of us inventing a coordinate.
+    const mmss = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.round(s % 60)).padStart(2, '0');
+    const FILM_HUD = {
+      title: `「${cfg.title}」${cfg.titleSub ? ' ' + cfg.titleSub : ''}`,
+      when: cfg.date ? `${String(cfg.date).replace(/-/g, '.')} / LIVE` : '',
+      bpm: cfg.bpm ? `BPM ${Math.round(cfg.bpm)} · 4/4` : '',
+      geo: '',
+      place: cfg.artist ? `原唱 ${cfg.artist}` : '',
+      len: mmss(cfg.duration),
+    };
+    // the monumental lockup takes exactly two glyphs; take the first two Han characters of the
+    // title, falling back to the upstream pair only if the title has fewer than two
+    const FILM_GLYPHS = (() => {
+      const cs = [...String(cfg.title)].filter(ch => /[\u3400-\u9FFF]/.test(ch)).slice(0, 2);
+      return cs.length === 2 ? cs : ['残', '光'];
+    })();
 
     // ------------------------------------------------------------ direction (engine/direction.js)
     const DIR = window.DIR;
@@ -798,7 +826,10 @@
     window.__zankoMeta.fps = 30;
 
     // ---- runtime evidence for tools/audit_official.mjs ------------------------------------
-    const signature = DIR.signature(cfg, acts);
+    // `S` is the built shot list, so the cadence axis is measured from REAL cuts instead of
+    // read off the config (hand-written cfg.acts carry no cadence field at all -- see the
+    // note in direction.js signature()).
+    const signature = DIR.signature(cfg, acts, { shots: S, lines });
     window.__cutAudit = {
       song: SONG, seed: BASE_SEED, directionMode: dir.structure.mode,
       officialScenesRegistered: Object.keys(Z.SCENES).sort(),
@@ -822,7 +853,7 @@
       charDeclared: charItems.map(it => it.img), charMissing,
       actCount: acts.length, actRoles: acts.map(a => a.role),
       intensityCurve: acts.map(a => +a.intensity.toFixed(2)),
-      cadence: acts.map(a => a.cadence),
+      cadence: [...String(signature.cadence)].map(Number),
       direction: { seed: BASE_SEED, mode: dir.structure.mode, signature, axes: dir.axes || {} },
     };
   };

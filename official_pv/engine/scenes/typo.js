@@ -739,9 +739,18 @@
   }
 
   // ===================================================================================== tunnel
-  const tunnelCfg = a => Object.assign({ words: ['暗闇の果てで', 'まだ遅くない', 'あなたに会いたい', '光', '残光'], toward: 'dawn', f: 820, v0: 3.1, v1: 9.5, fadeIn: 0.18 }, a);
+  const LATIN_ZANKO = ['AT THE END OF THE DARKNESS', 'IT IS NOT TOO LATE', 'I STILL WANT TO SEE YOU', 'ZANKŌ — AFTERGLOW', 'HOLD ON TO THE LAST LIGHT'];
+  const tunnelCfg = a => Object.assign({
+    words: ['暗闇の果てで', 'まだ遅くない', 'あなたに会いたい', '光', '残光'], toward: 'dawn', f: 820, v0: 3.1, v1: 9.5, fadeIn: 0.18,
+    // The wall text and the big romanisation under the last word are 残光's. A film that
+    // overrides `words` must not inherit them -- otherwise 《下个，路口，见》 gets
+    // 'ZANKŌ — AFTERGLOW' printed on its tunnel wall. For any other film both are empty and
+    // the latin ring is simply not placed (an empty pool is honest; inventing English lines
+    // to fill the space would not be).
+    latin: (Z.TITLE && Z.TITLE !== '残光') ? [] : LATIN_ZANKO,
+    latinSub: (Z.TITLE && Z.TITLE !== '残光') ? '' : 'ZANKŌ — AFTERGLOW',
+  }, a);
   const tunnelVP = lt => [W / 2 + 34 * Math.sin(lt * 0.85 + 0.4) + 12 * Math.sin(lt * 2.1), H / 2 + 20 * Math.sin(lt * 0.6 + 1.3)];
-  const LATIN = ['AT THE END OF THE DARKNESS', 'IT IS NOT TOO LATE', 'I STILL WANT TO SEE YOU', 'ZANKŌ — AFTERGLOW', 'HOLD ON TO THE LAST LIGHT'];
 
   // camera travel (world units) — accelerating, continuous past the shot end
   const travel = (lt, dur, v0, v1) => {
@@ -752,7 +761,7 @@
   // objects are built once per shot: each has a crossing time tc (when it leaves the frame) → a fixed world depth
   const tunCache = new Map();
   function tunnelObjects(S, a) {
-    const key = S.shot.id + '|' + S.shot.t0 + '|' + S.shot.t1 + '|' + a.words.join('/');
+    const key = S.shot.id + '|' + S.shot.t0 + '|' + S.shot.t1 + '|' + a.words.join('/') + '|' + (a.latin || []).join('/');
     let L = tunCache.get(key); if (L) return L;
     const t0 = S.shot.t0, t1 = S.shot.t1, dur = t1 - t0, B = S.clock.beats;
     const bs = B.filter(b => b > t0 - 1.5 && b < t1 + 5);
@@ -771,7 +780,7 @@
       } else {
         // off-beats: an engraved dial ring + a small Latin ring inside it
         L.push({ type: 'dial', tc: b, R: 1.9, tilt: [Z.rnds(bi, 21) * 0.15, Z.rnds(bi, 22) * 0.15], spin: 0.22 * (bi % 4 === 1 ? 1 : -1), ph: Z.rnd(bi, 8) * TAU, beat: true, id: bi * 7 + 2 });
-        L.push({ type: 'latin', tc: b + sp * 0.22, R: 1.12, gs: 0.07, text: LATIN[Math.floor(Z.rnd(bi, 9) * LATIN.length)], spin: -0.28, ph: Z.rnd(bi, 10) * TAU, tilt: [0, 0], id: bi * 7 + 3 });
+        if (a.latin && a.latin.length) L.push({ type: 'latin', tc: b + sp * 0.22, R: 1.12, gs: 0.07, text: a.latin[Math.floor(Z.rnd(bi, 9) * a.latin.length)], spin: -0.28, ph: Z.rnd(bi, 10) * TAU, tilt: [0, 0], id: bi * 7 + 3 });
       }
       L.push({ type: 'circle', tc: b + sp * 0.5, R: 1.3 + 0.9 * Z.rnd(bi, 5), tilt: [Z.rnds(bi, 6) * 0.3, Z.rnds(bi, 7) * 0.3], lw: 0.01, id: bi * 7 + 1 });
       if (bi % 4 === 1 || bi % 4 === 3) L.push({ type: 'cross', tc: b + sp * 0.7, x: (bi % 8 < 4 ? -1 : 1) * (1.55 + 0.5 * Z.rnd(bi, 12)), y: Z.rnds(bi, 13) * 0.9, sz: 0.8 + 0.3 * Z.rnd(bi, 14), rot: Z.rnds(bi, 15) * 0.25, id: bi * 7 + 4 });
@@ -868,8 +877,8 @@
         ctx.globalAlpha = EZ.soft(Z.clamp(tk * 2.5));
         ctx.fillStyle = '#2a1224'; ctx.fillText(title, vx + sz * 0.02, vy);
         ctx.restore();
-        const rk = EZ.soft(Z.clamp((tk - 0.45) / 0.4));                  // small Latin line under it
-        if (rk > 0) { ctx.save(); ctx.font = fontStr(18, 'dot', 400); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; if ('letterSpacing' in ctx) ctx.letterSpacing = '9px'; ctx.fillStyle = `rgba(42,18,36,${0.7 * rk})`; ctx.fillText('ZANKŌ — AFTERGLOW', vx + 4, vy + sz * 0.66 + 14); ctx.restore(); }
+        const rk = a.latinSub ? EZ.soft(Z.clamp((tk - 0.45) / 0.4)) : 0;   // small Latin line under it
+        if (rk > 0) { ctx.save(); ctx.font = fontStr(18, 'dot', 400); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; if ('letterSpacing' in ctx) ctx.letterSpacing = '9px'; ctx.fillStyle = `rgba(42,18,36,${0.7 * rk})`; ctx.fillText(a.latinSub, vx + 4, vy + sz * 0.66 + 14); ctx.restore(); }
       }
       const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 1.05);
       vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(3,2,6,${0.6 * (1 - glowK)})`);

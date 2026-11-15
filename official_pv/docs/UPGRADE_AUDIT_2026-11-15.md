@@ -65,15 +65,38 @@ clock beats total = 97 (should be ~322 for 219.8s @88bpm)
 以及 `beatZoom / beatBloom / beatCA / beatBump / glow.beat / tunnel / road.dolly`。
 
 **数据其实已经算出来了**：`audio.json` 里有 `downbeats`（80 个，间隔稳定 2.727 s = 4×0.6818，
-即 88 bpm 的完整小节）和 `onsets_strong`（220 个），**两个数组从未被任何代码读取**（grep 全项目 0 处）。
+即 88 bpm 的完整小节）和 `onsets_strong`（220 个）。两者都没被正确使用：
 
-**修法**（`prepare.py`，约 30 行）：
-- `beats` 改为 `downbeats` 展开 4 拍/小节 → 320 点；
-- 现有"歌词行首 + 中点"另存 `lyricOnsets`（`songcut.timeline.js` 与 `JZ.setAudio` 改读它）；
-- 其余字段不动。`main.js` 无需改。
+- `downbeats` —— grep 全项目 **0 处**读取；
+- `onsets_strong` —— 我第一版写"0 引用"，**这是错的**，实际有 1 处：`intro.js:64` 的
+  `strongOnsets()` 做 `.filter(o => o.t > t0 && o.strength >= thr)`，即在等 **`{t, strength}` 对象**；
+  而 `prepare.py:155` 写的是**裸浮点数组**。`o.t` 恒为 `undefined`，比较恒假 → 返回 `[]`，
+  于是 `intro.js:497` 的 `hitsT` 永远是空数组。**不是没接线，是接了但形状不对，静默失效。**
 
-**风险**：修完所有节拍类效果强度都要重调（`beatCA 2.0` 在 0.68 s 一拍下会过密）。
-建议先在《那天下雨了》单曲上试，确认观感后再推到另两首。
+### 1.1 已修复（2026-11-15 晚，代码已落盘未渲染）
+
+| 改动 | 位置 | 结果 |
+|---|---|---|
+| `beats` 改为「标称 BPM 网格 + 反拍吸附真实 onset」 | `prepare.py` 新增 3c 段 | 97 → **320 拍**（理论 322），57% 反拍被吸附 |
+| 歌词行首另存 `lyricOnsets` | 同上 | 97 条，与 `beats` 分家 |
+| `onsets_strong` 改为 `[{t, strength}]` | 同上 | 匹配 `intro.js:64` 唯一的消费者 |
+| `winning_phase` 改为 0..3 索引 | 同上 | 秒值另存 `phase_seconds`（1.6761） |
+| 运行时兜底 | `main.js` 新增 `beatPhase()` | 旧 json 的秒值不再污染时钟，并 warn |
+| 小节与下标永不错位 | 3c 用夹紧代替丢弃 | 断言 `len(beats) == len(nominal)`；实测每个 `k%4==0` 的 beat 精确等于 `downbeats[k//4]` |
+
+验证方式：不改 `audio/`、不重抽音频、不渲染——用仓库里现成的 `audio/song.wav` 复算
+3b→3c 全部逻辑（脚本见 §7）。输出：
+
+```
+duration 219.8 s   bpm 88   spb 0.6818 s
+theoretical 322 beats   OLD grid 97
+NEW grid 320 beats   phase_idx=0   snapped=183 (57%)
+gap min/med/max  0.333 / 0.682 / 1.000 s
+index stability: 每个 k%4==0 的 beat == downbeats[k//4] : True
+```
+
+**风险未消**：拍数变 3.3 倍后，所有节拍类效果强度都要重调（`beatCA 2.0` 在 0.68 s 一拍下会过密），
+且 `meta.js` 的"每 N 拍切一刀"会真的开始按拍切。这一步必须靠重渲验证，本轮按指示**未渲染**。
 
 **验证手段**：`render/_beatcheck.mjs` 已留档，改完重跑应显示 `nBeats≈320`、`beatsInShot≈4-5`。
 
@@ -758,3 +781,63 @@ node official_pv/tools/probe_axes.mjs --gate 9   # 任一对低于 9/12 则 exit
 
 按目录边界铁律，`cuts/` 顶部属于另一条并行渲染路径，本轮**未做任何读写**，仅 `ls` 观察。
 后续重出片时，`cut.mjs` 会重建 `cuts/<date>/official/`。
+
+---
+
+## 10. 第一批 P0 修复记录（2026-11-15 晚，代码已落盘，**未渲染**）
+
+按用户指示：**只改代码，先不渲染**；两首老片的 2/12 塌陷**只记录**，等重做那两首时一并处理。
+因此本节只承诺"代码正确 + 静态可验证"，不承诺"成片已好"。
+
+### 10.1 改了哪五处
+
+| # | 文件 | 改动 | 对应条目 |
+|---|---|---|---|
+| 1 | `tools/prepare.py` | `beats` 从「歌词行首+中点」改为「标称 BPM 网格 + 反拍吸附 onset」；`lyricOnsets` 分家 | §1.1 |
+| 2 | `tools/prepare.py` | `onsets_strong` 从裸浮点改为 `[{t,strength}]`，匹配 `intro.js:64` 唯一消费者 | §1.1 补记 |
+| 3 | `tools/prepare.py` + `engine/core/main.js` | `winning_phase` 改为 0..3 索引；秒值另存 `phase_seconds`；`main.js` 新增 `beatPhase()` 兜底旧 json | §1.2 |
+| 4 | `engine/scenes/intro.js` + `engine/songcut.timeline.js` + `engine/scenes/typo.js` | 残光字面量全部改为「跟随当前片」：`Z.TITLE / Z.TITLE_SUB / Z.CREDIT / Z.audio.bpm` 驱动，未知字段留空不编造 | §1.3 |
+| 5 | `engine/direction.js` + `engine/songcut.timeline.js` | `cadence` 从「读配置」改为「按真实镜头数实测」；`signature(cfg, acts, ctx)` | §1.6 |
+
+### 10.2 残光字面量：逐处清单
+
+`intro.js` 里**七处**会把 残光 印到画面上，全部改为 film-aware（`Z.TITLE` 未设或等于 `残光` 时
+逐字节还原上游示例）：
+
+| 位置 | 原来 | 现在 |
+|---|---|---|
+| `:345` `emberHud` | `'残光 / ZANKŌ'` 写死，args 无法覆盖 | `args.hudTitle` → `Z.TITLE / Z.TITLE_SUB` |
+| `:801` 巨石字形 | `['残','光']` | `args.glyphs` → 片名头两个汉字 |
+| `:841` 注音 | `['ざん','こう']` | 非残光片默认关闭（args.ruby 可开） |
+| `:875` 四角 HUD | `「残光」ZANKŌ — afterglow` / `BPM 131` / `踏切 No.7` / `35°41′N 139°46′E` / `03:44` | 片名 / 真实 BPM / 日期 / 原唱 / 真实时长；**坐标与地名留空**（我们确实没有这些数据，编一个更糟） |
+| `:893` 副标题 | `a.sub ?? 'afterglow'` | `a.sub ?? filmSub()` |
+| `:1031/:1034` afterimage | `a.text \|\| '残光'` | `a.text \|\| Z.TITLE` |
+| `:1086` 落款 | `a.credit \|\| '「残光」 — MV'` | `a.credit \|\| Z.CREDIT \|\| 「片名」 — MV` |
+
+`typo.js` 的 `tunnel` 场景另有**两处**同类（当前五首未使用该场景，属预防）：
+墙面文字池 `LATIN` 含 `'ZANKŌ — AFTERGLOW'`、大盘字下方硬编码 `fillText('ZANKŌ — AFTERGLOW')`。
+现在非残光片的 `latin` 池为空、`latinSub` 为空 → 该装饰不绘制，而不是编造英文句子填位。
+
+`vertical.js:30` 仍有 `title:'残光', sub:'ZANKŌ — afterglow', artist:'NikusonP'` 默认值 ——
+竖版整体尚未接线（§2.5），本轮不动，留作该条修复时的同批改动。
+
+### 10.3 验证（全部离线，未产生任何视频）
+
+| 检查 | 方法 | 结果 |
+|---|---|---|
+| 语法 | `node --check` ×5 + `ast.parse` | 全部 OK |
+| 整站加载 | 按 `index.html` 顺序在 node 里执行 20 个脚本 | 15 OK，2 失败均为 stub 能力不足（URL/`getElementById`），非代码错 |
+| 节拍网格 | 用现成 `audio/song.wav` 复算 3b→3c | 320 拍 / phase_idx=0 / 反拍吸附 57% / 下标零错位 |
+| 相位兜底 | 抽取 `main.js` 的 `beatPhase()` 实跑 | 旧值 1.6761 → 0 并 warn；整数 0 → 0；缺失 → 不 warn |
+| film 默认值 | 抽取 `intro.js` 的 film 助手 + `songcut` 的 `FILM_HUD` 实跑 | 残光示例逐字还原；三首真片无「残光 / BPM 131 / 踏切 / 东京坐标」 |
+| cadence | `tools/probe_axes.mjs` | `faruxue` `1111111144`、`huainvhai` `11111114`（此前双双为空串） |
+| 12 轴矩阵 | 同上 | 10 对中 9 对 9–12/12；`faruxue × huainvhai` 2/12 → **3/12**（cadence 活了），仍低于门槛 |
+
+### 10.4 还没验证的部分（必须靠重渲）
+
+- **观感**：拍数从 97 变 320，`beatCA`/`beatBloom`/`beatZoom`/`beatBump` 的强度大概率过密；
+  `meta.js` 的「每 N 拍切一刀」会真的按拍切，镜头数可能明显变化。**这必须看片才能定。**
+- **`kanjiSlam` 是否真的打出 4 个字**：静态只能证明镜头内 beat 数从 1 变 4–5，出字要靠抽帧确认。
+- **`downPulse` 是否非 0**：同上，需读 `probe_clock.mjs` 的运行时输出（该脚本需要渲染页面）。
+- **`titleRiff` 巨石字形取片名头两字是否好看**：《那天下雨了》取「那 / 天」，《下个，路口，见》取「下 / 个」。
+  这是机械规则，可能不是最好的两个字，需要看片后人工指定 `glyphs`。
