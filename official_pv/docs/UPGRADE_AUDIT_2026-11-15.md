@@ -16,6 +16,7 @@
 | 2 | **`winning_phase` 把秒当索引**：`downbeat_info.winning_phase=1.6761`（秒）被当作 beat 索引传进 `makeClock` | `inBar()` 在 2199 个采样点里**一次都不等于 0**；`downPulse()` **恒为 0**；`bar()` 出现 **-1** | 已在成片 |
 | 3 | **《残光》的字面量泄漏进画面**：`ember` 小字打字机写死 `'残光 / ZANKŌ'`，`titleRiff` 四角 HUD 默认 `「残光」ZANKŌ — afterglow / BPM 131 / 踏切 No.7 / 35°41′N 139°46′E / 03:44` | 《发如雪》1 镜、《坏女孩》2 镜、《下个，路口，见》2 镜 | 已在成片 |
 | 4 | **12 轴差异化审计是字符串比对**：`signature()` 的 `world/timeArc/material/role` 四个轴直接取配置里手写的散文（`songs/*.json:596` 的 `axes` 块），`palette/motif` 散文优先，其余 6 轴也是配置派生 —— **没有一轴看画面** | "两片相差 ≥9 轴"= "两份 JSON 写得不一样"；防同质化的核心保障实际不存在 | 审计失效 |
+| 5 | **审计尺子有三套**（18 / 22 / 24 项），且上一轮新加的"占位文本"检查正则只认英文（`/no shot\|missing scene\|undefined\|NaN\|Infinity/i`） | 老片缺的正是"占位文本 + 引用解析"两条；而「残光」两个字**不在那个正则里**，即使重跑也不会报警 | 审计失效 |
 
 一句话：**上一轮修掉了"画面上的英文调试字"，但没发现画面上还印着另一部作品的标题；而"差异化"这道防线，守的是 JSON 不是画面。**
 
@@ -159,18 +160,67 @@ ending:   d.ending,
   "role": "安静撑伞的少女，越过肩膀回望" }
 ```
 
+**先说一个更基础的问题：我们的 12 轴与官方 `02 §10` 的 12 行不是同一张矩阵。**
+
+| 官方 `02 §93-108` 的 12 行 | `direction.js:33` 的 `AXES` | 对应 |
+|---|---|---|
+| world / setting | `world` | ✅ |
+| time arc | `timeArc` | ✅ |
+| key / exposure | `key` | ✅ |
+| palette | `palette` | ✅ |
+| master shape | `motif` | ⚠️ 部分（motif 是母题，不一定是"形状"） |
+| material metaphor | `material` | ✅ |
+| **line style**（brush-pen / thin pencil / thick marker / crayon / woodcut） | — | ❌ **缺** |
+| character archetype | `role` | ⚠️ 部分 |
+| typography voice | `type` | ⚠️ 部分 |
+| **3D role**（flythrough / diorama / macro / none） | — | ❌ **缺** |
+| transition grammar | `trans` | ✅ |
+| ending | `ending` | ✅ |
+| （官方在表后 "Also vary pacing"） | `cadence` | 表外 |
+| （官方在表后 "density of typography"） | `density` | 表外 |
+
+12 对 12 是**数字巧合**。缺席的 `line style` 恰恰是"手书 PV"最核心的质感轴
+（笔压、线条粗细、用笔工具），而我们只能用 `material` 里的"细笔水彩 + 纸纹"一句话带过——
+这句话不参与任何渲染决策，只参与签名比对。
+
+**再看轴值怎么来的：**
+
 也就是说：**12 个轴里 4 个是手写散文，2 个散文优先，其余 6 个也是配置值**。
 `DIR.diff()` 数的是字符串不相等，`audit_official.mjs:190` 报出的 `worst: 11/12` 只是
 "两首歌的 JSON 写得很不一样"。
 
+**而且比较本身也不对等**，两处机制决定了"有声明"永远占便宜：
+
+- `palette` 轴有两种语义：有声明时取中文描述（`"冷青灰 #07121A/#1E3B48 + 单一暖金 #E8A34C"`，约 30 字），
+  无声明时取 `Object.values(cfg.palette).slice(0,4).join('')`（4 个 hex 拼接）。
+  两种形态 `String()` 比较 **100% 不等** —— 一首写了 axes、一首没写，palette 这一轴就白送一个差异。
+  `world / timeArc / material / role` 同理（长句 vs `null`）。
+- `ending` 有默认值：`direction.js:89` 的 `DEFAULTS.ending = 'afterimage'` 在 `normalize()` 阶段就填了，
+  早于 `songcut.timeline.js:771` 的兜底。所以审计里 `ending` **永远非空**，
+  "没想过片尾怎么收"与"明确决定用 afterimage"在数据层完全不可区分 —— 后者算创意决策，前者算默认值。
+
 这与上一轮的 `ref: no shot undefined` 是同一类失效（审计 PASS ≠ 画面正确），但更隐蔽：
 axes 本来就是"设计意图"，写得漂亮就必然通过，**永远不会 FAIL**。
+
+> **归类说明**：这一条是**方法论缺陷**，不是引擎 bug。代码层可指认的只有两行
+> （`direction.js:309` 的判等语义、`direction.js:34-37` 的成员与 02 §10 不一致），
+> 真正的问题是"用配置字符串代理画面观感"。修它要改审计口径，不是改渲染。
 
 官方 `02 §10` 的本意是**成片之间的观感差异**，不是台账差异。
 
 **更糟的是它不对称**：实测 3 首长片（`natianxiayule` / `xiageluokoujian` / `yiyangdeyueguang`）
 都写了 `axes` 块，所以 12 轴都有值；而 2 首旧片（`faruxue` / `huainvhai`）**没有写**，
-这 4 轴恒为 `null` → 它们之间最多只能差 7 轴，永远达不到 `>= 9` 的门槛。
+`world / timeArc / material / role` 这 4 轴恒为 `null`。
+
+`DIR.diff`（`direction.js:305-310`）的判等是：
+
+```js
+const eq = (x == null || y == null) ? (x === y) : String(x) === String(y);
+```
+
+两边都 `null` 时 `x === y` 成立 → 记为 same。所以在**两首都没写 axes** 的情况下，
+这 4 轴恒判"相同"，12 轴里最多只剩 8 轴可差 —— **门槛 9 在结构上就够不到**。
+（这是静态推理，不依赖跑批：`AXES` 12 项减去 4 个恒 null 轴 = 8。）
 
 也就是说：**这道门禁奖励"把设计说明写进 JSON"，惩罚"没写文档"**，与画面质量无关。
 写了就过，不写就挂 —— 这比"永远 PASS"更危险，因为它会诱导以后每次改片先补文案。
@@ -184,6 +234,45 @@ axes 本来就是"设计意图"，写得漂亮就必然通过，**永远不会 F
   要求至少两条的距离超过阈值。这才是"画面不同质"的证据。
 
 **验证手段**：本轮已确认 `axes` 无一处引用画面数据（grep `signature(` 的入参只有 `cfg` 与 `acts`）。
+
+### 1.5 审计证据链有三套尺子（18 / 22 / 24 项）
+
+这一条是**交付与归档问题**，不是代码缺陷，但影响所有"PASS"的可比性：
+
+| 曲目 | 审计项数 | 缺失项 |
+|---|---|---|
+| 发如雪 | **18** | 缺 10 项 |
+| 坏女孩 | **18** | 缺 10 项 |
+| 下个，路口，见 | 22 | 缺 3 项 |
+| 一样的月光 | 22 | 缺 3 项 |
+| 那天下雨了 | **24** | — |
+
+老片缺的 10 项包括 `no placeholder / debug text on screen`、`every shot reference resolves`、
+`film diverges >= 9/12 axes`、`character assets drawable + real alpha` 等 ——
+**正是上一轮才补上的那两条**。
+
+所以"《发如雪》18/18 PASS"与"《那天下雨了》24/24 PASS"**不能并列陈述**，
+前者连"画面上有没有调试字"都没查过。而《发如雪》恰恰就是 `ember` 打了「残光」的那首。
+
+**还有一层**：上一轮新加的占位检查正则只认英文
+
+```js
+/no shot|missing scene|undefined|NaN|Infinity/i
+```
+
+「残光」两个字**不匹配**。也就是说，即使把 24 项全部补跑一遍，
+`no placeholder` 这条**仍然不会报警** —— 它只能抓"引擎自己的英文兜底文案"，
+抓不到"另一部作品的中文字面量"。
+
+**修法**：
+- 短期：审计记录里必须带 `checks.length` 与生成的 commit，跨片比较时先对齐尺子；
+  老片要么重跑，要么在文档里明确标注"18 项版本"；
+- 中期：把占位检查改成**白名单制**——`hook fillText` 收集到的每一条字符串，
+  必须能在 `cfg.title / cfg.titleSub / cfg.artist / cfg.credit / lyrics / glyphs / tunnelWords /
+  typeLines / signature[].note` 里找到，否则报警。这比正则黑名单强得多，
+  一条就能覆盖"残光"、"undefined"、"no shot"所有情况。
+
+**验证手段**：`render/audit_*.json` 的 `checks.length` 逐片实测（见上表）。
 
 ---
 
