@@ -8,17 +8,22 @@
 
 ## 0. 摘要
 
-三个 P0，都不是代码风格问题，而是**已经在成片里**或**正在系统性削弱全片**：
+六条 P0，都不是代码风格问题：**前三条已经印在成片里**，**后三条让审计看不见问题**：
 
 | # | 问题 | 影响 | 状态 |
 |---|---|---|---|
 | 1 | **节拍网格是假的**：`audio.json.beats` 填的是 97 个歌词行首，官方契约要求 onset-snapped 节拍网格（《残光》486 个，我们应有 322 个） | 全片所有 beat 驱动失效：`pulse`/`bar`/`downPulse`/`beatZoom`/`beatBloom`/`beatCA`/`kanjiSlam` 一拍一字/JIZURA 节拍动效 | 已在成片 |
 | 2 | **`winning_phase` 把秒当索引**：`downbeat_info.winning_phase=1.6761`（秒）被当作 beat 索引传进 `makeClock` | `inBar()` 在 2199 个采样点里**一次都不等于 0**；`downPulse()` **恒为 0**；`bar()` 出现 **-1** | 已在成片 |
 | 3 | **《残光》的字面量泄漏进画面**：`ember` 小字打字机写死 `'残光 / ZANKŌ'`，`titleRiff` 四角 HUD 默认 `「残光」ZANKŌ — afterglow / BPM 131 / 踏切 No.7 / 35°41′N 139°46′E / 03:44` | 《发如雪》1 镜、《坏女孩》2 镜、《下个，路口，见》2 镜 | 已在成片 |
-| 4 | **12 轴差异化审计是字符串比对**：`signature()` 的 `world/timeArc/material/role` 四个轴直接取配置里手写的散文（`songs/*.json:596` 的 `axes` 块），`palette/motif` 散文优先，其余 6 轴也是配置派生 —— **没有一轴看画面** | "两片相差 ≥9 轴"= "两份 JSON 写得不一样"；防同质化的核心保障实际不存在 | 审计失效 |
+| 4 | **12 轴差异化审计是字符串比对**：`signature()` 的 `world/timeArc/material/role` 四个轴直接取配置里手写的散文（`songs/*.json:596` 的 `axes` 块），`palette/motif` 散文优先，其余 6 轴也是配置派生 —— **没有一轴看画面**。实测 10 对里 **9 对通过、`faruxue × huainvhai` 只有 2/12**（这两首配置层几乎同构），而现有审计只拿新片互比，永远看不到这个塌陷 | "两片相差 ≥9 轴"= "两份 JSON 写得不一样"；防同质化的核心保障实际不存在 | 审计失效 |
 | 5 | **审计尺子有三套**（18 / 22 / 24 项），且上一轮新加的"占位文本"检查正则只认英文（`/no shot\|missing scene\|undefined\|NaN\|Infinity/i`） | 老片缺的正是"占位文本 + 引用解析"两条；而「残光」两个字**不在那个正则里**，即使重跑也不会报警 | 审计失效 |
+| 6 | **`cadence` 轴在 manual 模式下永久失效**：该字段只在 `buildActs`/`makeAct` 里生成，而手写 `cfg.acts` 九键无此字段 → `faruxue`/`huainvhai` 的 `cadence` 恒为 `""`，两首之间永远判"相同" | `FREE_AXES` 自称自由轴，实为死轴；节奏差异完全不进入差异化审计 | 已在数据 |
 
 一句话：**上一轮修掉了"画面上的英文调试字"，但没发现画面上还印着另一部作品的标题；而"差异化"这道防线，守的是 JSON 不是画面。**
+
+> 补记：§1.4 我第一版用静态推理说"门槛 9 结构上够不到"，实测证明上界对、结论错 ——
+> 真实情况是 9 对通过、1 对塌到 2/12。更正过程记在 §8 最后一段。
+
 
 ---
 
@@ -189,6 +194,55 @@ ending:   d.ending,
 `DIR.diff()` 数的是字符串不相等，`audit_official.mjs:190` 报出的 `worst: 11/12` 只是
 "两首歌的 JSON 写得很不一样"。
 
+**我第一版报告在这里写错了，用实测更正。** 我原先据 `direction.js:309` 判等语义做了个静态推理：
+"两首都没写 axes 时 4 轴恒 null → 最多只能差 8 轴 → 门槛 9 在结构上够不到"。上界算对了，
+但**结论方向错了** —— 只要一方写了 axes，门槛是够得到的。所以我直接跑了真实的
+`normalize → buildActs → signature → diff`（复刻 `songcut.timeline.js:317-333` 的 LRC 解析与
+`mode` 分支），5 首歌 10 对全量结果：
+
+| 对 | 差值 | 相同的轴 |
+|---|---|---|
+| `faruxue` × `huainvhai` | **2 / 12** ← 唯一挂的 | world, timeArc, key, material, role, type, trans, cadence, density, ending |
+| `faruxue` × `natianxiayule` | 9 / 12 | key, density, ending |
+| `huainvhai` × `natianxiayule` | 9 / 12 | key, density, ending |
+| `faruxue` × `yiyangdeyueguang` | 11 / 12 | key |
+| `huainvhai` × `yiyangdeyueguang` | 11 / 12 | key |
+| `yiyangdeyueguang` × `natianxiayule` | 11 / 12 | key |
+| 含 `xiageluokoujian` 的 4 对 | 12 / 12 | — |
+
+所以门禁的真实状态是：**10 对里 9 对过，只有两首老片之间塌到 2/12**。
+而塌下去的原因不是"没画面差异"，是**两条老片在配置层几乎完全同构**：
+
+- `type` 两首都是 `gold|dark|5p` —— 排版声音一模一样；
+- `ending` 两首都是默认的 `afterimage`，`density` 都是 `2`；
+- `trans` 池子相同（都从 `DENY` 后的通用池抽，见 §2.11）；
+- 4 个散文轴两边都是 `null` → 恒判 same；
+- 只剩 `palette`（两组 hex 不同）和 `motif`（`雪/月/墨` vs `霓虹/雨/拨号音`）是真的不同。
+
+**这里还挖出一个比"核对字符串"更硬的 bug：`cadence` 轴在 manual 模式下永久失效。**
+
+`cadence` 取自 `acts.map(a => a.cadence).join('')`（`direction.js:293`），而 `cadence` 字段只在
+`buildActs` 的 `makeAct` 里生成（`direction.js:221`）。实测：
+
+| 曲目 | `structure.mode` | LRC 行 | acts | 带 `cadence` 的 act |
+|---|---|---|---|---|
+| `faruxue` | `manual`（默认） | 49 | 10 | **0** |
+| `huainvhai` | `manual`（默认） | 49 | 8 | **0** |
+| `xiageluokoujian` | `auto` | 49 | 9 | 9 |
+| `yiyangdeyueguang` | `auto` | 49 | 7 | 7 |
+| `natianxiayule` | `auto` | 49 | 10 | 10 |
+
+因为 `songcut.timeline.js:332` 只在 `mode === 'auto'` 时调 `buildActs`，否则优先用手写 `cfg.acts`；
+而 `songs/*.json` 里手写的 acts 只有 `{id,t0,t1,look,intensity,lut,pool,fx,trans}` 九个键，**没有 `cadence`**。
+结果：`cadence` 在 manual 两首里恒为 `""`，两首之间永远判"相同"——即使一首每句一切、一首八句一切。
+`DIR.FREE_AXES = ['cadence','density']`（`direction.js:38`）声明它是"自由轴"，
+实际它是**两根死轴之一**（另一根 `density` 取的也是 `String(d.structure.density)` 配置值，不是实测密度）。
+
+> **补充更正**：`audit_official.mjs:190` 的 `worst` 是逐片与"其他片"比出来的最大值，
+> 它报 `11/12` 是因为新三首互相之间有 12/12 的对，把最差值撑高了；
+> 它**从不检查两首老片之间**。所以 2/12 这个塌陷在现有审计里完全不可见 ——
+> 这也是 §1.5 "审计只跟新片比" 的另一面。
+
 **而且比较本身也不对等**，两处机制决定了"有声明"永远占便宜：
 
 - `palette` 轴有两种语义：有声明时取中文描述（`"冷青灰 #07121A/#1E3B48 + 单一暖金 #E8A34C"`，约 30 字），
@@ -208,8 +262,8 @@ axes 本来就是"设计意图"，写得漂亮就必然通过，**永远不会 F
 
 官方 `02 §10` 的本意是**成片之间的观感差异**，不是台账差异。
 
-**更糟的是它不对称**：实测 3 首长片（`natianxiayule` / `xiageluokoujian` / `yiyangdeyueguang`）
-都写了 `axes` 块，所以 12 轴都有值；而 2 首旧片（`faruxue` / `huainvhai`）**没有写**，
+**它还有一层不对称**：3 首新片（`natianxiayule` / `xiageluokoujian` / `yiyangdeyueguang`）
+都写了 `axes` 块，12 轴都有值；2 首旧片（`faruxue` / `huainvhai`）**没有写**，
 `world / timeArc / material / role` 这 4 轴恒为 `null`。
 
 `DIR.diff`（`direction.js:305-310`）的判等是：
@@ -218,12 +272,11 @@ axes 本来就是"设计意图"，写得漂亮就必然通过，**永远不会 F
 const eq = (x == null || y == null) ? (x === y) : String(x) === String(y);
 ```
 
-两边都 `null` 时 `x === y` 成立 → 记为 same。所以在**两首都没写 axes** 的情况下，
-这 4 轴恒判"相同"，12 轴里最多只剩 8 轴可差 —— **门槛 9 在结构上就够不到**。
-（这是静态推理，不依赖跑批：`AXES` 12 项减去 4 个恒 null 轴 = 8。）
+两边都 `null` 时 `x === y` 成立 → 记为 same。这就是上表里 `faruxue × huainvhai` 塌到 2/12 的机制：
+4 个 null 轴全判"相同"，等于门禁只在那 8 个有值的轴上考。
 
-也就是说：**这道门禁奖励"把设计说明写进 JSON"，惩罚"没写文档"**，与画面质量无关。
-写了就过，不写就挂 —— 这比"永远 PASS"更危险，因为它会诱导以后每次改片先补文案。
+于是这道门禁的真实激励是：**奖励"把设计说明写进 JSON"，惩罚"没写文档"**，与画面质量无关。
+写了就过，不写就容易挂 —— 这比"永远 PASS"更危险，因为它会诱导以后每次改片先补文案。
 
 **修法**（按成本递增）：
 - (a) 立刻做：把这条检查改名为 `declared divergence`，并在 `COMPLETENESS.md` 里写明
@@ -232,6 +285,22 @@ const eq = (x == null || y == null) ? (x === y) : String(x) === String(y);
   `role` → 是否有 `chars` + 人物占比，`material` → 全片 `grain/boil` 均值，`timeArc` → 段落 LUT 序列；
 - (c) 根治：两片各抽 12 帧（每段一帧），算色相分布 / 平均亮度 / 运动强度（相邻帧差分）三条量，
   要求至少两条的距离超过阈值。这才是"画面不同质"的证据。
+
+> ⚠️ **改 (b)/(c) 时有个坑必须先预置，否则下一手会以为改坏了。**
+> A12 的根子是**量纲错了**：`differ >= 9` 是绝对计数，却用来表达"12 轴里差 9 轴"这个比例要求。
+> 两者在数学上互斥 —— 一旦把不可比的轴从分母里剔掉，分母收缩，9 就永远不可达。以
+> `faruxue × natianxiayule` 为例，三种状态：
+>
+> | 状态 | 结果 | 差异轴 |
+> |---|---|---|
+> | 现状（`direction.js:309` 原样） | **9 / 12** 卡线通过 | 4 个 null 轴 + palette + cadence + motif + type + trans |
+> | 只剔除 4 个 null 轴 | **5 / 8** | palette, cadence, motif, type, trans |
+> | 再剔 palette（取值域不同）与 cadence（空串） | **3 / 6** | motif, type, trans |
+>
+> 所以三件事不是三条独立建议，是**同一个缺陷的三处**，必须一起动：
+> (1) 判等语义（`direction.js:309`）、(2) 门槛口径（`audit_official.mjs:190` 改比例制）、
+> (3) 退化轴的处置（null / 空串 / 取值域不同 → 记 `unknown` 不计入分母）。
+> 只动 (1) 的症状是"修完审计全红" —— 分母 6、门槛 9，恒 FAIL，看起来像改坏了，其实是量纲没改。
 
 **验证手段**：本轮已确认 `axes` 无一处引用画面数据（grep `signature(` 的入参只有 `cfg` 与 `acts`）。
 
@@ -273,6 +342,52 @@ const eq = (x == null || y == null) ? (x === y) : String(x) === String(y);
   一条就能覆盖"残光"、"undefined"、"no shot"所有情况。
 
 **验证手段**：`render/audit_*.json` 的 `checks.length` 逐片实测（见上表）。
+
+### 1.6 `cadence` 是死轴：manual 模式下恒为空串
+
+这一条独立成节，因为它是**代码 bug**（不是口径问题），且被 `FREE_AXES` 的声明掩盖了。
+
+`cadence` 在 `signature()` 里是 `acts.map(a => a.cadence).join('')`（`direction.js:293`）。
+而 `a.cadence` 这个字段**只有一个生产者**：`buildActs()` 内部的 `makeAct()`（`direction.js:221`，
+`cadence: cadenceFor(look, st.density, rng)`）。
+
+问题在调用侧 —— `songcut.timeline.js:332`：
+
+```js
+const acts = dir.structure.mode === 'auto' ? DIR.buildActs(cfg, lines)
+                                          : (cfg.acts && cfg.acts.length ? cfg.acts : DIR.buildActs(cfg, lines));
+```
+
+`mode` 的默认值是 `'manual'`（`direction.js:47`）。一旦 manual 且有手写 `cfg.acts`，
+就**直接用 JSON 里的数组**，`buildActs` 根本不跑。而手写 act 的键是
+`{id,t0,t1,look,intensity,lut,pool,fx,trans}` 九个 —— **没有 `cadence`**。
+
+实测五人组：
+
+| 曲目 | `structure.mode` | acts | 带 `cadence` 的 act | 签名里的 `cadence` |
+|---|---|---|---|---|
+| `faruxue` | `manual`（默认） | 10 | **0** | `""` |
+| `huainvhai` | `manual`（默认） | 8 | **0** | `""` |
+| `xiageluokoujian` | `auto` | 9 | 9 | `323122131` |
+| `yiyangdeyueguang` | `auto` | 7 | 7 | `3212113` |
+| `natianxiayule` | `auto` | 10 | 10 | `3231221213` |
+
+后果：`faruxue` 与 `huainvhai` 的 `cadence` 都是 `""`，`"" === ""` → **恒判"相同"**，
+即使一首每句一切、一首八句一切。这正是 §1.4 里那对 `faruxue × huainvhai = 2/12` 的成因之一。
+
+而 `direction.js:38` 的 `FREE_AXES = ['cadence', 'density']` 把这两轴标为"自由轴"
+（官方 `02 §10` 表后 "Also vary pacing" / "density of typography"），
+意味着门禁认为这两轴**一定会**贡献差异 —— 实际上 `density` 取的是
+`String(d.structure.density)`（配置值 `2/2/1/3/2`，不是实测密度），`cadence` 在 manual 下恒空。
+**两根"自由轴"都不自由。**
+
+**修法**（推荐后者）：
+- (a) 给两首老片的手写 acts 补 `cadence` 字段 —— 但这是人工填表，以后每加一首 manual 的歌都要记得填；
+- (b) 让 `signature()` 在 `a.cadence == null` 时**从实际数据推**：
+  用 `act` 覆盖的时长 ÷ 该区间内 LRC 行数，取整后夹到 1..4。这样 manual/auto 一视同仁，
+  且反映的是"每几句一切"这个真实观感量。`density` 同样应该从实测镜头切点数推，而不是读配置。
+
+**验证手段**：见上表（本轮用复刻 `songcut.timeline.js:317-333` 的脚本实测，五人全量）。
 
 ---
 
@@ -485,6 +600,7 @@ const tt = (act.trans && act.trans.length) ? act.trans[Math.floor(rng() * act.tr
 | 3.10 | 场景参数契约 4 处不符 | `panels` 传 number（`songcut:257`）、`burst` 空 `cuts`（`:259`）、`solid`/`jz` 传了它们不读的 `chars`（`:184/:186`）。当前词表未引用，属潜伏 |
 | 3.11 | `memories` 场景会崩 | `sceneArgs` 若给它传 `photos: string`，`meta.js` 里 `for (const P of a.photos)` 会逐字符迭代。当前未引用，潜伏 |
 | 3.12 | 立绘窗口内切点（与 2.3 的 (a) 同源） | 窗口 8–12.5 s 内插一刀，需要 in/out 绑窗口时间 |
+| 3.13 | `songs/` 目录混放三类文件 | 歌曲配置（`duration`+`lrc`）、场次配置（`2026-11-09.json`，键为 `date/source_video/whitelist/songs`）、调色片段（`*.palette.json`，约 450 B）。任何 `songs/*.json` 通配都会把后两类当歌曲读，实测 `probe_axes.mjs` 首版就因此吐出 5 个假的 0/12 行。建议按 `duration is number && lrc` 判真歌，或拆到 `songs/sessions/` |
 
 ---
 
@@ -503,7 +619,7 @@ const tt = (act.trans && act.trans.length) ? act.trans[Math.floor(rng() * act.tr
 | 25 个官方场景优先适配 | 05 §8 | 用 9 个 | ⚠️ |
 | `lyric:'none'` 只给排版场景 | 06 §6 | 17 处，全部合规 | ✅ |
 | 每镜独立 post | 01 §4 | 57/57 | ✅ |
-| 12 轴差异 ≥9 | 02 §10 | 数字达标（两两 11–12），但轴值全部来自配置字符串，不看画面 | ❌ 见 1.4 |
+| 12 轴差异 ≥9 | 02 §10 | 10 对里 9 对达标（9–12），**`faruxue × huainvhai` 仅 2/12**；且轴值全部来自配置字符串，不看画面 | ❌ 见 1.4 / 1.6 |
 | 中央を空ける 36% | JIZURA README:166 | `zoneW 0.36`，`outsideLive=0` | ✅ |
 | 9:16 竖版交付 | 08 §5 | 有代码，未配置未产出 | ❌ P1 |
 | 1–2 段 Blender 3D | 07 全文 | 一镜未用（`blender_*` 工具未引入） | ⚠️ 可选 |
@@ -531,28 +647,33 @@ const tt = (act.trans && act.trans.length) ? act.trans[Math.floor(rng() * act.tr
 1. 1.3 残光字面量（`titleRiff` 补 `hud`/`glyphs`；`ember` 的 `intro.js:344` 参数化）
 2. 1.2 `winning_phase` 改 0..3 索引
 3. 1.1 `prepare.py` 生成真 beat 网格 + `lyricOnsets` 分家
-4. 1.4 先把那条门禁改名为 `declared divergence` 并在文档写明口径（5 分钟，防止继续拿它当质量证据）
-5. 重出《那天下雨了》，抽帧确认：kanjiSlam 打出 4 个字、`downPulse` 非 0、无"残光"
+4. 1.6 `cadence` 死轴：给手写 acts 补 `cadence` 字段，或让 `signature()` 在 manual 模式下
+   从 `t0/t1` 与实际歌词行数推出实测 cadence（后者更好，不依赖人工填表）
+5. 1.4 先把那条门禁改名为 `declared divergence` 并在文档写明口径（5 分钟，防止继续拿它当质量证据）
+6. 重出《那天下雨了》，抽帧确认：kanjiSlam 打出 4 个字、`downPulse` 非 0、无"残光"
+
+> 注意：第 4、5 项**不要动 `direction.js:309` 的判等语义**。那是第三批的事，
+> 且必须与 `audit_official.mjs:190` 的门槛一起改成比例制，否则会"越修越红"（见 1.4 末的警告框）。
 
 **第二批（1 天，观感）**
-5. 2.2 chorus 按拍切（依赖第一批）
-6. 2.4 碎片镜头
-7. 2.7 `LOOKS.boil` 接线
-8. 2.1 重新审议 110 条 layout 禁令（先列一张"禁令 → 理由 → 是否只对身体镜头成立"的表给用户过目）
-9. 2.11 转场从随机抽签改成语义化（段落首/尾/中间三档）
-10. 2.12 signature moments 真正钉住镜头
+7. 2.2 chorus 按拍切（依赖第一批）
+8. 2.4 碎片镜头
+9. 2.7 `LOOKS.boil` 接线
+10. 2.1 重新审议 110 条 layout 禁令（先列一张"禁令 → 理由 → 是否只对身体镜头成立"的表给用户过目）
+11. 2.11 转场从随机抽签改成语义化（段落首/尾/中间三档）
+12. 2.12 signature moments 真正钉住镜头
 
 **第三批（1 天，工程）**
-11. 1.4 的 (b)/(c)：把 4 个散文轴换成可核验量，或抽帧算画面距离
-12. 2.9 preload 容错
-13. 2.6 重生成哈希清单（23/5，含 `why`）
-14. 3.8 lint 前置
-15. 2.10 文档数字自动回写
+13. 1.4 的 (b)/(c) + 判等语义 + 门槛口径**三处同时改**（改成 `differ / known` 比例制）
+14. 2.9 preload 容错
+15. 2.6 重生成哈希清单（23/5，含 `why`）
+16. 3.8 lint 前置
+17. 2.10 文档数字自动回写
 
 **第四批（可选）**
-16. 2.5 竖版接线
-17. 3.2 / 3.3 / 3.4 性能
-18. Mediabunny 试点
+18. 2.5 竖版接线
+19. 3.2 / 3.3 / 3.4 性能
+20. Mediabunny 试点
 
 ---
 
@@ -564,8 +685,26 @@ const tt = (act.trans && act.trans.length) ? act.trans[Math.floor(rng() * act.tr
 | 时钟体检 | `tools/probe_clock.mjs` | `bar/inBar/downPulse` 实际取值 |
 | 节拍体检 | `tools/probe_beats.mjs` | 镜头内 beat 数 vs glyph 数 |
 | JIZURA 能力普查 | `tools/probe_jizura.mjs` | 186 layout 用了几个 |
+| **12 轴差异矩阵** | `tools/probe_axes.mjs` | 全 N×(N-1)/2 对、raw 与 strict 双口径、退化轴普查 |
 | 抽帧 | `ffmpeg` / 引擎直渲 | kanjiSlam 是否只打一个字 |
 | 逐文件 diff | `diff`（`\r\n` 归一化） | 哈希清单真实性 |
+
+`probe_axes.mjs` 是本轮新增的，专治 §1.4/§1.6：`audit_official.mjs` 只把每片跟 `render/` 里现存
+的片比一次并取最大值，所以「两首老片之间塌到 2/12」永远不进报告，且数字会随 `render/` 被清理而漂移。
+新脚本每次都跑全矩阵，并把「两边都空」的轴单独列出来，避免 null-vs-null 被算成"相同"。
+
+```bash
+node official_pv/tools/probe_axes.mjs            # 全量矩阵 + 退化轴普查
+node official_pv/tools/probe_axes.mjs --gate 9   # 任一对低于 9/12 则 exit 1（可接 CI）
+```
+
+实测输出（5 首真歌，已排除 `songs/2026-11-*.json` 场次配置与 `*.palette.json` 调色片段）：
+
+```
+-- faruxue x huainvhai : only 2/12 --
+   genuinely differing : palette, motif
+   blank on both sides : world, timeArc, material, role, cadence
+```
 
 四个脚本已经放进 `tools/`（不再是临时文件），可随时重跑复现：`node tools/probe_clock.mjs` 等，
 都只读不写。`probe_beats.mjs` 会往 `render/_probe_beats/` 落几张抽帧。
@@ -596,6 +735,16 @@ const tt = (act.trans && act.trans.length) ? act.trans[Math.floor(rng() * act.tr
 - 真实 modified 数是 **5** 不是 3（漏了 `index.html`、`vertical.html`，它们在上游 template 里存在）；
 - 上轮说"`ref` 的 `meltAt/meltEnd` 原来传的是分数"，这个判断成立，但**只对 `melt` 模式**；
   `freeze` 模式不读这两个值，所以影响面比当时描述的窄。
+
+**还有一条是本次报告内部的自我更正**（写在这里，因为它最容易被下一手当结论引用）：
+
+| 我一度写成 | 实测 | 结论 |
+|---|---|---|
+| "两首都没写 axes 时 12 轴最多只能差 8 轴，**门槛 9 在结构上就够不到**" | 上界 8 是对的，但**门槛够得到**：只要一方写了 axes 就能到 9–12，10 对里 9 对通过；真正塌陷的是两首老片之间 **2/12** | 上界正确，**结论方向错**。改成实测表 + 补出「`cadence` 在 manual 模式恒空」这个真 bug（见 1.4） |
+| 12 轴与官方 `02 §10` 是同一张矩阵，"12 对 12" | 官方有 `line style`、`3D role` 两行我们没有；我们的 `cadence`/`density` 在官方是表外散文 | 否证：数字巧合（见 1.4 对照表） |
+
+教训：`DIR.diff` 这类"配置层判等"的问题，**静态推理只能给上界，必须跑真实数据**。
+我第一次就是用上界替代了实测，把"某一对塌到 2"错说成"全部门槛不可达"。
 
 ---
 
