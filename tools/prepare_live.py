@@ -22,13 +22,12 @@ import shutil
 import subprocess
 import sys
 
-# 运行时路径只有一份：songcut/pvlink.runtime()（env → config.json → 内置探测）。
-# 写死的 D:/ffmpeg/bin/... 换台机器就得全局替换，漏一处就是「找不到 ffmpeg」。
+# 运行时路径只有一份：songcut/config.runtime()（env → config.json → 内置探测）。
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-from songcut import pvlink as _PVRT  # noqa: E402
-_RT = _PVRT.runtime()
+from songcut import config as _CFG  # noqa: E402
+_RT = _CFG.runtime()
 
 
 FFMPEG = _RT["ffmpeg"]
@@ -69,11 +68,11 @@ def main():
     ap.add_argument("--dur", type=float, default=12.0)
     ap.add_argument("--out", required=True)
     ap.add_argument("--head-fps", type=int, default=30)
-    # 文字 PV 里人物层是「慢节奏插入」，不需要 30fps：8fps 足够读出表情与呼吸，
+    # 直播层是「慢节奏插入」，不需要 30fps：8fps 足够读出表情与呼吸，
     # 而解码后的常驻内存只有 30fps 的 27%（4K 渲染时这直接决定会不会 OOM）。
     ap.add_argument("--body-fps", type=int, default=0, help="0 = 与 head-fps 相同")
     # 输出尺寸：裁切在源分辨率做（保住细节），再降采样到实际显示尺寸。
-    # 文字 PV 的圆窗直径约 300 设计像素、半身竖幅约 560×746，1080p 下绰绰有余；
+    # 圆窗直径约 300 设计像素、半身竖幅约 560×746，1080p 下绰绰有余；
     # 4K 时靠 1.10 倍的取景余量 + 平滑插值，不要为了锐度在这里堆 2K 图。
     ap.add_argument("--head-out", type=int, default=0, help="0 = 不缩放（= head-s）")
     ap.add_argument("--body-out", default="", help="WxH，空=不缩放")

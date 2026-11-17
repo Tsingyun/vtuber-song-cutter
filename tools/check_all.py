@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """一键检查：在改完代码、还没出片之前，用 30 秒确认「没有把地基弄坏」。
 
-分三层（快的在前，任一层失败即停）：
+分两层（快的在前，任一层失败即停）：
   ① 语法/导入 —— compileall + 关键模块 import；
-  ② 纯逻辑单测 —— tests/test_spec.py（规格唯一真源）+ 其余可独立运行的测试；
-  ③ 素材/字体 —— pv_fonts_audit.py（16 个中文字面在不在、许可证在不在）。
+  ② 纯逻辑单测 —— tests/test_spec.py（规格唯一真源）。
 
 不做的事（故意的）：
-  · 不跑 4K 渲染、不跑 pv_flash/pv_uniform —— 它们要片子，属于「出片后验收」；
+  · 不跑 4K 渲染 —— 它要片子，属于「出片后验收」；
   · 不跑 pytest 收集到的全部测试（其中部分依赖真实录播/GPU）。
 
 用法：
@@ -58,12 +57,6 @@ def main():
 
     print("[② 纯逻辑单测]")
     ok &= run("tests/test_spec.py", [PY, os.path.join("tests", "test_spec.py")], quiet=False)
-
-    print("[③ 页面契约]")
-    ok &= run("pv_pages.py", [PY, os.path.join("tools", "pv_pages.py")])
-
-    print("[④ 字体库]")
-    ok &= run("pv_fonts_audit.py", [PY, os.path.join("tools", "pv_fonts_audit.py")])
 
     print("\n%s" % ("全部通过 ✓" if ok else "有失败 ✗（先修再出片）"))
     return 0 if ok else 1

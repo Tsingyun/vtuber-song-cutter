@@ -2,8 +2,7 @@ name: ci
 
 # 这个仓库的主体是「要 GPU + 数 GB 录播」的渲染管线，CI 不可能跑出片。
 # 所以 CI 只负责一件事：**守住不需要素材就能验的部分** —— 语法、导入、
-# 规格唯一真源的单测、字体清单。出片级验收（pv_flash/pv_uniform/pv_check）
-# 仍由 tools/check_all.py 与 pv_* 量具在本机执行。
+# 规格唯一真源的单测。出片级验收仍由 tools/check_all.py 与 songcut.qc 在本机执行。
 
 on:
   push:
@@ -34,6 +33,3 @@ jobs:
 
       - name: 规格单测
         run: python -m pytest tests/test_spec.py -q
-
-      - name: 字体清单
-        run: python tools/pv_fonts_audit.py
