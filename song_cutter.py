@@ -1285,29 +1285,48 @@ def render_player_video(workdir, job, ffmpeg=None):
 
 
 
-_ART_DATAURL_CACHE = {"done": False, "val": None}
+_ART_DATAURL_CACHE = {}
 
 
-def _art_dataurl():
+def _art_path_for(song_key=""):
+    """按歌名取立绘路径：streamer.art_by_song[歌名] 优先，回落 streamer.art_image。
+
+    为什么要按歌分流：一次 --date 会渲多首，而这三首的情绪/服装差别很大
+    （校服 / 公主切 / 小礼服），共用一张等于三首都是一个妆。查表是纯配置，
+    不动任何版式；未登记的歌仍然走原 art_image，行为与改动前一致。
+    """
+    table = CFG.path("streamer", "art_by_song", default={}) or {}
+    if isinstance(table, dict):
+        for k, v in table.items():
+            if song_key and k and (k == song_key or k in song_key or song_key in k):
+                p = CFG.expand(v or "")
+                if p:
+                    return p
+    return STREAMER_ART
+
+
+def _art_dataurl(song_key=""):
     """装饰立绘 → dataURL（未配置或文件缺失返回 None，播放器自动跳过该图层）。
 
-    结果按进程缓存：这是一张固定不变的静态立绘，base64 后约 2.2 MB，
-    每首都重新读盘 + 编码一遍纯属浪费（还会让每首的渲染 job 多写 2 MB 文本）。
+    缓存按**歌曲**分桶：一张 PNG base64 后约 2~4 MB，每首重复读盘 + 编码纯属浪费；
+    但也不能像旧版那样全局只存一张 —— 那样一次渲三首就只有第一首的立绘生效。
     """
-    if _ART_DATAURL_CACHE["done"]:
-        return _ART_DATAURL_CACHE["val"]
+    path = _art_path_for(song_key)
+    key = path or ""
+    if key in _ART_DATAURL_CACHE:
+        return _ART_DATAURL_CACHE[key]
     val = None
-    if not STREAMER_ART or not os.path.exists(STREAMER_ART):
-        if STREAMER_ART:
-            log("警告：装饰立绘不存在，跳过该图层：%s" % STREAMER_ART)
+    if not path or not os.path.exists(path):
+        if path:
+            log("警告：装饰立绘不存在，跳过该图层：%s" % path)
     else:
-        head = io.open(STREAMER_ART, "rb").read(4)
+        head = io.open(path, "rb").read(4)
         mime = "image/png" if head == b"\x89PNG" else "image/jpeg"
         import base64 as _b64
         val = "data:%s;base64,%s" % (
-            mime, _b64.b64encode(io.open(STREAMER_ART, "rb").read()).decode())
-    _ART_DATAURL_CACHE["done"] = True
-    _ART_DATAURL_CACHE["val"] = val
+            mime, _b64.b64encode(io.open(path, "rb").read()).decode())
+        log("  装饰立绘: %s（前奏期出现，第一句歌词前退场）" % os.path.basename(path))
+    _ART_DATAURL_CACHE[key] = val
     return val
 
 
@@ -1907,7 +1926,7 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "watermark": CFG.expand(CFG.path("assets", "watermark", default="") or ""),
         "lrc": lrc,
         "cover": cover_data,
-        "artImage": _art_dataurl(),
+        "artImage": _art_dataurl(seg["title_guess"]),   # 按歌分流，见 _art_path_for
         "scheme": dec["scheme"],          # 标题装饰（自动匹配/手动覆盖）
         "res": OUT_RES,                   # 1=1920×1080，2=3840×2160
         "bitrate": OUT_BITRATE,           # 成片视频码率(bps)
