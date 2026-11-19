@@ -2329,3 +2329,13 @@ python tools/pv_figcomp.py --spec fig_spec.json --jz jz_v4 \
 | **原唱核实（联网）** | 走马＝陈粒，词曲陈粒，2015-02-02《如也》✅；双人船＝ChiliChill，词曲 ChiliChill，**2022-01-07《每到夜里我就很饿》**（配置里曾错写「ChiliChill乐团 · 2025」，已改）；与你有关＝**词/演唱 泠鸢yousa、曲 郑伟**，2021《时光代理人 动画原声带》（曾错写「词曲/演唱 泠鸢yousa」，已改）。三首 `[ar:]` 与画面左下角「歌名 / 原唱」均正确。 |
 | **文字纪律** | `typeLines` / `tunnelWords` 共 24 条装饰短语，原先是我自撰的诗意短句（「灯是别人的」「只坐得下一个」「门缝里的光」…），已**全部替换成该曲 LRC 原文的真实片段**，并用脚本断言每条都 `in` 官方 LRC 文本（24/24 命中、0 例外）。术力口 PV 的大字装饰也是「歌词」，不得自创。 |
 | **入库策略** | 新增 `official_pv/.gitignore`：`audio/`、`analysis/`、`render/`、`_tmp/`、`engine/fonts/*.ttf`、`assets/bg|char/`、`assets/style/luts/` 不入库（字体 248 MB、底版 23 MB、立绘 15 MB、音频 41 MB）。配置 / LRC / palette / 工具 / 文档照常入库。 |
+
+## 138. 渲染中途被叫停 → 续渲的 manifest 陷阱（2026-11-19 走马/双人船实录）
+
+| 项 | 内容 |
+|---|---|
+| **现象** | `song_cutter.py` 的 manifest 在**整场所有歌渲完**才落盘。中途按 `--only 1,2` 渲完第一首后被叫停，`cuts/<date>/manifest.json` 根本不存在——第一首的成片/歌词都在盘上，记录却没写进去。 |
+| **续渲陷阱** | 若直接 `--only 2 --force` 重渲第二首，带回逻辑（§重切唯一钥匙）从**旧 manifest** 补未处理条目；旧 manifest 不存在 → 第一首条目会以裸 segments 数据补入，丢掉 specs/qc/lrc_path 等完整字段。 |
+| **正确做法** | 续渲前**先手工写一份只含已完成歌曲完整条目的 manifest 种子**（照其它日期的 manifest 结构填 specs/specs_ok/lrc_path/cut_start/qc 等），再跑 `--only <剩余序号> --force`；渲完日志会打印「已从旧 manifest 带回 N 首」，核对带回条目的字段没被裸数据覆盖。 |
+| **半成品处理** | 中断残留的 `.mp4.render.mp4` 必须删掉再续渲（A 线必须从 f0 顺序渲染，`--force` 会重建）；`_mux_audio.mp3` 可留着复用。 |
+| **本次结果** | 走马 6759.76→6995.32（236.1s）、双人船 7287.80→7502.30（215.1s），均 4K60/18Mbps，QC 各 PASS 24 / WARN 2 / BLOCK 0；两首都没插装饰立绘层（用户选保留 A 唱片自带的淡化背景水印）。第三首"与你有关"未渲，manifest 标 `not_rendered`。 |
