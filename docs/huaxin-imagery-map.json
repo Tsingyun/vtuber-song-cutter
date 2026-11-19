@@ -1,0 +1,725 @@
+{
+ "_meta": {
+  "song": "画心",
+  "artist": "张靓颖",
+  "vocal": "岁己SUI",
+  "concept": "huaxin-paper",
+  "pack": "huaxin",
+  "koma": 12,
+  "dur": 430.5,
+  "fps": 30,
+  "res": [
+   3840,
+   2160
+  ],
+  "ghost": 0.62,
+  "note": "画皮/人狐畸恋。五套纸：素/夜/月/朱/烬，浅深隔段交替（换纸=翻一页画）。字形只用宋骨（cnSerif 700 片名·cnSerifLt 400 正文·cnKai 落款≤4 处），900 只给「画不出你的骨骼」与「为你而割舍」两处极值。"
+ },
+ "sections": [
+  {
+   "name": "intro",
+   "t0": 0.0,
+   "t1": 6.82,
+   "scheme": 0
+  },
+  {
+   "name": "chant",
+   "t0": 6.82,
+   "t1": 18.82,
+   "scheme": 0
+  },
+  {
+   "name": "prelude",
+   "t0": 18.82,
+   "t1": 65.63,
+   "scheme": 1
+  },
+  {
+   "name": "V1a",
+   "t0": 65.63,
+   "t1": 92.63,
+   "scheme": 1
+  },
+  {
+   "name": "V1b",
+   "t0": 92.63,
+   "t1": 120.34,
+   "scheme": 2
+  },
+  {
+   "name": "C1",
+   "t0": 120.34,
+   "t1": 147.62,
+   "scheme": 3
+  },
+  {
+   "name": "Br1",
+   "t0": 147.62,
+   "t1": 161.34,
+   "scheme": 1
+  },
+  {
+   "name": "V2a",
+   "t0": 161.34,
+   "t1": 189.03,
+   "scheme": 1
+  },
+  {
+   "name": "C2a",
+   "t0": 189.03,
+   "t1": 216.33,
+   "scheme": 2
+  },
+  {
+   "name": "C2b",
+   "t0": 216.33,
+   "t1": 236.79,
+   "scheme": 3
+  },
+  {
+   "name": "Br2",
+   "t0": 236.79,
+   "t1": 330.97,
+   "scheme": 0
+  },
+  {
+   "name": "C3a",
+   "t0": 330.97,
+   "t1": 358.84,
+   "scheme": 3
+  },
+  {
+   "name": "C3b",
+   "t0": 358.84,
+   "t1": 379.24,
+   "scheme": 4
+  },
+  {
+   "name": "tail",
+   "t0": 379.24,
+   "t1": 413.74,
+   "scheme": 4
+  },
+  {
+   "name": "outro",
+   "t0": 413.74,
+   "t1": 430.5,
+   "scheme": 4
+  }
+ ],
+ "imagery": {},
+ "lines": [
+  {
+   "line": 0,
+   "t0": 6.82,
+   "t1": 18.82,
+   "text": "啦啦啦……",
+   "img": [
+    "hum"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "dust"
+   ],
+   "cam": "drift",
+   "pal": 0
+  },
+  {
+   "line": 1,
+   "t0": 65.63,
+   "t1": 72.33,
+   "text": "看不穿 是你失落的魂魄",
+   "img": [
+    "lost"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "dust"
+   ],
+   "cam": "push",
+   "pal": 1,
+   "recallKey": "lost"
+  },
+  {
+   "line": 2,
+   "t0": 72.39,
+   "t1": 79.16,
+   "text": "猜不透 是你瞳孔的颜色",
+   "img": [
+    "eye"
+   ],
+   "layout": "center",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 1
+  },
+  {
+   "line": 3,
+   "t0": 79.16,
+   "t1": 85.91,
+   "text": "一阵风 一场梦 爱如生命般莫测",
+   "img": [
+    "wind"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "cam": "drift",
+   "pal": 1,
+   "special": "slowPan"
+  },
+  {
+   "line": 4,
+   "t0": 85.97,
+   "t1": 92.57,
+   "text": "你的心到底被什么蛊惑",
+   "img": [
+    "heart"
+   ],
+   "layout": "lowerThird",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 1
+  },
+  {
+   "line": 5,
+   "t0": 92.63,
+   "t1": 99.8,
+   "text": "你的轮廓在黑夜之中淹没",
+   "img": [
+    "night"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "rays"
+   ],
+   "cam": "push",
+   "pal": 2
+  },
+  {
+   "line": 6,
+   "t0": 99.86,
+   "t1": 106.54,
+   "text": "看桃花开出怎样的结果",
+   "img": [
+    "petal"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "petal",
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 2
+  },
+  {
+   "line": 7,
+   "t0": 106.6,
+   "t1": 113.41,
+   "text": "看着你抱着我 目光似月色寂寞",
+   "img": [
+    "moon",
+    "cry"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "cam": "drift",
+   "pal": 2
+  },
+  {
+   "line": 8,
+   "t0": 113.47,
+   "t1": 120.28,
+   "text": "就让你在别人怀里快乐",
+   "img": [
+    "letgo"
+   ],
+   "layout": "marginNote",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 2
+  },
+  {
+   "line": 9,
+   "t0": 120.34,
+   "t1": 127.11,
+   "text": "爱着你 像心跳难触摸",
+   "img": [
+    "beat"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "rays"
+   ],
+   "cam": "push",
+   "pal": 3
+  },
+  {
+   "line": 10,
+   "t0": 127.11,
+   "t1": 133.96,
+   "text": "画着你 画不出你的骨骼",
+   "img": [
+    "cry"
+   ],
+   "layout": "cropGiant",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "cam": "push",
+   "pal": 3,
+   "special": "ghostFlash"
+  },
+  {
+   "line": 11,
+   "t0": 133.96,
+   "t1": 140.79,
+   "text": "记着你的脸色 是我等你的执着",
+   "img": [
+    "wait"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "dust"
+   ],
+   "cam": "drift",
+   "pal": 3
+  },
+  {
+   "line": 12,
+   "t0": 140.79,
+   "t1": 147.62,
+   "text": "你是我一首唱不完的歌",
+   "img": [
+    "song"
+   ],
+   "layout": "keySplit",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "rays"
+   ],
+   "cam": "float",
+   "pal": 3
+  },
+  {
+   "line": 13,
+   "t0": 161.34,
+   "t1": 168.48,
+   "text": "看不穿 是你失落的魂魄",
+   "img": [
+    "lost"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "dust"
+   ],
+   "cam": "push",
+   "pal": 1,
+   "recallKey": "lost"
+  },
+  {
+   "line": 14,
+   "t0": 168.48,
+   "t1": 175.24,
+   "text": "猜不透 是你瞳孔的颜色",
+   "img": [
+    "eye"
+   ],
+   "layout": "center",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 1
+  },
+  {
+   "line": 15,
+   "t0": 175.3,
+   "t1": 182.09,
+   "text": "一阵风 一场梦 爱是生命的莫测",
+   "img": [
+    "wind"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "cam": "drift",
+   "pal": 1
+  },
+  {
+   "line": 16,
+   "t0": 182.15,
+   "t1": 188.97,
+   "text": "你的心到底被什么蛊惑",
+   "img": [
+    "heart"
+   ],
+   "layout": "lowerThird",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 1
+  },
+  {
+   "line": 17,
+   "t0": 189.03,
+   "t1": 195.73,
+   "text": "你的轮廓在黑夜之中淹没",
+   "img": [
+    "night"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "rays"
+   ],
+   "cam": "push",
+   "pal": 2
+  },
+  {
+   "line": 18,
+   "t0": 195.79,
+   "t1": 202.65,
+   "text": "看桃花开出怎样的结果",
+   "img": [
+    "petal"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "petal",
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 2
+  },
+  {
+   "line": 19,
+   "t0": 202.65,
+   "t1": 209.48,
+   "text": "看着你抱着我 目光比月色寂寞",
+   "img": [
+    "moon",
+    "cry"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "cam": "drift",
+   "pal": 2
+  },
+  {
+   "line": 20,
+   "t0": 209.48,
+   "t1": 216.33,
+   "text": "就让你在别人怀里快乐",
+   "img": [
+    "letgo"
+   ],
+   "layout": "marginNote",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 2
+  },
+  {
+   "line": 21,
+   "t0": 216.33,
+   "t1": 223.04,
+   "text": "爱着你 像心跳难触摸",
+   "img": [
+    "beat"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "rays"
+   ],
+   "cam": "push",
+   "pal": 3
+  },
+  {
+   "line": 22,
+   "t0": 223.1,
+   "t1": 229.91,
+   "text": "画着你 画不出你的骨骼",
+   "img": [
+    "cry"
+   ],
+   "layout": "cropGiant",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "cam": "push",
+   "pal": 3,
+   "special": "ghostFlash"
+  },
+  {
+   "line": 23,
+   "t0": 229.97,
+   "t1": 236.73,
+   "text": "记着你的脸色 是我等你的执着",
+   "img": [
+    "wait"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "dust"
+   ],
+   "cam": "drift",
+   "pal": 3
+  },
+  {
+   "line": 24,
+   "t0": 236.79,
+   "t1": 248.79,
+   "text": "你是我一首唱不完的歌",
+   "img": [
+    "song"
+   ],
+   "layout": "keySplit",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "rays"
+   ],
+   "cam": "float",
+   "pal": 3
+  },
+  {
+   "line": 25,
+   "t0": 330.97,
+   "t1": 338.19,
+   "text": "你的轮廓在黑夜之中淹没",
+   "img": [
+    "night"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "rays"
+   ],
+   "cam": "push",
+   "pal": 3
+  },
+  {
+   "line": 26,
+   "t0": 338.25,
+   "t1": 344.99,
+   "text": "看桃花开出怎样的结果",
+   "img": [
+    "petal"
+   ],
+   "layout": "center",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "petal",
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 2
+  },
+  {
+   "line": 27,
+   "t0": 345.05,
+   "t1": 351.91,
+   "text": "看着你抱着我 目光比月色寂寞",
+   "img": [
+    "moon",
+    "cry"
+   ],
+   "layout": "block",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "halo",
+    "rays"
+   ],
+   "cam": "drift",
+   "pal": 2
+  },
+  {
+   "line": 28,
+   "t0": 351.97,
+   "t1": 358.78,
+   "text": "就让你在别人怀里快乐",
+   "img": [
+    "letgo"
+   ],
+   "layout": "marginNote",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "dust"
+   ],
+   "cam": "float",
+   "pal": 3
+  },
+  {
+   "line": 29,
+   "t0": 358.84,
+   "t1": 365.55,
+   "text": "爱着你 像心跳难触摸",
+   "img": [
+    "beat"
+   ],
+   "layout": "center",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "rays"
+   ],
+   "cam": "push",
+   "pal": 3
+  },
+  {
+   "line": 30,
+   "t0": 365.61,
+   "t1": 372.36,
+   "text": "画着你 画不出你的骨骼",
+   "img": [
+    "cry"
+   ],
+   "layout": "cropGiant",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "watercolor"
+   ],
+   "cam": "push",
+   "pal": 4,
+   "special": "ghostFlash"
+  },
+  {
+   "line": 31,
+   "t0": 372.42,
+   "t1": 379.18,
+   "text": "记着你的脸色 是我等你的执着",
+   "img": [
+    "wait"
+   ],
+   "layout": "block",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "watercolor",
+    "dust"
+   ],
+   "cam": "drift",
+   "pal": 4
+  },
+  {
+   "line": 32,
+   "t0": 379.24,
+   "t1": 391.24,
+   "text": "我的心只愿为你而割舍",
+   "img": [
+    "letgo",
+    "cry"
+   ],
+   "layout": "fullTrack",
+   "enter": "softIn",
+   "exit": "fade",
+   "bg": [
+    "rays",
+    "petal"
+   ],
+   "cam": "push",
+   "pal": 4
+  },
+  {
+   "line": 33,
+   "t0": 401.74,
+   "t1": 413.74,
+   "text": "啦……",
+   "img": [
+    "hum"
+   ],
+   "layout": "center",
+   "enter": "fadeSlow",
+   "exit": "fade",
+   "bg": [
+    "dust",
+    "petal"
+   ],
+   "cam": "float",
+   "pal": 4
+  }
+ ],
+ "transitions": {},
+ "specials": {}
+}

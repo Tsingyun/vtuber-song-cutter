@@ -23,7 +23,6 @@ import io
 import json
 import os
 import shutil
-import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PATH = os.path.join(ROOT, "config.json")
@@ -188,26 +187,6 @@ def ffprobe():
         if c and (os.path.sep in c or shutil.which(c)):
             return c
     return "ffprobe"
-
-
-def runtime():
-    """外部可执行文件与 Node 依赖路径（env → config.json → 内置探测）。
-
-    原先散落在 tools/*.py 里的路径解析现收敛到这里，换机器只改配置或环境变量。
-    """
-    node = ""
-    for c in node_candidates():
-        if c and (os.path.sep in c or shutil.which(c)):
-            node = c
-            break
-    return {
-        "ffmpeg": os.environ.get("SONGCUT_FFMPEG") or ffmpeg(),
-        "ffprobe": os.environ.get("SONGCUT_FFPROBE") or ffprobe(),
-        "node": node or "node",
-        "node_path": os.environ.get("SONGCUT_NODE_PATH") or node_modules_path() or "",
-        "python": sys.executable,
-        "root": ROOT,
-    }
 
 
 def describe():

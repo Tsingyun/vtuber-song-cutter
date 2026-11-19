@@ -1,0 +1,156 @@
+{
+  "natianxiayule": {
+    "abs_start": 5787.8,
+    "anchor_offsets": [
+      5787.64,
+      5787.82,
+      5788.09,
+      5786.01,
+      5786.49,
+      5788.27,
+      5787.8
+    ],
+    "offset_spread": 2.26,
+    "official_duration": 223.0,
+    "opening_rms_0_5_to_2_5s": 0.00125,
+    "opening_ok": false,
+    "out_probe": {
+      "scan_from": 5965.8,
+      "official_end_pred": 6010.8,
+      "quiet_runs": [
+        {
+          "t0": 42.85,
+          "t1": 43.35,
+          "abs": 6008.65
+        },
+        {
+          "t0": 43.4,
+          "t1": 44.7,
+          "abs": 6009.2
+        },
+        {
+          "t0": 44.75,
+          "t1": 46.5,
+          "abs": 6010.55
+        },
+        {
+          "t0": 48.7,
+          "t1": 49.1,
+          "abs": 6014.5
+        },
+        {
+          "t0": 52.45,
+          "t1": 53.6,
+          "abs": 6018.25
+        },
+        {
+          "t0": 55.7,
+          "t1": 56.0,
+          "abs": 6021.5
+        },
+        {
+          "t0": 56.6,
+          "t1": 56.9,
+          "abs": 6022.4
+        },
+        {
+          "t0": 57.2,
+          "t1": 57.55,
+          "abs": 6023.0
+        },
+        {
+          "t0": 58.4,
+          "t1": 58.8,
+          "abs": 6024.2
+        }
+      ],
+      "chosen": {
+        "abs": 6010.55,
+        "local_t": 44.75,
+        "len_s": 1.75
+      }
+    }
+  },
+  "yiyangdeyueguang": {
+    "abs_start": 6291.77,
+    "anchor_offsets": [
+      6291.6,
+      6291.77,
+      6291.95
+    ],
+    "offset_spread": 0.35,
+    "official_duration": 240.386,
+    "opening_rms_0_5_to_2_5s": 0.00696,
+    "opening_ok": false,
+    "out_probe": {
+      "scan_from": 6487.156,
+      "official_end_pred": 6532.156,
+      "quiet_runs": [
+        {
+          "t0": 38.65,
+          "t1": 39.25,
+          "abs": 6525.81
+        },
+        {
+          "t0": 39.4,
+          "t1": 40.2,
+          "abs": 6526.56
+        },
+        {
+          "t0": 42.55,
+          "t1": 42.85,
+          "abs": 6529.71
+        },
+        {
+          "t0": 42.9,
+          "t1": 43.2,
+          "abs": 6530.06
+        }
+      ],
+      "chosen": {
+        "abs": 6530.06,
+        "local_t": 42.9,
+        "len_s": 0.3
+      }
+    }
+  },
+  "xiageluokoujian": {
+    "abs_start": 6698.61,
+    "anchor_offsets": [
+      6698.43,
+      6698.58,
+      6698.65,
+      6698.72
+    ],
+    "offset_spread": 0.29,
+    "official_duration": 210.373,
+    "opening_rms_0_5_to_2_5s": 0.09681,
+    "opening_ok": true,
+    "out_probe": {
+      "scan_from": 6863.983,
+      "official_end_pred": 6908.983,
+      "quiet_runs": [
+        {
+          "t0": 40.0,
+          "t1": 67.65,
+          "abs": 6903.98
+        },
+        {
+          "t0": 68.1,
+          "t1": 68.5,
+          "abs": 6932.08
+        },
+        {
+          "t0": 68.8,
+          "t1": 69.35,
+          "abs": 6932.78
+        }
+      ],
+      "chosen": {
+        "abs": 6903.98,
+        "local_t": 40.0,
+        "len_s": 27.65
+      }
+    }
+  }
+}

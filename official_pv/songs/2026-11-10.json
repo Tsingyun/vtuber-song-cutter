@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-10",
+  "source_video": "D:/录播/25788785-岁己SUI/2026-11-10/录制-25788785-20261110-201630-486-陪你这个猪过周二！.mp4",
+  "source_spec": "1920x1080 / 60fps / HEVC + AAC / 22416.950 s",
+  "cut_method": "ASR onset anchors from the 11-10 SRT (D:/岁己直播自动总结/SRT/) cross-checked against official LRC; median offset per song. Out-point from a -68 dB / -180 dB digital-silence valley measured on the real PCM. Dead-air / whisper-quiet heads dropped by shifting abs_start, LRC, acts, live windows and duration together.",
+  "whitelist": [
+    "natianxiayule",
+    "yiyangdeyueguang",
+    "xiageluokoujian"
+  ],
+  "songs": {
+    "natianxiayule": {
+      "file": "【岁己SUI】那天下雨了【20261110歌切】",
+      "abs_start": 5791.2,
+      "abs_end": 6011.0,
+      "duration": 219.8,
+      "evidence": "7 ASR anchors vs official LRC (spread 2.26 s) -> 5787.80; 0.5-3.4 s digital dead air (-49..-60 dB) -> start advanced 3.40 s and LRC/acts/live/duration shifted -3.40 s together; out 6011.00 = -114 dB digital silence before the 6012 s speech. Live length 219.80 s vs official 223 s."
+    },
+    "yiyangdeyueguang": {
+      "file": "【岁己SUI】一样的月光【20261110歌切】",
+      "abs_start": 6296.77,
+      "abs_end": 6525.6,
+      "duration": 228.83,
+      "evidence": "3 ASR anchors vs official LRC (spread 0.35 s) -> 6291.77. SRT 首句「倔强的表情／怎么看得我越来越心慌」判定为徐佳莹 2009 原创版，不是苏芮《搭错车》版；成片标原唱 徐佳莹。0.5 s 处 -67 dB 谷 + 15 s 轻钢琴前奏导致开头 RMS 0.0070 < 0.008 门槛 -> start advanced 5.00 s, whole timeline shifted -5.00 s. out 6525.60 = -62 dB fade-out before the 6526 s speech; live length 228.83 s vs official 240.386 s (尾奏提前收 6.6 s)."
+    },
+    "xiageluokoujian": {
+      "file": "【岁己SUI】下个，路口，见【20261110歌切】",
+      "abs_start": 6698.61,
+      "abs_end": 6904.0,
+      "duration": 205.39,
+      "evidence": "4 ASR anchors vs official LRC (spread 0.29 s) -> 6698.61; opening RMS 0.0968 (healthy, no head shift). out 6904.00 = -180 dB absolute digital silence lasting 27.6 s until the 6931.5 s speech; live length 205.39 s vs official 210.373 s (尾奏提前收 5.0 s)."
+    }
+  }
+}

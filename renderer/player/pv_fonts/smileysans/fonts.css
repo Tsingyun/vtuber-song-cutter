@@ -1,0 +1,9 @@
+/* Smiley Sans —— 由 tools/pv_fetch_cjk.py 生成，勿手改。 */
+/* 唯一字重（oblique 是字形本身斜，不是合成） */
+@font-face {
+  font-family: 'Smiley Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(smileysans/SmileySans-Oblique.woff2) format('woff2');
+}

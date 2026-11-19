@@ -1,0 +1,41 @@
+{
+ "id": "S_xiageluokoujian",
+ "key": "high",
+ "ramp": [
+  [
+   0.0,
+   "#574D5D"
+  ],
+  [
+   0.3,
+   "#83416D"
+  ],
+  [
+   0.6,
+   "#F06FA8"
+  ],
+  [
+   0.85,
+   "#FAC3DB"
+  ],
+  [
+   1.0,
+   "#FFFFFF"
+  ]
+ ],
+ "duo": [
+  [
+   0.0,
+   "#63C9DE"
+  ],
+  [
+   0.5,
+   "#8D4572"
+  ],
+  [
+   1.0,
+   "#FFF0F6"
+  ]
+ ],
+ "note": "per-film gradient map; appended to the LUT atlas by core/main.js"
+}

@@ -350,6 +350,13 @@ python -m songcut.qc --mp4 成片.mp4 --src-audio 录播.mp4 --src-ss 5814
 - [`docs/architecture.md`](docs/architecture.md) —— 架构与依赖解耦方案
 - [`docs/dependencies.md`](docs/dependencies.md) —— 链路逐环依赖分析、去 ASR 可行性
 - [`docs/transcript-pipeline.md`](docs/transcript-pipeline.md) —— 转写接入设计（上游优先）
+- [`docs/integration-pvlink.md`](docs/integration-pvlink.md) —— 歌切产物与文字 PV 的接入层
+  （`songcut/pvlink.py`：切点/原唱/歌词/录播源/画框几何的唯一读口）
+- [`docs/mv-graph.md`](docs/mv-graph.md) —— 统一时间轴与统一图层描述
+- [`docs/fig-art.md`](docs/fig-art.md) —— 立绘人物层：文字穿过人物的特效与选图判据
+  （`songcut/mvgraph.py`：九类图层、帧级时间基准、静默错校验；`pvlink.py graph|check`）
+- [`docs/z-runtime.md`](docs/z-runtime.md) —— 把成片整片交给 Vocaloid-Style MV Pipeline 渲染
+  （`pv_to_z.py`：以上游 `timeline.js` 为母版，只换切点表与配色脚本；`pv_z_render.py`：分段出片 + 混音）
 
 ## 许可
 

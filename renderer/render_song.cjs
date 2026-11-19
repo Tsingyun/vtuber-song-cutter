@@ -62,7 +62,7 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
                '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
                '.otf': 'font/otf', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
-/* ffmpeg 定位：调用方传的环境变量优先（工具侧用 config.runtime 解析后传进来），
+/* ffmpeg 定位：调用方传的环境变量优先（pv_one 用 pvlink.runtime 解析后传进来），
    其次 PATH。不再留项目绝对路径 —— 换盘/换机就是「找不到 ffmpeg」。 */
 function pickFfmpeg() {
   const cands = [process.env.FFMPEG_BIN, 'ffmpeg'].filter(Boolean);
@@ -114,7 +114,7 @@ async function cleanupArtifacts() {
   const RES = Number(argOf('res') || job.res || 1);
   const BITRATE = Number(argOf('bitrate') || job.bitrate || 18000000);
   const FPS = Number(argOf('fps') || job.fps
-    || 60);
+    || (job.storyboard && job.storyboard.meta && job.storyboard.meta.fps) || 60);
   const ENCODER = argOf('encoder') || job.encoder || (RES >= 2 ? 'ffmpeg' : 'webcodecs');
   const PRESET = argOf('preset') || job.preset || 'fast';
   /* 视频编码器：h264_nvenc（NVENC 硬编，默认） / libx264（CPU 软编回退）。
@@ -338,6 +338,13 @@ async function cleanupArtifacts() {
     proAnalysis: job.proAnalysis || null,   // 真实音频分析（tools/analyze_music.py），供 pro_bg.js
     bg: job.bg || '',                        // 专业背景层方案：daw | spec | vocal | ''
     live: job.live || null,   // 直播画面序列（head 圆窗 / body 竖幅 / wide 底衬）
+    /* 文字 PV 导演层的产物（tools/pv_direct.py）。只有 index_pv.html 读它；
+       其余页面忽略未知字段，所以传了也不影响 v9/v10。 */
+    storyboard: job.storyboard || null,
+    /* 文字 PV 的成片时长由编排稿决定（样片可能只渲一段），必须显式告诉页面；
+       否则 PV 页会退回「读音频时长」，音频是整首歌 ⇒ 尾巴全是最后一镜的定格。 */
+    pvDur: (job.pvDur != null) ? Number(job.pvDur)
+      : (job.storyboard && job.storyboard.meta && job.storyboard.meta.dur) || null,
     fps: FPS,
     lrcOffset: (job.lrcOffset == null ? null : Number(job.lrcOffset)),  // 歌词时间偏移（测试片段用整份 LRC + 偏移）
     scheme: (job.scheme == null ? null : Number(job.scheme)),  // 标题装饰方案 0~4（自动匹配/手动覆盖）
@@ -353,8 +360,12 @@ async function cleanupArtifacts() {
     /* pageerror 只捕 JS 抛错，捕不到 renderer 进程被杀（OOM/GPU 崩）——那才是 4K 长片最常见的死法 */
     page.on('crash', () => console.error('[pagecrash] 渲染实例的 renderer 进程崩溃（多为内存/GPU 超限）'));
     browser.on('disconnected', () => console.error('[browserclosed] Chromium 连接断开'));
+    /* [pv] 开头的行要放出来：人物装载、字体就绪这些信息只有在渲染日志里才能看见，
+       以前一律静默，于是「成片里一个人都没有」只能靠事后看图发现。 */
     page.on('console', m => {
-      if (m.type() === 'error') console.error('[console.error]', m.text());
+      const t = m.text();
+      if (m.type() === 'error') console.error('[console.error]', t);
+      else if (t.startsWith('[pv]')) console.log(t);
     });
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForFunction('window.HL && HL.ready', null, { timeout: 60000 });
@@ -401,18 +412,22 @@ async function cleanupArtifacts() {
       try {
         return await h.page.evaluate(async ({ s, e, up, q }) => {
           // 歌词排版有跨帧累积状态，每个实例都必须从 f0 顺序快进到自己的起点（绘制仅 0.3 ms/帧）
-          // fast=1：只推排版状态，不画内容（跨帧累积状态必须按序推进）
+          // fast=1：只推排版状态，不装载人物帧（否则这一段会把 48 个镜头的图全解一遍）
           if (typeof window.__fastTo === 'function') window.__fastTo(s);
           else for (let i = 0; i < s; i++) window.__frame(i, { fast: 1 });
-          /* 同一张画的连续输出帧复用同一份 JPEG；不能连 __frame 一起跳过：
-             画布是累加的，跳帧会让上一张画留在屏上。 */
+          /* koma 格缓存：同一张画的 2~3 个输出帧逐字节相同，只需编码一次。
+             实测 4K30/koma12：6950 帧 → 2780 次 toBlob（省掉 60% 的光栅+编码），
+             而发给 ffmpeg 的仍是 6950 份 JPEG（重复份直接复用同一份 Buffer）。
+             ⚠ 不能连 __frame 一起跳过：画布是累加的，跳帧会让上一张画留在屏上。 */
           let ck = null, cbuf = null, enc = 0;
           for (let i = s; i < e; i++) {
-            /* 页面可以返回 Promise；v9/v10 的 __frame 返回 undefined，await 无副作用。 */
+            /* 页面可以返回 Promise：人物层是「按镜头滑动装载」的，换镜头时要把那一镜
+               的直播帧解码完再画（否则会画到回落帧 = 人物闪）。v9/v10 的 __frame
+               返回 undefined，await undefined 无副作用。 */
             const k = (typeof window.__komaOf === 'function') ? window.__komaOf(i) : i;
             let buf;
             if (cbuf && k === ck) {
-              /* 同一张画：不重绘、不编码，只推进进度 */
+              /* 同一张画：不重绘、不编码，只推进进度（见 index_pv.html 的 __tick 注释） */
               if (typeof window.__tick === 'function') window.__tick(i); else await window.__frame(i);
               buf = cbuf;
             } else {

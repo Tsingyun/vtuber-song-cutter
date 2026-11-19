@@ -1,0 +1,173 @@
+{
+  "upstream": "https://github.com/EGSECDA/vocaloid-style-mv-pipeline",
+  "reference_clone": "D:/岁己歌切/_ref/vocaloid-style-mv-pipeline",
+  "reference_clone_head": "13b380dab077d4c8ea956825c9693c720e0c2b91",
+  "verified_at": "2026-11-10T03:12:00",
+  "method": "byte-for-byte sha256 comparison against skills/vocaloid-style-mv/template",
+  "identical_count": 25,
+  "modified_count": 1,
+  "identical": {
+    "engine/core/assets.js": {
+      "upstream": "ca6f66a75af8ce87",
+      "local": "ca6f66a75af8ce87"
+    },
+    "engine/core/draw.js": {
+      "upstream": "4e7b4cd7efd46bf7",
+      "local": "4e7b4cd7efd46bf7"
+    },
+    "engine/core/gl.js": {
+      "upstream": "7633204593dd3f35",
+      "local": "7633204593dd3f35"
+    },
+    "engine/core/main.js": {
+      "upstream": "3f5e6ff5eb2b7a49",
+      "local": "3f5e6ff5eb2b7a49"
+    },
+    "engine/core/trans.js": {
+      "upstream": "b4897fd86fd4f9b4",
+      "local": "b4897fd86fd4f9b4"
+    },
+    "engine/core/util.js": {
+      "upstream": "1e6be8d7551fdb3d",
+      "local": "1e6be8d7551fdb3d"
+    },
+    "engine/scenes/dark.js": {
+      "upstream": "4b20e29e78b30ae6",
+      "local": "4b20e29e78b30ae6"
+    },
+    "engine/scenes/glass.js": {
+      "upstream": "9f116950663198eb",
+      "local": "9f116950663198eb"
+    },
+    "engine/scenes/intro.js": {
+      "upstream": "2925beddfba8c292",
+      "local": "2925beddfba8c292"
+    },
+    "engine/scenes/memory.js": {
+      "upstream": "046d9c68336d0410",
+      "local": "046d9c68336d0410"
+    },
+    "engine/scenes/meta.js": {
+      "upstream": "730b16cfac1952b0",
+      "local": "730b16cfac1952b0"
+    },
+    "engine/scenes/night.js": {
+      "upstream": "049318137efd89ac",
+      "local": "049318137efd89ac"
+    },
+    "engine/scenes/scenes.js": {
+      "upstream": "af24af0d8850e6c2",
+      "local": "af24af0d8850e6c2"
+    },
+    "engine/scenes/typo.js": {
+      "upstream": "ac339c33e218db84",
+      "local": "ac339c33e218db84"
+    },
+    "engine/vertical.js": {
+      "upstream": "0f872eb596266653",
+      "local": "0f872eb596266653"
+    },
+    "tools/build_jizura_bundle.mjs": {
+      "upstream": "36838573c4ef1ed5",
+      "local": "36838573c4ef1ed5"
+    },
+    "tools/jizura_parts.mjs": {
+      "upstream": "6013c63237134c32",
+      "local": "6013c63237134c32"
+    },
+    "tools/jizura_probe.mjs": {
+      "upstream": "02f9c9cc2db932c1",
+      "local": "02f9c9cc2db932c1"
+    },
+    "tools/jz_cuts_at.mjs": {
+      "upstream": "0cd5f9c7f6f85fba",
+      "local": "0cd5f9c7f6f85fba"
+    },
+    "tools/kit_env.mjs": {
+      "upstream": "5e7f1946ab3d9c08",
+      "local": "5e7f1946ab3d9c08"
+    },
+    "tools/preview_style_fx.mjs": {
+      "upstream": "0b65dcdf2376cd0f",
+      "local": "0b65dcdf2376cd0f"
+    },
+    "tools/render_final.mjs": {
+      "upstream": "e34999a932458729",
+      "local": "e34999a932458729"
+    },
+    "tools/stills.mjs": {
+      "upstream": "4a4cb4db4fe82b5b",
+      "local": "4a4cb4db4fe82b5b"
+    },
+    "tools/verify_style_snippets.mjs": {
+      "upstream": "419040305e1bead7",
+      "local": "419040305e1bead7"
+    },
+    "jizura/app/jizura_adapter.js": {
+      "upstream": "dade950c1f300c26",
+      "local": "dade950c1f300c26"
+    }
+  },
+  "modified": {
+    "tools/render_frames.mjs": {
+      "upstream": "a458e1123ad3d4e4",
+      "local": "caef34e0d60b091a"
+    }
+  },
+  "missing_from_local": [
+    "engine\\timeline.js",
+    "tools\\alpha_matte.py",
+    "tools\\analyze_audio.py",
+    "tools\\blender_common.py",
+    "tools\\blender_run.py",
+    "tools\\fetch_fonts.py",
+    "tools\\gigafile_upload.mjs",
+    "tools\\imagegen.py",
+    "tools\\jizura_serve.mjs",
+    "tools\\kit_env.py",
+    "tools\\review_sheets.py",
+    "tools\\style_palette_sheet.py",
+    "tools\\transcribe_align_mms.py",
+    "tools\\transcribe_kana.py",
+    "tools\\transcribe_lines.py",
+    "tools\\transcribe_onset_probe.py",
+    "tools\\transcribe_prep.py",
+    "tools\\transcribe_reconcile.py",
+    "tools\\transcribe_score.py",
+    "tools\\transcribe_separate.py",
+    "tools\\transcribe_translation.py",
+    "tools\\transcribe_vocal_activity.py",
+    "tools\\transcribe_whisper.py"
+  ],
+  "local_only": [
+    {
+      "file": "cut.mjs",
+      "sha256_16": "b3df0fcaaf101df2"
+    },
+    {
+      "file": "engine/index.html",
+      "sha256_16": "297b70cb8697bcfd"
+    },
+    {
+      "file": "engine/songcut.timeline.js",
+      "sha256_16": "a747d02dbdeea277"
+    },
+    {
+      "file": "engine/scenes/livewin.js",
+      "sha256_16": "273d8306d6eeb1fc"
+    },
+    {
+      "file": "tools/prepare.py",
+      "sha256_16": "aa4089d7f50bc6ff"
+    },
+    {
+      "file": "tools/audit_official.mjs",
+      "sha256_16": "46154eba764379ac"
+    },
+    {
+      "file": "docs/OFFICIAL_SOURCE_HASHES.json",
+      "sha256_16": "9552a4e2f08a18d7"
+    }
+  ],
+  "note": "engine/core/*.js and 8 official engine/scenes/*.js are upstream files. Files listed under modified/local_only are our documented patches or new orchestration code."
+}

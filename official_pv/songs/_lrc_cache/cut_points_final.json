@@ -1,0 +1,20 @@
+{
+  "natianxiayule": {
+    "abs_start": 5791.2,
+    "abs_end": 6011.0,
+    "duration": 219.8,
+    "lrc_offset": 3.4
+  },
+  "yiyangdeyueguang": {
+    "abs_start": 6296.77,
+    "abs_end": 6525.6,
+    "duration": 228.83,
+    "lrc_offset": 5.0
+  },
+  "xiageluokoujian": {
+    "abs_start": 6698.61,
+    "abs_end": 6904.0,
+    "duration": 205.39,
+    "lrc_offset": 0.0
+  }
+}

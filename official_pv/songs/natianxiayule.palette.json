@@ -1,0 +1,45 @@
+{
+ "id": "S_natianxiayule",
+ "key": "low",
+ "ramp": [
+  [
+   0.0,
+   "#07121A"
+  ],
+  [
+   0.28,
+   "#0D1E29"
+  ],
+  [
+   0.54,
+   "#1E3B48"
+  ],
+  [
+   0.76,
+   "#8FC7D8"
+  ],
+  [
+   0.92,
+   "#EAF4F6"
+  ],
+  [
+   1.0,
+   "#FFFFFF"
+  ]
+ ],
+ "duo": [
+  [
+   0.0,
+   "#6FA3BE"
+  ],
+  [
+   0.5,
+   "#568190"
+  ],
+  [
+   1.0,
+   "#EAF4F6"
+  ]
+ ],
+ "note": "per-film gradient map; appended to the LUT atlas by core/main.js"
+}

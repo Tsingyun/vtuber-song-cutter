@@ -1,0 +1,48 @@
+{
+  "natianxiayule": {
+    "title": "那天下雨了",
+    "original_artist": "周杰伦",
+    "official_duration": 223.0,
+    "source": "online fetch (lrclib + netease)",
+    "lyrics_source": "lrclib:周杰伦",
+    "info": {
+      "artist": "周董",
+      "netease_duration_ms": null,
+      "lyrics_lines": 50,
+      "lyrics_tail_sec": 207.18,
+      "lyrics_coverage": 0.929,
+      "lyrics_overlap": 0.633,
+      "warn_lyrics_mismatch": null,
+      "warn_artist_mismatch": "网易云候选中未找到原唱（周杰伦）版本，封面与官方时长不可信，已丢弃 dt、需人工指定封面"
+    },
+    "cover": "D:\\岁己歌切\\official_pv\\songs\\_lrc_cache\\_cover_natianxiayule.img",
+    "lrc_file": "D:\\岁己歌切\\official_pv\\songs\\natianxiayule.lrc",
+    "lines": 50,
+    "first_line": "[00:03.37]La-la-la-la, la-la-la, la-la-la-la",
+    "last_line": "[03:27.18]我绝不再转身离开"
+  },
+  "yiyangdeyueguang": {
+    "title": "一样的月光",
+    "original_artist": "徐佳莹",
+    "official_duration": 240.386,
+    "source": "A-side vetted cache (read-only copy)",
+    "lyrics_source": "netease:一样的月光(徐佳莹)",
+    "cover": "D:\\岁己歌切\\official_pv\\songs\\_lrc_cache\\_cover_yiyangdeyueguang.img",
+    "lrc_file": "D:\\岁己歌切\\official_pv\\songs\\yiyangdeyueguang.lrc",
+    "lines": 42,
+    "first_line": "[00:15.91]倔强的表情",
+    "last_line": "[03:32.51]让疯狂的爱情占据我的 窗"
+  },
+  "xiageluokoujian": {
+    "title": "下个, 路口, 见",
+    "original_artist": "李宇春",
+    "official_duration": 210.373,
+    "source": "A-side vetted cache (read-only copy)",
+    "lyrics_source": "netease:下个, 路口, 见(李宇春)",
+    "cover": "D:\\岁己歌切\\official_pv\\songs\\_lrc_cache\\_cover_xiageluokoujian.img",
+    "lrc_file": "D:\\岁己歌切\\official_pv\\songs\\xiageluokoujian.lrc",
+    "lines": 34,
+    "first_line": "[00:23.03]刚下的地铁还不算拥挤",
+    "last_line": "[02:54.26]下个路口再见吧"
+  }
+}
