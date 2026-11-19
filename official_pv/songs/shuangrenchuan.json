@@ -1,0 +1,370 @@
+{
+  "id": "shuangrenchuan",
+  "title": "双人船",
+  "titleSub": "SHUANG REN CHUAN",
+  "artist": "ChiliChill",
+  "credit": "词曲 ChiliChill · 2022《每到夜里我就很饿》",
+  "date": "2026-11-18",
+  "absStart": 7287.8,
+  "absEnd": 7502.3,
+  "duration": 214.5,
+  "bpm": 130,
+  "lrc": "analysis/lyrics_mv.lrc",
+  "thesis": "无风的浅海 · 一条只坐得下两个人的旧木船。全片是「等」：水面几乎不动，只有两道桨痕并排；等到最后，另一道痕始终没出现。",
+  "palette": {
+    "void": "#0B1418",
+    "ink": "#14252B",
+    "mid": "#2C4A50",
+    "glow": "#F4FBFB",
+    "accent": "#9BD6D2",
+    "warm": "#E8B27A",
+    "gold": "#DCC48A",
+    "cold": "#7FB3B8"
+  },
+  "grad": [
+    [
+      0,
+      "#EAF4F3"
+    ],
+    [
+      0.42,
+      "#BBDCD9"
+    ],
+    [
+      0.8,
+      "#7FAFB2"
+    ],
+    [
+      1,
+      "#F6FCFB"
+    ]
+  ],
+  "glyphs": [
+    "船",
+    "桨",
+    "海",
+    "等",
+    "风",
+    "水",
+    "伴",
+    "双"
+  ],
+  "tunnelWords": [
+    "我独自撑一只双人的船",
+    "心海倒是常年无浪",
+    "等一个人来坐我的船",
+    "摇摇晃晃的不安",
+    "愿你不会为难",
+    "与我为伴"
+  ],
+  "typeLines": [
+    "双人船",
+    "与我为伴"
+  ],
+  "motifs": [
+    "双桨",
+    "并排的水痕",
+    "船坞木纹",
+    "薄雾",
+    "空白纸边"
+  ],
+  "live": [],
+  "lookDefault": {
+    "boil": 0.6,
+    "bloom": 0.46,
+    "bloomThreshold": 0.9,
+    "grain": 0.036,
+    "vignette": 0.14,
+    "lutMix": 0.08
+  },
+  "head_rms_min": 0.005,
+  "lrcOffset": 0,
+  "timeline_note": "切点来自 11-18 直播：数字静音段 7286.84~7288.58 取中点 7287.80；LRC 首句 14.62 s；出点 7502.30 落在尾奏后的说话之前。歌词取网易云完整版（34 行，含重复段），制作名单 5 行已剔除。",
+  "direction": {
+    "seed": 20261119,
+    "structure": {
+      "mode": "auto",
+      "pattern": [
+        "intro",
+        "verse",
+        "pre",
+        "chorus",
+        "verse",
+        "chorus",
+        "outro"
+      ],
+      "weights": {
+        "verse": 1.0,
+        "pre": 0.62,
+        "chorus": 1.15,
+        "bridge": 0.6,
+        "climax": 0.85
+      },
+      "base": {
+        "intro": 0.2,
+        "verse": 0.38,
+        "pre": 0.56,
+        "chorus": 0.7,
+        "bridge": 0.3,
+        "climax": 0.86,
+        "outro": 0.22
+      },
+      "jitter": 0.05,
+      "density": 2,
+      "maxHold": 6.8,
+      "minShot": 0.8,
+      "tailGap": 3.2
+    },
+    "lexicon": {
+      "scenes": {
+        "intro": [
+          "typeCard",
+          "illust",
+          "solid",
+          "titleRiff"
+        ],
+        "verse": [
+          "illust",
+          "jz",
+          "road",
+          "solid"
+        ],
+        "pre": [
+          "tunnel",
+          "illust",
+          "road"
+        ],
+        "chorus": [
+          "jz",
+          "illust",
+          "converge",
+          "afterimage"
+        ],
+        "outro": [
+          "afterimage",
+          "illust",
+          "typeCard"
+        ]
+      },
+      "any": [
+        "dust",
+        "glow",
+        "custom"
+      ],
+      "fx": {
+        "intro": [
+          "dust",
+          "feathers",
+          "custom"
+        ],
+        "verse": [
+          "dust",
+          "grad",
+          "rain",
+          "custom"
+        ],
+        "pre": [
+          "feathers",
+          "glow",
+          "custom"
+        ],
+        "chorus": [
+          "glow",
+          "feathers",
+          "custom",
+          "dust"
+        ],
+        "outro": [
+          "dust",
+          "feathers",
+          "grad",
+          "custom"
+        ]
+      },
+      "trans": [
+        "xfade",
+        "iris",
+        "zoom",
+        "slices",
+        "flash",
+        "cut",
+        "wipe",
+        "push"
+      ],
+      "recipes": [
+        "ripples",
+        "paperFiber",
+        "bokehOrbs",
+        "breathFog",
+        "edgeBloom",
+        "scanlines"
+      ]
+    },
+    "type": {
+      "styles": [
+        "mint",
+        "paper",
+        "specimen"
+      ],
+      "schemes": "light",
+      "plans": 7,
+      "centerDir": "lr",
+      "fx": {
+        "motion": 0.42,
+        "glitch": 0.12,
+        "chroma": 0.24,
+        "decor": 0.3,
+        "density": 0.34,
+        "texture": 0.72,
+        "flash": false,
+        "koma": 12,
+        "hud": "off",
+        "bgSwitch": 0.18
+      },
+      "deny": {
+        "decor": {
+          "add": [
+            "qrBlock",
+            "cursorClick",
+            "notifBell"
+          ]
+        },
+        "bg": {
+          "add": [
+            "triTess",
+            "tornPaper",
+            "marble",
+            "paperCut"
+          ]
+        }
+      }
+    },
+    "grade": {
+      "lutPool": [
+        "day",
+        "dawn",
+        "S_shuangrenchuan"
+      ],
+      "base": {
+        "boil": 0.6,
+        "bloom": 0.46,
+        "bloomThreshold": 0.9,
+        "grain": 0.036,
+        "vignette": 0.14,
+        "lutMix": 0.08
+      },
+      "exposure": 0.34,
+      "bloomCurve": [
+        0.34,
+        0.52
+      ],
+      "grainCurve": [
+        0.03,
+        0.045
+      ],
+      "vignetteCurve": [
+        0.1,
+        0.2
+      ],
+      "lutMixCurve": [
+        0.06,
+        0.16
+      ],
+      "caBoost": 0.8,
+      "flashOnSection": false,
+      "shake": 0.7
+    },
+    "opening": "typeCard",
+    "ending": "solid",
+    "axes": {
+      "world": "无风的浅海与旧木船坞 · 水面反光 / 船桨 / 木纹",
+      "timeArc": "清晨薄雾 → 正午白亮 → 退潮后的空水面",
+      "key": "海盐高调（白得发灰，阴影里留着一点冷水色）",
+      "palette": "海盐青白 #F4FBFB/#9BD6D2 + 一点暖沙 #E8B27A",
+      "motif": "双桨与并排的两道水痕（另一道始终没有）",
+      "material": "水彩晕染 + 细纸纹，边缘留白、不描硬边",
+      "role": "独自坐在船头、把桨留给别人的少女"
+    },
+    "char": {
+      "note": "校服全身（5）＝「坐船的人」开场与尾段；校服半身（2）＝「等的那一段」中段长间奏。零遮挡：三个窗口都落在无词区。",
+      "zoneW": 0.36,
+      "items": [
+        {
+          "img": "assets/char/shuangrenchuan_sailor.png",
+          "t0": 0.4,
+          "t1": 13.6,
+          "form": "full",
+          "side": "center",
+          "h": 1010,
+          "y": 1150,
+          "stage": {
+            "plate": "a",
+            "zoomFrom": 1.04,
+            "zoomTo": 1.0,
+            "vignette": 0.18,
+            "ground": {
+              "color": "#E8F2F1",
+              "h": 90,
+              "a": 0.42,
+              "sheen": "#FFFFFF",
+              "sheenY": 4,
+              "sheenH": 180,
+              "sheenA": 0.05
+            },
+            "post": {
+              "bloom": 0.3,
+              "bloomThreshold": 0.94
+            }
+          }
+        },
+        {
+          "img": "assets/char/shuangrenchuan_bust.png",
+          "t0": 81.2,
+          "t1": 97.6,
+          "form": "bust",
+          "side": "center",
+          "h": 470,
+          "y": 1180,
+          "stage": {
+            "plate": "b",
+            "zoomFrom": 1.08,
+            "zoomTo": 1.02,
+            "vignette": 0.16,
+            "post": {
+              "bloom": 0.28,
+              "bloomThreshold": 0.93
+            }
+          }
+        },
+        {
+          "img": "assets/char/shuangrenchuan_sailor.png",
+          "t0": 190.2,
+          "t1": 204.4,
+          "form": "full",
+          "side": "center",
+          "h": 960,
+          "y": 1210,
+          "stage": {
+            "plate": "c",
+            "zoomFrom": 1.1,
+            "zoomTo": 1.01,
+            "vignette": 0.2,
+            "ground": {
+              "color": "#DDEBEA",
+              "h": 100,
+              "a": 0.46,
+              "sheen": "#FFFFFF",
+              "sheenY": 4,
+              "sheenH": 200,
+              "sheenA": 0.045
+            },
+            "post": {
+              "bloom": 0.32,
+              "bloomThreshold": 0.94
+            }
+          }
+        }
+      ]
+    }
+  }
+}

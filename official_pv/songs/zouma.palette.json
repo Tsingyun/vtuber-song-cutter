@@ -1,0 +1,45 @@
+{
+ "id": "S_zouma",
+ "key": "low",
+ "ramp": [
+  [
+   0.0,
+   "#04070D"
+  ],
+  [
+   0.28,
+   "#0A1220"
+  ],
+  [
+   0.54,
+   "#16283C"
+  ],
+  [
+   0.76,
+   "#7FA8C8"
+  ],
+  [
+   0.92,
+   "#E9F1F8"
+  ],
+  [
+   1.0,
+   "#FFFFFF"
+  ]
+ ],
+ "duo": [
+  [
+   0.0,
+   "#6E93B4"
+  ],
+  [
+   0.5,
+   "#4A6882"
+  ],
+  [
+   1.0,
+   "#E9F1F8"
+  ]
+ ],
+ "note": "per-film gradient map; appended to the LUT atlas by core/main.js"
+}

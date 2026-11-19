@@ -2316,3 +2316,16 @@ python tools/pv_figcomp.py --spec fig_spec.json --jz jz_v4 \
 | **"第二个形式不要出现"** | 指**对话范围**：本会话的回复中不主动提及、不讨论、不渲染另一种形式；用户主动问到才答。 |
 | **文件纪律（硬约束）** | 这是范围约束，**不是删除指令**。另一条产线的文件一律不删、不改、不清理、不搬动——§134 的误删是前车之鉴。§135 的禁区清单继续有效。 |
 | **规则状态** | §135 继续有效；§136 作废、不执行；§134 事故记录保留作为纪律提醒。 |
+
+## 138. 11-18 三首歌切（术力口 PV 线，2026-11-19 出片）
+
+| 项 | 内容 |
+|---|---|
+| **产出** | `cuts/2026-11-18/official/` 三首：走马 235.56s / 7067 帧 / 34.26 Mb/s / 1009 MB；双人船 214.5s / 6435 帧 / 18.84 Mb/s / 505 MB；与你有关 218.7s / 6561 帧 / 29.96 Mb/s / 819 MB。全部 1920×1080@30/1，走 `official_pv/cut.mjs --date 2026-11-18`，三首两两差异 12/12 轴、审计 24/24 PASS。 |
+| **未使用唱片封面** | 用户本次明确要求走手书 PV 形式、立绘用他提供的图；三首 `char` 全部落在无词区，`live` 空、`livePct=0%`。 |
+| **引擎修复 1** | `tools/render_frames.mjs`：本机 playwright-core 的 `page.evaluate` **只收 1 个参数**，`(fn, null, {timeout})` 会抛 `Too many arguments`（`assertMaxArguments`）。改成 Node 侧 `raceTimeout(page.evaluate(fn), ms, label)`，不再依赖不存在的 helper 超时。 |
+| **引擎修复 2** | `engine/songcut.timeline.js`：`titleRiff` 分支引用 `FILM_GLYPHS`/`FILM_HUD`（`const` 声明在 `setup()` 内、`sceneArgs` 在模块作用域）→ 开场即 TDZ ReferenceError。改成就地按 `C.cfg.title` 重算 glyphs / hud。 |
+| **工具新增** | `prepare.py` 的「开头响度闸门」可由 `--head-rms-min` 或单曲 `head_rms_min` 覆盖（走马 0.006 / 双人船 0.005 是安静前奏 0.0064~0.0081，不是死区）；新增 `tools/fetch_lrc_1118.py`（SRT 窗口文本当 ref_text 抓官方 LRC）、`gen_luts.py`（从 `palettes.json` 无损重建 LUT PNG）、`fetch_fonts.py`（37 个 OFL 字体）、`list_scene_assets.py`（列每个 `Z.scene()` 的 `preload`）。 |
+| **原唱核实（联网）** | 走马＝陈粒，词曲陈粒，2015-02-02《如也》✅；双人船＝ChiliChill，词曲 ChiliChill，**2022-01-07《每到夜里我就很饿》**（配置里曾错写「ChiliChill乐团 · 2025」，已改）；与你有关＝**词/演唱 泠鸢yousa、曲 郑伟**，2021《时光代理人 动画原声带》（曾错写「词曲/演唱 泠鸢yousa」，已改）。三首 `[ar:]` 与画面左下角「歌名 / 原唱」均正确。 |
+| **文字纪律** | `typeLines` / `tunnelWords` 共 24 条装饰短语，原先是我自撰的诗意短句（「灯是别人的」「只坐得下一个」「门缝里的光」…），已**全部替换成该曲 LRC 原文的真实片段**，并用脚本断言每条都 `in` 官方 LRC 文本（24/24 命中、0 例外）。术力口 PV 的大字装饰也是「歌词」，不得自创。 |
+| **入库策略** | 新增 `official_pv/.gitignore`：`audio/`、`analysis/`、`render/`、`_tmp/`、`engine/fonts/*.ttf`、`assets/bg|char/`、`assets/style/luts/` 不入库（字体 248 MB、底版 23 MB、立绘 15 MB、音频 41 MB）。配置 / LRC / palette / 工具 / 文档照常入库。 |

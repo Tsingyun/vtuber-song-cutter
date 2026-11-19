@@ -1,0 +1,41 @@
+{
+ "id": "S_shuangrenchuan",
+ "key": "high",
+ "ramp": [
+  [
+   0.0,
+   "#536165"
+  ],
+  [
+   0.3,
+   "#5E898A"
+  ],
+  [
+   0.6,
+   "#9BD6D2"
+  ],
+  [
+   0.85,
+   "#D5EEED"
+  ],
+  [
+   1.0,
+   "#FFFFFF"
+  ]
+ ],
+ "duo": [
+  [
+   0.0,
+   "#7FB3B8"
+  ],
+  [
+   0.5,
+   "#649091"
+  ],
+  [
+   1.0,
+   "#F4FBFB"
+  ]
+ ],
+ "note": "per-film gradient map; appended to the LUT atlas by core/main.js"
+}

@@ -1,0 +1,18 @@
+# ---- 派生产物：每次 prepare / render 重新生成，不入库 ----
+audio/
+analysis/
+render/
+_tmp/
+
+# ---- 大体积二进制：字体（OFL 许可证文本仍然入库，只有字体文件本体忽略）----
+engine/fonts/*.ttf
+engine/fonts/*.otf
+engine/fonts/*.woff2
+
+# ---- 程序化底版 / LUT / 用户提供的立绘 ----
+# assets/bg/  = prepare.py paint_plates() 生成的 1920x1080 plate
+# assets/style/luts/ = tools/gen_luts.py 从 palettes.json 重建的 256x1 渐变行
+# assets/char/ = 用户提供的第三方美术立绘（私有素材，与根 .gitignore 的 _private_assets/ 同策）
+assets/bg/
+assets/char/
+assets/style/luts/

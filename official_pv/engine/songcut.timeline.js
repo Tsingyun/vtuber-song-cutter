@@ -199,14 +199,31 @@
             // intro.js:345 used to hardcode '残光 / ZANKŌ' here, with no way to override it
             hudTitle: C.cfg.titleSub ? `${C.cfg.title} / ${C.cfg.titleSub}` : C.cfg.title },
           post: S2 => Object.assign(Z.INTRO.post.ember(S2), { lutA: act.lut, lutMix: C.lutMix }) };
-      case 'titleRiff':
+      case 'titleRiff': {
         // upstream titlePreload() wants a character AND a sky plate (it falls back to
         // assets/char/REF_master.png + assets/bg/bg_sky.png, neither of which exists here).
         // The four corner strings and the two monumental glyphs are 残光's by default -- pass
         // this film's own, and disable the Japanese ruby (it read ざん/こう under our glyphs).
+        //
+        // FILM_GLYPHS / FILM_HUD are declared with `const` INSIDE setup(), while sceneArgs lives
+        // at module scope -- referring to them here is a TDZ ReferenceError the moment a film
+        // opens on titleRiff (11-18 《与你有关》 hit it; the other two films never did because
+        // neither used this scene). Recomputed locally from C.cfg instead of widening the scope.
+        const cs = [...String(C.cfg.title)].filter(ch => /[\u3400-\u9FFF]/.test(ch)).slice(0, 2);
+        const glyphs = cs.length === 2 ? cs : ['残', '光'];
+        const mmss = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.round(s % 60)).padStart(2, '0');
+        const hud = {
+          title: `「${C.cfg.title}」${C.cfg.titleSub ? ' ' + C.cfg.titleSub : ''}`,
+          when: C.cfg.date ? `${String(C.cfg.date).replace(/-/g, '.')} / LIVE` : '',
+          bpm: C.cfg.bpm ? `BPM ${Math.round(C.cfg.bpm)} · 4/4` : '',
+          geo: '',
+          place: C.cfg.artist ? `原唱 ${C.cfg.artist}` : '',
+          len: mmss(C.cfg.duration),
+        };
         return { args: { seed: 11 + i, whiteAt: 0.5, grain: 0.5, variant: C.mode('titleVar', ['intro']),
             char: C.charImg || NO_IMAGE, sky: C.plate('a'),
-            glyphs: FILM_GLYPHS, ruby: false, sub: C.cfg.titleSub || '', hud: FILM_HUD }, lyric: 'none' };
+            glyphs, ruby: false, sub: C.cfg.titleSub || '', hud }, lyric: 'none' };
+      }
 
       // ---------------------------------------------------------------- typo.js
       case 'kanjiSlam':

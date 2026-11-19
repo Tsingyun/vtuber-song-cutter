@@ -1,0 +1,68 @@
+{
+  "zouma": {
+    "title": "走马",
+    "original_artist": "陈粒",
+    "official_duration": 235.555,
+    "source": "online fetch (lrclib + netease)",
+    "lyrics_source": "netease:走马(陈粒)",
+    "info": {
+      "artist": "陈粒",
+      "netease_duration_ms": 235555,
+      "lyrics_lines": 68,
+      "lyrics_tail_sec": 229.07,
+      "lyrics_coverage": 0.972,
+      "lyrics_overlap": 0.746,
+      "warn_lyrics_mismatch": null,
+      "warn_artist_mismatch": null
+    },
+    "cover": "D:\\岁己歌切\\official_pv\\songs\\_lrc_cache\\_cover_zouma.img",
+    "lrc_file": "D:\\岁己歌切\\official_pv\\songs\\zouma.lrc",
+    "lines": 68,
+    "first_line": "[00:13.726]窗外雨都停了",
+    "last_line": "[03:49.069]醒了"
+  },
+  "shuangrenchuan": {
+    "title": "双人船",
+    "original_artist": "ChiliChill",
+    "official_duration": 214.498,
+    "source": "online fetch (lrclib + netease)",
+    "lyrics_source": "lrclib:ChiliChill",
+    "info": {
+      "artist": "ChiliChill乐团",
+      "netease_duration_ms": 214498,
+      "lyrics_lines": 28,
+      "lyrics_tail_sec": 189.81,
+      "lyrics_coverage": 0.885,
+      "lyrics_overlap": 0.365,
+      "warn_lyrics_mismatch": null,
+      "warn_artist_mismatch": null
+    },
+    "cover": "D:\\岁己歌切\\official_pv\\songs\\_lrc_cache\\_cover_shuangrenchuan.img",
+    "lrc_file": "D:\\岁己歌切\\official_pv\\songs\\shuangrenchuan.lrc",
+    "lines": 28,
+    "first_line": "[00:14.62]我独自撑一只双人的船",
+    "last_line": "[03:09.81]与我为伴"
+  },
+  "yuniyouguan": {
+    "title": "与你有关",
+    "original_artist": "泠鸢yousa",
+    "official_duration": 221.006,
+    "source": "online fetch (lrclib + netease)",
+    "lyrics_source": "lrclib:泠鸢yousa",
+    "info": {
+      "artist": "泠鸢yousa",
+      "netease_duration_ms": 221006,
+      "lyrics_lines": 38,
+      "lyrics_tail_sec": 206.94,
+      "lyrics_coverage": 0.936,
+      "lyrics_overlap": 0.541,
+      "warn_lyrics_mismatch": null,
+      "warn_artist_mismatch": null
+    },
+    "cover": "D:\\岁己歌切\\official_pv\\songs\\_lrc_cache\\_cover_yuniyouguan.img",
+    "lrc_file": "D:\\岁己歌切\\official_pv\\songs\\yuniyouguan.lrc",
+    "lines": 38,
+    "first_line": "[00:17.54]如果灯下总有人等待",
+    "last_line": "[03:26.94]星星点点都与你有关"
+  }
+}

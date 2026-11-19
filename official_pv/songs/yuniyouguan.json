@@ -1,0 +1,363 @@
+{
+  "id": "yuniyouguan",
+  "title": "与你有关",
+  "titleSub": "YU NI YOU GUAN",
+  "artist": "泠鸢yousa",
+  "credit": "词/演唱 泠鸢yousa · 曲 郑伟 ·《时光代理人》动画原声带 2021",
+  "date": "2026-11-18",
+  "absStart": 8011.3,
+  "absEnd": 8230.0,
+  "duration": 218.7,
+  "bpm": 130,
+  "lrc": "analysis/lyrics_mv.lrc",
+  "thesis": "冬夜的旧公寓楼道 · 一盏没关的灯。全片的光源始终只有那一个，人物走到哪儿它就跟到哪儿；最后她关上门，光留在门外。",
+  "palette": {
+    "void": "#120A0C",
+    "ink": "#241318",
+    "mid": "#48232A",
+    "glow": "#FFF2E8",
+    "accent": "#F2A9B8",
+    "warm": "#F6C98A",
+    "gold": "#E7B778",
+    "cold": "#C98FA0"
+  },
+  "grad": [
+    [
+      0,
+      "#170C10"
+    ],
+    [
+      0.38,
+      "#3A1D24"
+    ],
+    [
+      0.72,
+      "#7A4147"
+    ],
+    [
+      1,
+      "#1A0E12"
+    ]
+  ],
+  "glyphs": [
+    "灯",
+    "门",
+    "暖",
+    "等",
+    "你",
+    "关",
+    "夜",
+    "家"
+  ],
+  "tunnelWords": [
+    "只要你在",
+    "那片天就会蓝",
+    "没有阴霾覆盖",
+    "细细回看都与你有关",
+    "别害怕纷扰的明天",
+    "星星点点都与你有关"
+  ],
+  "typeLines": [
+    "与你有关",
+    "星星点点"
+  ],
+  "motifs": [
+    "一盏没关的灯",
+    "门缝的光",
+    "楼道扶手",
+    "结霜的窗",
+    "钥匙"
+  ],
+  "live": [],
+  "lookDefault": {
+    "boil": 0.8,
+    "bloom": 0.34,
+    "bloomThreshold": 0.86,
+    "grain": 0.062,
+    "vignette": 0.4,
+    "lutMix": 0.1
+  },
+  "lrcOffset": 0,
+  "timeline_note": "切点来自 11-18 直播：LRC 与 SRT 四句互证（斜率 1:1），入点 8011.30、出点按实测尾奏 8230.00（取官方时长会切进说话）。歌词取网易云 37 行，制作名单已剔除。",
+  "direction": {
+    "seed": 20261120,
+    "structure": {
+      "mode": "auto",
+      "pattern": [
+        "intro",
+        "verse",
+        "pre",
+        "chorus",
+        "bridge",
+        "chorus",
+        "climax",
+        "outro"
+      ],
+      "weights": {
+        "verse": 0.95,
+        "pre": 0.55,
+        "chorus": 1.2,
+        "bridge": 0.72,
+        "climax": 0.95
+      },
+      "base": {
+        "intro": 0.24,
+        "verse": 0.36,
+        "pre": 0.5,
+        "chorus": 0.72,
+        "bridge": 0.28,
+        "climax": 0.9,
+        "outro": 0.26
+      },
+      "jitter": 0.04,
+      "density": 3,
+      "maxHold": 7.4,
+      "minShot": 1.05,
+      "tailGap": 2.0
+    },
+    "lexicon": {
+      "scenes": {
+        "intro": [
+          "typeCard",
+          "illust",
+          "road"
+        ],
+        "verse": [
+          "illust",
+          "jz",
+          "solid"
+        ],
+        "pre": [
+          "tunnel",
+          "illust",
+          "ember"
+        ],
+        "chorus": [
+          "jz",
+          "illust",
+          "converge",
+          "afterimage"
+        ],
+        "bridge": [
+          "afterimage",
+          "jz",
+          "illust"
+        ],
+        "climax": [
+          "illust",
+          "jz",
+          "kanjiSlam",
+          "converge"
+        ],
+        "outro": [
+          "afterimage",
+          "solid",
+          "typeCard"
+        ]
+      },
+      "any": [
+        "dust",
+        "glow",
+        "custom"
+      ],
+      "fx": {
+        "intro": [
+          "dust",
+          "glow"
+        ],
+        "verse": [
+          "dust",
+          "grad",
+          "glow"
+        ],
+        "pre": [
+          "glow",
+          "dust",
+          "custom"
+        ],
+        "chorus": [
+          "glow",
+          "embers",
+          "custom",
+          "fireflies"
+        ],
+        "bridge": [
+          "grad",
+          "dust"
+        ],
+        "climax": [
+          "embers",
+          "glow",
+          "custom",
+          "fireflies"
+        ],
+        "outro": [
+          "dust",
+          "glow"
+        ]
+      },
+      "trans": [
+        "xfade",
+        "flash",
+        "ink",
+        "barrier",
+        "cut",
+        "zoom"
+      ],
+      "recipes": [
+        "pollen",
+        "bokehOrbs",
+        "edgeBloom",
+        "dustShaft"
+      ]
+    },
+    "type": {
+      "styles": [
+        "magenta",
+        "rouge",
+        "crimson"
+      ],
+      "schemes": "dark",
+      "plans": 6,
+      "centerDir": "bt",
+      "fx": {
+        "motion": 0.52,
+        "glitch": 0.18,
+        "chroma": 0.3,
+        "decor": 0.44,
+        "density": 0.4,
+        "texture": 0.54,
+        "flash": false,
+        "koma": 12,
+        "hud": "off",
+        "bgSwitch": 0.22
+      },
+      "deny": {
+        "decor": {
+          "add": [
+            "qrBlock",
+            "cursorClick",
+            "notifBell"
+          ]
+        },
+        "bg": {
+          "add": [
+            "triTess",
+            "tornPaper",
+            "marble",
+            "paperCut"
+          ]
+        }
+      }
+    },
+    "grade": {
+      "lutPool": [
+        "dawn",
+        "night",
+        "S_yuniyouguan"
+      ],
+      "base": {
+        "boil": 0.8,
+        "bloom": 0.34,
+        "bloomThreshold": 0.86,
+        "grain": 0.062,
+        "vignette": 0.4,
+        "lutMix": 0.1
+      },
+      "exposure": 0.12,
+      "bloomCurve": [
+        0.22,
+        0.44
+      ],
+      "grainCurve": [
+        0.05,
+        0.08
+      ],
+      "vignetteCurve": [
+        0.26,
+        0.48
+      ],
+      "lutMixCurve": [
+        0.08,
+        0.22
+      ],
+      "caBoost": 1.1,
+      "flashOnSection": false,
+      "shake": 0.85
+    },
+    "opening": "titleRiff",
+    "ending": "jz",
+    "axes": {
+      "world": "冬夜的旧公寓楼道 · 暖黄廊灯 / 结霜的窗 / 扶手与门牌",
+      "timeArc": "傍晚亮灯 → 深夜 → 天亮前最后一段黑",
+      "key": "暖调中低（光只在灯与门缝两处，暗部保留细节不压死）",
+      "palette": "暖粉与旧木 #FFF2E8/#F2A9B8 + 廊灯金 #F6C98A",
+      "motif": "一盏没关的灯：门缝 / 灯罩 / 关灯后留在墙上的余斑",
+      "material": "柔焦摄影 + 细噪点，光晕溢出、边缘发毛",
+      "role": "站在门口回头、手里还攥着钥匙的少女"
+    },
+    "char": {
+      "note": "眼镜笑半身（4）＝「灯下等你」开场；粉外套半身（8）＝「关门前最后一句」尾段。两张都是 16:9 半身，按 h 收窄画布宽度，人物落在 centerFree 的空档里。",
+      "zoneW": 0.36,
+      "items": [
+        {
+          "img": "assets/char/yuniyouguan_lamp.png",
+          "t0": 0.4,
+          "t1": 17.9,
+          "form": "bust",
+          "side": "center",
+          "h": 520,
+          "y": 1190,
+          "stage": {
+            "plate": "a",
+            "zoomFrom": 1.06,
+            "zoomTo": 1.0,
+            "vignette": 0.44,
+            "post": {
+              "bloom": 0.2,
+              "bloomThreshold": 0.92
+            }
+          }
+        },
+        {
+          "img": "assets/char/yuniyouguan_lamp.png",
+          "t0": 101.4,
+          "t1": 122.8,
+          "form": "bust",
+          "side": "center",
+          "h": 500,
+          "y": 1200,
+          "stage": {
+            "plate": "b",
+            "zoomFrom": 1.1,
+            "zoomTo": 1.02,
+            "vignette": 0.46,
+            "post": {
+              "bloom": 0.18,
+              "bloomThreshold": 0.92
+            }
+          }
+        },
+        {
+          "img": "assets/char/yuniyouguan_pink.png",
+          "t0": 208.3,
+          "t1": 217.6,
+          "form": "bust",
+          "side": "center",
+          "h": 470,
+          "y": 1185,
+          "stage": {
+            "plate": "c",
+            "zoomFrom": 1.12,
+            "zoomTo": 1.02,
+            "vignette": 0.5,
+            "post": {
+              "bloom": 0.22,
+              "bloomThreshold": 0.93
+            }
+          }
+        }
+      ]
+    }
+  }
+}

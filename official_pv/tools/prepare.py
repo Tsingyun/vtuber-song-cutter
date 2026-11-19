@@ -51,6 +51,10 @@ def main():
     ap.add_argument('--date', default='', help='session date; defaults to the song config date')
     ap.add_argument('--song', required=True)
     ap.add_argument('--skip-live', action='store_true', help='skip frame extraction (audio/analysis only)')
+    ap.add_argument('--head-rms-min', type=float, default=None,
+                    help='opening 0.5-2.5 s RMS floor; defaults to songs/<id>.json head_rms_min, '
+                         'then 0.008. Lower it ONLY when the head was measured and is a quiet '
+                         'intro, never digital silence')
     a = ap.parse_args()
     sid = a.song
     cfg = json.loads((ROOT / 'songs' / f'{sid}.json').read_text(encoding='utf-8'))
@@ -245,8 +249,17 @@ def main():
     head = mono[int(sr * 0.5):int(sr * 2.5)]
     head_rms = float(np.sqrt(np.mean(head ** 2))) if head.size else 0.0
     print(f'[prepare] opening RMS (0.5-2.5 s): {head_rms:.4f}')
+    # The gate's job is to catch DIGITAL silence, not a deliberately quiet intro. 11-18
+    # 《走马》 opens on a lone guitar figure measured at 0.0064-0.0081 RMS (-43 dBFS, clearly
+    # audible) and the fix is NOT to chop 2 s of intro: the default stays 0.008, a film whose
+    # head was MEASURED and is merely quiet may declare `head_rms_min` in its own config.
+    thr = a.head_rms_min if a.head_rms_min is not None else float(cfg.get('head_rms_min') or 0.008)
+    if head_rms < thr:
+        raise SystemExit(f'OPENING AUDIO IS SILENT (RMS={head_rms:.5f} < {thr}); '
+                         f'check abs_start / lrcOffset')
     if head_rms < 0.008:
-        raise SystemExit(f'OPENING AUDIO IS SILENT (RMS={head_rms:.5f}); check abs_start / lrcOffset')
+        print(f'[prepare] NOTE: head is quiet but not silent (below the default 0.008 gate); '
+              f'accepted via head_rms_min={thr}')
     print(f'[prepare] analysis: {len(beats)} beats, {len(sections)} sections, {n} envelope frames')
 
     # ---- 4. procedural background plates (no AI art, no external images) ------

@@ -357,6 +357,17 @@ async function main() {
   let f1 = a.end != null ? parseTime(a.end, a.fps).frame : null;
 
   const stats = { args: a, workers: [], gpu: null };
+  // page.evaluate() takes exactly one argument in the playwright-core shipped in this
+  // workspace -- a `{ timeout }` third arg throws "Too many arguments" before the page
+  // is even touched. Race the promise on the Node side instead of leaning on a helper
+  // timeout that this build does not have.
+  const raceTimeout = (p, ms, label) => {
+    let t;
+    return Promise.race([
+      p.finally(() => clearTimeout(t)),
+      new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${label} timed out after ${ms} ms`)), ms); }),
+    ]);
+  };
   const openPage = async (w) => {
     const ctx = await browsers[w % browsers.length].newContext({ viewport: { width: a.width, height: a.height }, deviceScaleFactor: 1 });
     await ctx.addInitScript(initScript, cfg);
@@ -365,7 +376,9 @@ async function main() {
     page.on('console', (m) => { if (a.verbose || m.type() === 'error') console.log(`[w${w} ${m.type()}]`, m.text()); });
     const tl = performance.now();
     await page.goto(url, { waitUntil: 'load', timeout: a.timeoutReady });
-    const info = await page.evaluate(async () => { const r = await window.ready; return (r && typeof r === 'object') ? r : null; }, null, { timeout: a.timeoutReady });
+    const info = await raceTimeout(
+      page.evaluate(async () => { const r = await window.ready; return (r && typeof r === 'object') ? r : null; }),
+      a.timeoutReady, 'window.ready');
     const gpu = await page.evaluate(() => {
       const c = document.createElement('canvas'); const g = c.getContext('webgl2') || c.getContext('webgl');
       const e = g && g.getExtension('WEBGL_debug_renderer_info');

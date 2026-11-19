@@ -1,0 +1,396 @@
+{
+  "id": "zouma",
+  "title": "走马",
+  "titleSub": "ZO U MA",
+  "artist": "陈粒",
+  "credit": "词曲 陈粒 · 2015《如也》",
+  "date": "2026-11-18",
+  "absStart": 6759.76,
+  "absEnd": 6995.32,
+  "duration": 235.56,
+  "bpm": 143,
+  "lrc": "analysis/lyrics_mv.lrc",
+  "thesis": "凌晨的环形匝道 · 她坐在护栏上晃腿，看车灯一条河。全片只有一种运动：绕圈。最后一圈绕完，天没亮，人走了。",
+  "palette": {
+    "void": "#04070D",
+    "ink": "#0A1220",
+    "mid": "#16283C",
+    "glow": "#E9F1F8",
+    "accent": "#7FA8C8",
+    "warm": "#F0A34B",
+    "gold": "#D8B26A",
+    "cold": "#6E93B4"
+  },
+  "grad": [
+    [
+      0,
+      "#03060B"
+    ],
+    [
+      0.4,
+      "#0C1724"
+    ],
+    [
+      0.78,
+      "#1B3145"
+    ],
+    [
+      1,
+      "#05090F"
+    ]
+  ],
+  "glyphs": [
+    "走",
+    "马",
+    "环",
+    "灯",
+    "夜",
+    "风",
+    "圈",
+    "远"
+  ],
+  "tunnelWords": [
+    "窗外雨都停了",
+    "屋里灯还黑着",
+    "好景只有片刻",
+    "森林都会凋落",
+    "风吹走云朵",
+    "你就在对岸"
+  ],
+  "typeLines": [
+    "走马",
+    "你就在对岸"
+  ],
+  "motifs": [
+    "环",
+    "车灯",
+    "沥青反光",
+    "护栏",
+    "夜风"
+  ],
+  "live": [],
+  "lookDefault": {
+    "boil": 1.0,
+    "bloom": 0.3,
+    "bloomThreshold": 0.8,
+    "grain": 0.055,
+    "vignette": 0.34,
+    "lutMix": 0.0
+  },
+  "head_rms_min": 0.006,
+  "lrcOffset": 0,
+  "timeline_note": "切点来自 11-18 直播：LRC 首句 13.726 s 反推 + −129 dB 数字静音谷 + 算法 onset 6759.95 三点互证；尾部「浪漫无处消磨」独立复核差 0.11 s。",
+  "direction": {
+    "seed": 20261118,
+    "structure": {
+      "mode": "auto",
+      "pattern": [
+        "intro",
+        "verse",
+        "pre",
+        "chorus",
+        "verse",
+        "chorus",
+        "bridge",
+        "climax",
+        "outro"
+      ],
+      "weights": {
+        "verse": 1.1,
+        "pre": 0.45,
+        "chorus": 1.35,
+        "bridge": 0.7,
+        "climax": 1.0
+      },
+      "base": {
+        "intro": 0.14,
+        "verse": 0.32,
+        "pre": 0.52,
+        "chorus": 0.76,
+        "bridge": 0.26,
+        "climax": 0.96,
+        "outro": 0.18
+      },
+      "jitter": 0.09,
+      "density": 1,
+      "maxHold": 5.2,
+      "minShot": 0.5,
+      "tailGap": 2.6
+    },
+    "lexicon": {
+      "scenes": {
+        "intro": [
+          "typeCard",
+          "converge",
+          "solid"
+        ],
+        "verse": [
+          "road",
+          "illust",
+          "jz",
+          "solid"
+        ],
+        "pre": [
+          "tunnel",
+          "road",
+          "illust"
+        ],
+        "chorus": [
+          "kanjiSlam",
+          "illust",
+          "converge",
+          "ember"
+        ],
+        "bridge": [
+          "afterimage",
+          "ref",
+          "jz"
+        ],
+        "climax": [
+          "kanjiSlam",
+          "converge",
+          "illust",
+          "ember"
+        ],
+        "outro": [
+          "afterimage",
+          "typeCard",
+          "solid"
+        ]
+      },
+      "any": [
+        "dust",
+        "glow",
+        "custom"
+      ],
+      "fx": {
+        "intro": [
+          "dust",
+          "glow"
+        ],
+        "verse": [
+          "dust",
+          "rain",
+          "grad"
+        ],
+        "pre": [
+          "rays",
+          "dust",
+          "custom"
+        ],
+        "chorus": [
+          "embers",
+          "glow",
+          "custom",
+          "rain"
+        ],
+        "bridge": [
+          "grad",
+          "dust",
+          "custom"
+        ],
+        "climax": [
+          "embers",
+          "rays",
+          "custom",
+          "glow"
+        ],
+        "outro": [
+          "dust",
+          "feathers"
+        ]
+      },
+      "trans": [
+        "cut",
+        "xfade",
+        "push",
+        "wipe",
+        "black",
+        "zoom"
+      ],
+      "recipes": [
+        "sweepLines",
+        "speedLines",
+        "sliceGlitch",
+        "scanlines"
+      ]
+    },
+    "type": {
+      "styles": [
+        "noir",
+        "transit",
+        "blueprint"
+      ],
+      "schemes": "dark",
+      "plans": 5,
+      "centerDir": "tb",
+      "fx": {
+        "motion": 0.74,
+        "glitch": 0.22,
+        "chroma": 0.44,
+        "decor": 0.26,
+        "density": 0.58,
+        "texture": 0.66,
+        "flash": false,
+        "koma": 12,
+        "hud": "off",
+        "bgSwitch": 0.34
+      },
+      "deny": {
+        "decor": {
+          "add": [
+            "qrBlock",
+            "cursorClick",
+            "notifBell",
+            "balloonRow"
+          ]
+        },
+        "bg": {
+          "add": [
+            "triTess",
+            "tornPaper",
+            "marble",
+            "paperCut",
+            "asanoha"
+          ]
+        }
+      }
+    },
+    "grade": {
+      "lutPool": [
+        "night",
+        "mono",
+        "S_zouma"
+      ],
+      "base": {
+        "boil": 1.0,
+        "bloom": 0.24,
+        "bloomThreshold": 0.84,
+        "grain": 0.075,
+        "vignette": 0.42,
+        "lutMix": 0.06
+      },
+      "exposure": 0,
+      "bloomCurve": [
+        0.14,
+        0.34
+      ],
+      "grainCurve": [
+        0.06,
+        0.092
+      ],
+      "vignetteCurve": [
+        0.3,
+        0.52
+      ],
+      "lutMixCurve": [
+        0.04,
+        0.18
+      ],
+      "caBoost": 1.35,
+      "flashOnSection": false,
+      "shake": 1.15
+    },
+    "opening": "illust",
+    "ending": "afterimage",
+    "axes": {
+      "world": "深夜高架桥下的环形匝道 · 沥青积水 / 远处车灯河流",
+      "timeArc": "深夜 → 凌晨三点 → 天将亮未亮",
+      "key": "低压夜色（暗部压到近黑，只有钠灯与车灯两处亮）",
+      "palette": "蓝黑沥青 #04070D/#16283C + 钠灯橙 #F0A34B",
+      "motif": "环形：匝道 / 马蹄 / 断了又接上的车灯光带",
+      "material": "粗颗粒胶片 + 霓虹边缘溢出，硬边剪影",
+      "role": "骑在护栏上晃腿的少女，看车流而不是看镜头"
+    },
+    "char": {
+      "note": "黑哥特全身（0）＝「绕圈的人」：开场与尾声各一次；黑制服半身（7）＝「停下来那一刻」：中段长间奏。窗口全部落在无词区，时间轴取自 analysis/lyrics_mv.lrc。",
+      "zoneW": 0.36,
+      "items": [
+        {
+          "img": "assets/char/zouma_gothic.png",
+          "t0": 0.3,
+          "t1": 13.2,
+          "form": "full",
+          "side": "center",
+          "h": 1010,
+          "y": 1150,
+          "stage": {
+            "plate": "a",
+            "zoomFrom": 1.06,
+            "zoomTo": 1.0,
+            "vignette": 0.5,
+            "ground": {
+              "color": "#02050A",
+              "h": 120,
+              "a": 0.55,
+              "sheen": "#F0A34B",
+              "sheenY": 6,
+              "sheenH": 220,
+              "sheenA": 0.05
+            },
+            "post": {
+              "bloom": 0.15,
+              "bloomThreshold": 0.92
+            }
+          }
+        },
+        {
+          "img": "assets/char/zouma_uniform.png",
+          "t0": 92.9,
+          "t1": 108.9,
+          "form": "bust",
+          "side": "center",
+          "h": 470,
+          "y": 1190,
+          "stage": {
+            "plate": "b",
+            "zoomFrom": 1.12,
+            "zoomTo": 1.03,
+            "vignette": 0.46,
+            "ground": {
+              "color": "#03060C",
+              "h": 110,
+              "a": 0.5,
+              "sheen": "#F0A34B",
+              "sheenY": 8,
+              "sheenH": 240,
+              "sheenA": 0.04
+            },
+            "post": {
+              "bloom": 0.16,
+              "bloomThreshold": 0.9
+            }
+          }
+        },
+        {
+          "img": "assets/char/zouma_gothic.png",
+          "t0": 188.6,
+          "t1": 204.6,
+          "form": "full",
+          "side": "center",
+          "h": 940,
+          "y": 1200,
+          "stage": {
+            "plate": "c",
+            "zoomFrom": 1.14,
+            "zoomTo": 1.04,
+            "vignette": 0.52,
+            "ground": {
+              "color": "#02040A",
+              "h": 130,
+              "a": 0.6,
+              "sheen": "#F0A34B",
+              "sheenY": 6,
+              "sheenH": 260,
+              "sheenA": 0.045
+            },
+            "post": {
+              "bloom": 0.14,
+              "bloomThreshold": 0.93
+            }
+          }
+        }
+      ]
+    }
+  }
+}
