@@ -9,6 +9,9 @@ cuts/
 segments/
 transcript/out/
 _media_cache/
+# 歌词/封面抓取缓存落到项目根时同样不入库（lyrics_fetch 的 cache_dir 曾指向根目录）
+_cover_*.img
+_lrc_*.json
 _trash/
 # _render_tmp/ = 渲染中间产物（mjpeg/分段mp4/concat），运行时产物，可整体删
 _render_tmp/

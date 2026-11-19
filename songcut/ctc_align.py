@@ -226,6 +226,76 @@ def _fuse(rows, lines, runs):
     return out, n1, n5
 
 
+def _repair_tail(fused, lines, runs, total, log=_log):
+    """尾部塌陷修复。
+
+    现象：SenseVoice 在末段（高音/长音/连唱，单 run 动辄 20s+）大面积漏识别，
+    只吐出极少数词，且把最后一字的 end 拖到音频末尾（CTC 尾部 padding）。
+    _map_lines 对「ASR 末字之后」的 LRC 字符一律填 map_e[prev]，于是尾部若干行
+    全部塌到 ≈total：
+      · 这些行 t >= 片长 → 永不显示；
+      · 上一行的 nxt 也等于该值 → fillEnd 撑满整个尾段，画面卡死在最后一句。
+    实测《走马》2026-11-18：L64~L68 五行 t=236.04 > 片长 235.6，片尾 18s 静止。
+
+    修法：只在检测到坏行时生效。用「已对齐段」的 (CTC − 原LRC) 中位偏移外推
+    坏行的原 LRC 时间（该偏移同时吸收切点差、head_pad、整体速度比），
+    再单调钳制进 [前一行尾, 人声末]。行内逐字时间不可信，交由调用方均分。
+
+    返回 bad 下标集合（set），无坏行时返回空集。
+    """
+    import statistics
+    n = len(fused)
+    if n < 3:
+        return set()
+    bad = set()
+    for i, (t2, _te) in enumerate(fused):
+        if t2 is None:
+            continue
+        if t2 >= total - 0.5:                       # 落到片外
+            bad.add(i)
+        elif i and fused[i - 1][0] is not None and t2 - fused[i - 1][0] < 0.05:
+            bad.add(i)                              # 与上一行挤在同一时刻
+    if not bad:
+        return set()
+
+    # 坏行必须集中在尾段才有外推依据；头部坏行不在本修复范围
+    hi = max(bad)
+    bad = {i for i in bad if i >= hi - 12}
+    if not bad or min(bad) == 0:
+        return set()
+
+    # 用最后 12 个「好行」的偏移中位数（局部，避免整首速度漂移）
+    good = [i for i in range(n) if i not in bad and fused[i][0] is not None]
+    good = good[-12:]
+    if len(good) < 3:
+        return set()
+    off = statistics.median(fused[i][0] - lines[i]["t"] for i in good)
+
+    limit = min(total - 0.25, runs[-1][1] + 0.4) if runs else total - 0.25
+    # 下界取前一行「起点」而非 t_end —— 前一行的 t_end 恰恰也被拖到 total，
+    # 若拿它当下界会把整段顶到片尾，等于没修
+    lo = fused[min(bad) - 1][0] + 0.3
+    for i in sorted(bad):
+        t2 = lines[i]["t"] + off
+        t2 = max(t2, lo)
+        t2 = min(t2, limit)
+        nxt = fused[i + 1][0] if i + 1 < n else None
+        # 行尾按字数估（0.5s/字，下限 1.0s）；坏行逐字时间不可信，
+        # 若仍用 +3.0 会让「醒了」这类两字短句拖满三秒
+        dur = max(1.0, 0.5 * len(_norm(lines[i]["text"])))
+        te = min(t2 + dur, nxt - 0.06) if nxt is not None else min(t2 + dur, limit)
+        fused[i] = (t2, max(te, t2 + 0.3))
+        lo = t2 + 0.06
+    # 前一行让出空间，否则它的 fillEnd 会盖住修好的首行
+    j = min(bad) - 1
+    if j >= 0 and fused[j][1] is not None:
+        fused[j] = (fused[j][0], min(fused[j][1], fused[min(bad)][0] - 0.06))
+
+    log("  CTC对齐: %d 行时间不可信已重算（偏移 %+.2fs，片长 %.2fs，坏行区间 %d~%d，末位 %.2fs）"
+        % (len(bad), off, total, min(bad) + 1, max(bad) + 1, fused[max(bad)][0]))
+    return bad
+
+
 def align_lrc(lrc_text, mp3_path, workdir, log=_log):
     """主入口。返回 (new_lrc, info)；失败时 new_lrc=None。"""
     info = {"ok": False, "reason": "", "n_words": 0, "match_ratio": 0.0}
@@ -258,6 +328,7 @@ def align_lrc(lrc_text, mp3_path, workdir, log=_log):
         info["reason"] = "文本匹配率低(%.2f<%.2f)" % (cov, MATCH_MIN)
         return None, info
     fused, n1, n5 = _fuse(rows, lines, runs)
+    bad = _repair_tail(fused, lines, runs, total, log=log)
 
     # 输出: [mm:ss.xx]<t>字<t>字…<fillEnd> 逐字卡拉OK时间轴
     # fillEnd=min(行尾end+0.25, 下行-0.06)；字时间=CTC逐字值+本行起点修正量
@@ -273,7 +344,14 @@ def align_lrc(lrc_text, mp3_path, workdir, log=_log):
         fe = max(fe, t2 + 0.5)
         text = lines[i]["text"]
         body = []
-        if ranges[i] is not None:
+        if i in bad:
+            # 该行 CTC 逐字值全是同一个「ASR 末字时间」，不足信；
+            # 行内按字数在 [t2, fe] 内均分，视觉上仍是逐字跟唱而非瞬间刷完
+            span = max(fe - t2, 0.4)
+            step = span / max(1, len(text))
+            ts_list = [t2 + step * ix for ix in range(len(text))]
+            body = ["<%s>%s" % (_ft(tv), c) for c, tv in zip(text, ts_list)]
+        elif ranges[i] is not None:
             b0, b1 = ranges[i]
             d = t2 - rows[i][0]           # 本行起点修正量（R1/R5/R2）
             # pass1: 非保留字符取 CTC 时刻；保留字符(空格/标点)先占位 None
@@ -310,6 +388,18 @@ def align_lrc(lrc_text, mp3_path, workdir, log=_log):
                     tv = last + 0.02
                 ts_list[ix] = tv
                 last = tv
+            # pass4: 整行退化检测。行首字之前没有已知锚点时，_map_lines 的 prev=None 分支
+            #   会把整行填成同一个时刻（全取 map_s[nxt]），pass3 再退化成「每字 +0.02s」——
+            #   视觉上整句在 0.2s 内刷完，卡拉OK 效果全丢。跨度不足 0.06s/字 时按行内均分，
+            #   行尾改用下一行起点（CTC 的 t_end 同样不可信，会直接把 fe 压在 t2+0.5 上）。
+            nch = len(text)
+            if nch > 2 and (max(ts_list) - min(ts_list)) < max(0.3, 0.06 * nch):
+                if nxt is not None:
+                    fe = max(t2 + 0.3, min(nxt - 0.06, t2 + 0.45 * nch))
+                else:
+                    fe = max(fe, t2 + 0.45 * nch)
+                step = max(fe - t2, 0.3) / nch
+                ts_list = [t2 + step * ix for ix in range(nch)]
             body = ["<%s>%s" % (_ft(tv), c) for c, tv in zip(text, ts_list)]
         else:
             body.append(text)

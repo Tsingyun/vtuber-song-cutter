@@ -2014,6 +2014,11 @@ def cleanup_outputs(manifest, seg_dir, keep_mp3=False):
     removed = 0
     for s in manifest["songs"]:
         mp3 = s.get("mp3")
+        # 本轮「成品已存在，跳过」的条目不清 —— 它没参与渲染，其 mp3 路径上留着的
+        # 是上一次的残留件，可能是另一个正在跑的进程的中间件（2026-11-19 踩过：
+        # 并发两进程，跳过方删掉 mp3，渲染方 CTC 降级 + setup ENOENT 整首作废）
+        if s.get("skipped"):
+            continue
         if mp3 and os.path.exists(mp3) and s.get("specs_ok"):
             if keep_mp3:
                 s["mp3_cleaned"] = False
@@ -2028,6 +2033,8 @@ def cleanup_outputs(manifest, seg_dir, keep_mp3=False):
                 log("  MP3 删除失败（%s）：%s" % (mp3, e))
     # 残留渲染中间件（*.render.mp4）
     for s in manifest["songs"]:
+        if s.get("skipped"):
+            continue
         tmp = (s.get("mp4") or "") + ".render.mp4"
         if tmp.endswith(".render.mp4") and os.path.exists(tmp):
             try:
@@ -2276,8 +2283,10 @@ def main():
             if args.dry_run:
                 continue
             ref_extra = {}
+            _skipped = False
             if os.path.exists(out_mp4) and os.path.getsize(out_mp4) > 1048576 and not args.force:
                 log("  成品已存在，跳过（--force 可强制重渲）")
+                _skipped = True
             else:
                 if args.raw_cut:
                     t0 = time.time()
@@ -2327,6 +2336,7 @@ def main():
                 "mp4": out_mp4, "mp3": out_mp3, "specs": specs, "specs_ok": ok,
                 "renderer": ("raw-cut" if args.raw_cut
                              else ("player-4k60" if OUT_RES >= 2 else "player-1080p60")),
+                "skipped": _skipped,
                 **ref_extra,
             }
             # ── 成片自检（判定化）：只解码成片，不重渲。失败项带帧号/时间码/行号 + 修复建议 ──
