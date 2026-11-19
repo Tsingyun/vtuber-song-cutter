@@ -833,10 +833,8 @@ let PAL = { top:[250,249,246], bottom:[241,240,235], accent:[168,178,190],
             vibrant:[150,160,172], muted:[150,160,172], soft1:[190,196,204],
             hue:0.58, sat:0.10, fromCover:false };
 const rgba = (c,a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
-/* 立绘装饰层开关：默认关闭（视觉重构后右侧留白由歌词区承接）。
-   ?art=1 可在渲染/预览时单独打开，用于对照该图层与现版式的冲突程度；
-   不加该参数时行为与此前完全一致。 */
-const SHOW_ART = new URLSearchParams(location.search).get('art') === '1';
+/* 立绘装饰层开关：默认关闭（视觉重构后右侧留白由歌词区承接） */
+const SHOW_ART = false;
 /* 品牌短标记：刊眉带/题饰/封面占位用的小字；离线渲染由 meta.mark 覆盖 */
 let BRAND_MARK = 'SC';
 
@@ -1935,12 +1933,10 @@ function buildArtCanvas(){
   const hasAlpha = nTrans > pd.length/4 * 0.02;
   let iw, ih;
   if(hasAlpha){
-    // 透明底：按画布高度的 74% 定高，完整呈现不裁切任何边缘。
-    // 旧值 H（撑满全高）× 680 上限是按「常驻装饰层」定的；现在只在**前奏期**出现，
-    // 那一刻没有当前歌词行，所以给它更大的版面（见 drawArtLayer 的时间窗）。
-    ih = Math.round(H * 0.74);
-    iw = Math.round(ih * artImg.width / artImg.height);
-    if(iw > 1150){ iw = 1150; ih = Math.round(iw * artImg.height / artImg.width); }
+    // 透明底：以高度撑满画布，完整呈现不裁切任何边缘
+    ih = H;
+    iw = Math.round(H * artImg.width / artImg.height);
+    if(iw > 680){ iw = 680; ih = Math.round(iw * artImg.height / artImg.width); }
   } else {
     iw = 640; ih = Math.round(iw * artImg.height / artImg.width);
   }
@@ -1968,27 +1964,8 @@ function drawArtLayer(){
   if(!SHOW_ART || !artCanvas) return;      // 装饰立绘开关（默认关）
   const offline = (typeof HL !== 'undefined') && HL.on;
   const pt = offline ? HL.vT : audio.currentTime;
-
-  /* 时间窗 = 前奏期：从 0 到「第一句歌词之前 1.4s」。
-     为什么必须是窗口而不是常驻：歌词视口 x980~1824 与立绘落位
-     x≈760~1910 重叠过半，常驻时满 alpha 会把未唱行糊掉（实测）；
-     而三首歌的前奏都有 13~20s，那一段没有当前行，是版式里唯一
-     真正容得下人物的时段。留住它，就等于把「立绘」和「歌词」解耦。
-     前奏过短（<2.5s 可用）时不画 —— 宁可不出现，也不压文字。 */
-  let first = Infinity;
-  if(typeof lyrics !== 'undefined' && lyrics){
-    for(const L of lyrics){ if(L && L.start != null && L.start < first) first = L.start; }
-  }
-  const hold = first === Infinity ? 0 : first - 1.4;
-  if(hold < 2.5) return;
-  const fin = 0.6, fout = 1.2;                       // 淡入 / 淡出时长
-  let k;
-  if(pt < fin) k = pt / fin;
-  else if(pt < hold - fout) k = 1;
-  else if(pt < hold) k = (hold - pt) / fout;
-  else return;                                        // 第一句歌词到来前已完全退场
-  if(k <= 0) return;
-  const a = (k*k*(3-2*k)) * 0.85;                     // smoothstep × 前奏期可承受的存在感
+  const fade = Math.min(1, Math.max(0, pt/9));   // 前 9 秒缓缓淡入
+  const a = fade*fade*(3-2*fade) * (artAlphaMode ? 0.42 : 0.45);  // smoothstep + 整体低存在感
   if(a <= 0.002) return;
   const iw = artCanvas.width, ih = artCanvas.height;
   const dx = artAlphaMode ? (W - iw - 10) : (W - iw + 36);   // 透明 PNG：不出血不裁边
@@ -3425,11 +3402,6 @@ renderCacheBar();
     ctx.setTransform(OUT_SCALE,0,0,OUT_SCALE,0,0);
     ctx.clearRect(0,0,W,H);
     drawBackground(now, dt);
-    /* 立绘图层必须与预览 loop 保持同一调用序列 —— 这里原先漏了 drawArtLayer()，
-       导致「打开 SHOW_ART 也不出画面」：成片走的是 renderFrame，而它只画了
-       background/cover/info/lyrics/bar/stickers。RULES 47 记的「带与不带 artImage
-       的帧 MD5 完全相同」，真因就是这一行缺失，不是开关或素材的问题。 */
-    if(SHOW_ART) drawArtLayer();
     drawCover(now);
     drawInfo(Math.max(0, (HL.on ? HL.vT : audio.currentTime) + offset));
     drawLyrics(now, dt);

@@ -313,10 +313,7 @@ async function cleanupArtifacts() {
     throw new Error('播放器页面不存在：' + pagePath);
   }
   const BGQ = job.bg ? ('&bg=' + encodeURIComponent(job.bg)) : '';   // 专业背景层方案切换
-  /* 立绘图层：只有 job 真的带了立绘数据才开（?art=1）。不带时 URL 与旧版逐字符相同，
-     所以没有立绘的片子行为完全不变；带的时候由播放器按「前奏期」时间窗自行退场。 */
-  const ARTQ = job.artImage ? '&art=1' : '';
-  const url = 'file:///' + pagePath.replace(/\\/g, '/') + '?render=1&res=' + RES + BGQ + ARTQ +
+  const url = 'file:///' + pagePath.replace(/\\/g, '/') + '?render=1&res=' + RES + BGQ +
     '&cpu=' + (CPU_RASTER ? '1' : '0') + '&touchdup=' + (TOUCHDUP ? '1' : '0');
 
   // 3. 注入音频 + 元数据 + 歌词 + 封面
