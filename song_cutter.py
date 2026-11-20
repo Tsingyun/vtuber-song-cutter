@@ -1610,7 +1610,10 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         ref_text = "\n".join(t for (a, b, t) in srt_entries if _rt_a - 2 <= a <= _rt_b + 2)
     lrc, cover_path, linfo = lyrics_fetch.fetch_lyrics_and_cover(
         fetch_name, artist_hint=_hint, dur=ce - cs, ref_text=ref_text,
-        cache_dir=os.path.join(workdir, "_media_cache"))
+        cache_dir=os.path.join(workdir, "_media_cache"),
+        # 封面归属必须用**原唱**（artist），不能用 artist_hint（那只是歌词版本）：
+        # 《唯一》hint=邓紫棋 曾把封面换成 G.E.M. 版，违反「画面标原唱」铁律。
+        cover_artist=(seg.get("artist") or "").strip())
     # 原唱封面显式覆盖（segments.cover_path，auto_cut 按曲库原唱抓取；缺失则回退抓取结果）
     _orig_cov = (seg.get("cover_path") or "").strip() if isinstance(seg.get("cover_path"), str) else seg.get("cover_path")
     if _orig_cov and os.path.exists(_orig_cov):

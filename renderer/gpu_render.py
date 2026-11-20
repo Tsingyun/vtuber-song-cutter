@@ -48,7 +48,8 @@ except ImportError:
     raise
 
 DESIGN_W, DESIGN_H = 1920, 1080
-SS = 2.0                     # 文字纹理超采样倍数
+SS = 2.0                     # 文字纹理超采样倍数（__init__ 里按输出分辨率覆写）
+_GL_SCISSOR_TEST = 0x0C11    # moderngl 未导出该常量，直接给 GL 值
 
 # ---- A 唱片版式常量（对齐 renderer/player/index.html）----
 COVER_X, COVER_Y, COVER_S, COVER_R = 268.0, 96.0, 560.0, 10.0
@@ -71,6 +72,11 @@ FONT_FALLBACK_SC = os.path.join(_WIN_FONTS, "msyh.ttc")
 KANA_RE = re.compile(r"[\u3040-\u30FF]")
 CJK_RE = re.compile(r"[\u3040-\u30FF\u4e00-\u9fff]")
 LRC_RE = re.compile(r"\[(\d+):(\d+(?:[.:]\d+)?)\]")
+# 增强型 LRC 的逐字标签 <mm:ss.xx>（对齐链产出）；与行首 [] 标签是两套记号
+WORD_TS = r"(\d+):(\d+(?:[.:]\d+)?)"          # 带分组：取 group(1)/group(2)
+WORD_TS_NC = r"(?:\d+):(?:\d+(?:[.:]\d+)?)"   # 无分组：给 re.split 用（否则子组会混进切分结果）
+WORD_RE = re.compile(r"<%s>" % WORD_TS)
+WORD_SPLIT = re.compile(r"(<%s>)" % WORD_TS_NC)
 
 
 def log(*a):
@@ -97,7 +103,22 @@ def _ffmpeg_path():
 # ----------------------------------------------------------------------------
 # LRC
 # ----------------------------------------------------------------------------
+def _tag_sec(m, s):
+    return int(m) * 60 + float(s.replace(":", "."))
+
+
 def parse_lrc(text, duration):
+    """LRC → [(t, text, words, fill_end)]，**必须剥净所有时间标签**。
+
+    三种写法都要认（CPU 端 renderer/player/index.html 的 parseLyrics 同样支持）：
+      ① 行首 [mm:ss.xx]词                —— 纯行级 LRC
+      ② 行首 [mm:ss.xx]<mm:ss.xx>字<...> —— 增强型逐字轴（CTC/DTW/ASR 对齐器的输出）
+      ③ 行尾独立 <mm:ss.x>               —— 该行实际唱完时刻（卡拉OK填充终点）
+
+    ⚠ 历史 bug：只做 ①，②的 `<...>` 被当成正文 → 成片整行变成
+      `<00:56.03>时<00:56.15>我<...>` 且因超长被压到极小字号。凡对齐链
+      （dtw/ctc/asr）产出的 lrc 都是 ②，所以只有走 --lrc-override 的曲子正常。
+    """
     raw = []
     for line in (text or "").splitlines():
         tags = LRC_RE.findall(line)
@@ -106,23 +127,56 @@ def parse_lrc(text, duration):
         body = LRC_RE.sub("", line).strip()
         if not body:
             continue
+
+        # ③ 行尾独立标签 = 整行唱完时刻；先摘下来，剩下的才是正文
+        fill = None
+        m_end = re.search(r"<%s>\s*$" % WORD_TS, body)
+        if m_end:
+            fill = _tag_sec(m_end.group(1), m_end.group(2))
+            body = body[:m_end.start()].rstrip()
+
+        # ② 内嵌尖括号 = 逐字时间轴
+        words = None
+        if WORD_RE.search(body):
+            toks = WORD_SPLIT.split(body)
+            ws, pending = [], None
+            for tok in toks:
+                if not tok:
+                    continue
+                mm = WORD_RE.fullmatch(tok)
+                if mm:
+                    pending = _tag_sec(mm.group(1), mm.group(2))
+                    continue
+                for ch in tok:
+                    if ch in "\r\n":
+                        continue
+                    if not ch.strip() and ch != " ":
+                        continue
+                    ws.append((pending if pending is not None else 0.0, ch))
+            # 同一标签下的一串字共享起点：按累计宽度均分它们的时间，避免整词同帧点亮
+            if len(ws) >= 2:
+                words = ws
+            body = WORD_RE.sub("", body).strip()
+
+        if not body:
+            continue
         if body.strip("♪ ~—-·　 ").lower() in ("", "interlude", "instrumental"):
             continue
         for m, s in tags:
-            t = int(m) * 60 + float(s.replace(":", "."))
-            raw.append((t, body))
+            raw.append((_tag_sec(m, s), body, words, fill))
+
     raw.sort(key=lambda x: x[0])
     out, seen = [], set()
-    for t, c in raw:
+    for t, c, w, fill in raw:
         k = (round(t, 2), c)
         if k in seen:
             continue
         seen.add(k)
         if out and abs(out[-1][0] - t) < 0.02:
             if c not in out[-1][1]:
-                out[-1] = (out[-1][0], out[-1][1] + "  " + c)
+                out[-1] = (out[-1][0], out[-1][1] + "  " + c, out[-1][2], out[-1][3])
             continue
-        out.append((t, c))
+        out.append((t, c, w, fill))
     return out
 
 
@@ -182,6 +236,34 @@ def text_mask(text, px, weight=600, pad=10):
     d = ImageDraw.Draw(img)
     d.text((pad - bbox[0], pad - bbox[1]), text, font=font, fill=255)
     return img, w, h
+
+
+def text_mask_chars(text, px, weight=600, pad=10):
+    """text_mask 的增强版：额外返回每个字符的横向起点（纹理像素，含 pad）。
+
+    卡拉OK填充需要「唱到第几个字 → 已唱多少像素」，因此必须知道字形级偏移。
+    用同一个 font 对象 `getlength(prefix)` 累加，与上面 textbbox 的排版一致。
+    """
+    font = get_font(text, px, weight)
+    dummy = ImageDraw.Draw(Image.new("L", (4, 4)))
+    try:
+        bbox = dummy.textbbox((0, 0), text, font=font)
+    except Exception:
+        bbox = (0, 0, int(px * len(text) * 0.6), px)
+    w = max(1, bbox[2] - bbox[0] + pad * 2)
+    h = max(1, bbox[3] - bbox[1] + pad * 2)
+    img = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(img)
+    d.text((pad - bbox[0], pad - bbox[1]), text, font=font, fill=255)
+    ox = pad - bbox[0]
+    xs = []
+    for i in range(len(text)):
+        try:
+            pre = float(font.getlength(text[:i]))
+        except Exception:
+            pre = i * px * 0.6
+        xs.append(ox + pre)
+    return img, w, h, xs
 
 
 def mask_to_rgba(mask):
@@ -376,6 +458,7 @@ uniform float u_alpha;
 uniform vec3  u_tint;
 uniform float u_blur;      // 模糊半径（纹理像素）
 uniform vec2  u_texel;     // 1/纹理尺寸
+uniform float u_kar;       // 卡拉OK 填充阈值（uv.x，<0 = 关闭）
 void main() {
     vec2 uv = v_uv;
     float a;
@@ -392,19 +475,36 @@ void main() {
         a = s / 18.0;
     }
     if (a <= 0.002) discard;
-    f_color = vec4(u_tint, a * u_alpha);
+    vec3 col = u_tint;
+    float alpha = a * u_alpha;
+    if (u_kar >= 0.0) {
+        /* 已唱实色 / 未唱薄底：同字形只换色与透明度（换字重会重影）。
+           阈值带半像素羽化，避免 4K 下看到锯齿竖边。 */
+        float e = 1.2 * u_texel.x;   // 1.2 纹理像素羽化
+        float w = smoothstep(u_kar - e, u_kar + e, uv.x);
+        col = mix(u_tint, vec3(0.52, 0.55, 0.60), 0.72 * w);
+        alpha *= mix(1.0, 0.30, w);
+    }
+    f_color = vec4(col, alpha);
 }
 """
 
 
 class GpuRenderer:
-    def __init__(self, job, out_path, sec=None, res=2):
+    def __init__(self, job, out_path, sec=None, res=2, start=0.0):
+        global SS
         self.job = job
         self.out = out_path
         self.sec = sec
+        self.t0 = float(start or 0.0)   # 起始时间（抽副歌片段用；坐标仍按全片时间）
         self.res = res
         self.W = DESIGN_W * res
         self.H = DESIGN_H * res
+        # 文字纹理超采样倍数必须跟着输出分辨率走：
+        # 设计坐标 1px = 输出 res 物理px，SS<res 就是「小图放大」→ 边缘发虚。
+        # 4K(res=2) 取 4 = 2× 超采样（等效 SSAA），1080p 取 2。见 RULES §144。
+        SS = 4.0 if int(res) >= 2 else 2.0
+        self.SS = SS
         self.fps = int(job.get("fps") or 60)
         self.bitrate = int(job.get("bitrate") or 18_000_000)
         self.dt = 1.0 / self.fps
@@ -434,13 +534,15 @@ class GpuRenderer:
         self.vao_comp = self.ctx.vertex_array(self.prog_comp, [(self.vbo_fs, "2f 2f", "in_pos", "in_uv")])
         self.vao_text = self.ctx.vertex_array(self.prog_text, [(self.vbo_quad, "2f 2f", "in_pos", "in_uv")])
 
-        # FBO：scene(4K) / blur(1/2 歌词区) 两趟 / final(4K)
+        # FBO：scene(4K) / blur(歌词区，与输出同分辨率) 两趟 / final(4K)
+        # ⚠ 曾用 1/2 分辨率，毛玻璃区放大回 4K 时细节被抹平（肉眼「整块糊」）
+        #   且与文字锐度形成对比，观感像整体降分辨率。见 RULES §144。
         self.tex_scene = self.ctx.texture((self.W, self.H), 4)
         self.tex_scene.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.fbo_scene = self.ctx.framebuffer(color_attachments=[self.tex_scene])
 
-        bw = max(64, int(LY_W * res / 2))
-        bh = max(64, int(LY_H * res / 2))
+        bw = max(64, int(LY_W * res))
+        bh = max(64, int(LY_H * res))
         self.tex_b1 = self.ctx.texture((bw, bh), 4)
         self.tex_b1.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.fbo_b1 = self.ctx.framebuffer(color_attachments=[self.tex_b1])
@@ -496,7 +598,7 @@ class GpuRenderer:
         ], dtype="f4")
         self.vbo_quad.write(v.tobytes())
 
-    def _draw_text(self, tex, x, y, w, h, alpha, tint, blur_px=0.0):
+    def _draw_text(self, tex, x, y, w, h, alpha, tint, blur_px=0.0, kar=-1.0):
         self._set_quad(x, y, w, h)
         tex.use(location=0)
         p = self.prog_text
@@ -506,6 +608,7 @@ class GpuRenderer:
         p["u_tint"] = tuple(c / 255.0 for c in tint)
         p["u_blur"] = float(blur_px * SS)
         p["u_texel"] = (1.0 / tex.size[0], 1.0 / tex.size[1])
+        p["u_kar"] = float(kar)
         self.vao_text.render()
 
     # ------------------------------------------------------------------
@@ -560,10 +663,24 @@ class GpuRenderer:
         self.date_geo = (1824.0 - w / SS, 1054.0 - h / SS * 0.78, w / SS, h / SS)
 
         # 歌词纹理（清晰一套，模糊由 shader 做）
+        # 每行额外存：字符横向起点 xs（设计坐标）+ 逐字时间 words + 行尾时间 fill，
+        # 供卡拉OK填充用（与 CPU 端 karaokeFrac/karaokeWidth 同一套算法）。
         self.lyr = []
-        for _, txt in self.lyrics:
-            m, w, h = text_mask(txt, int(60 * SS), 700)
-            self.lyr.append((self._upload(m), w / SS, h / SS))
+        for t, txt, words, fill in self.lyrics:
+            m, w, h, xs = text_mask_chars(txt, int(60 * SS), 700)
+            self.lyr.append({
+                "tex": self._upload(m),
+                "w": w / SS, "h": h / SS,
+                "xs": [v / SS for v in xs],
+                "text": txt, "words": words, "fill": fill,
+                "t": t,
+            })
+        # 行结束时间：优先行尾 <mm:ss.x>，否则下一行起点，末行用片长
+        for i, sp in enumerate(self.lyr):
+            sp["end"] = (sp["fill"] if sp["fill"] is not None
+                         else (self.lyr[i + 1]["t"] if i + 1 < len(self.lyr) else duration))
+            if sp["end"] is not None and sp["end"] <= sp["t"] + 0.05:
+                sp["end"] = sp["t"] + max(1.0, duration / max(1, len(self.lyr)))
         # 当前行左侧绯玫红标记（3×78 设计像素的纯白块，绘制时 tint 成红色）
         self.t_bar = self._upload(Image.new("L", (max(1, int(3 * SS)), max(1, int(78 * SS))), 255))
 
@@ -572,6 +689,7 @@ class GpuRenderer:
         self.act = [0.0] * n
         self.bs = [None] * n
         self.bl = [None] * n
+        self.ox = [0.0] * n          # 当前行横向滚动偏移（长行跟唱）
         self._cur_sec = None
         self._cur_sec_tex = None
         self._prev_idx = -999
@@ -621,8 +739,41 @@ class GpuRenderer:
         return idx
 
     # ------------------------------------------------------------------
+    def _sung_x(self, sp, t):
+        """已唱到的横向位置（**设计坐标**，与 sp["xs"] 同系，含左右 pad）。
+
+        有逐字轴 → 按字推进（字内线性）；无逐字轴 → 行时长线性推进。
+        与 CPU 端 karaokeFrac/karaokeWidth 等价，但去掉了「同时刻词链」特判：
+        这里把同刻字整段视为一个区间，宽度近似即可（4K 下肉眼不可辨）。
+        """
+        xs = sp["xs"]
+        n = len(xs)
+        if n == 0:
+            return 0.0
+        words = sp["words"]
+        if words and len(words) == n:
+            ts = [w[0] for w in words]
+            if max(ts) - min(ts) > 0.05:
+                j = 0
+                for i in range(n):
+                    if ts[i] <= t:
+                        j = i
+                    else:
+                        break
+                T0, T1 = ts[j], (ts[j + 1] if j + 1 < n else sp["end"])
+                frac = max(0.0, min(1.0, (t - T0) / max(0.05, T1 - T0)))
+                x0 = xs[j]
+                x1 = xs[j + 1] if j + 1 < n else xs[j] + 60.0
+                return x0 + (x1 - x0) * frac
+        s, e = sp["t"], sp["end"]
+        f = 0.0 if e <= s else (t - s) / (e - s)
+        f = max(0.0, min(1.0, f))
+        x1 = xs[-1] + 60.0
+        return xs[0] + (x1 - xs[0]) * f
+
+    # ------------------------------------------------------------------
     def render_frame(self, i):
-        t = i / self.fps
+        t = self.t0 + i / self.fps
         ctx = self.ctx
         idx = self._update_motion(t)
 
@@ -693,18 +844,33 @@ class GpuRenderer:
         self._draw_text(self.t_info, *self.info_geo, 0.62, INK)
 
         # 歌词（Apple Music 式）
-        if idx >= 0 and self.lyrics:
-            for k in range(len(self.lyrics)):
+        if idx >= 0 and self.lyr:
+            # 视口裁剪（等价 CPU 端 ctx.clip）：当前行超宽横向滚动时文字会顶到画布边缘，
+            # 不裁就像「跑出面板」。GL 的 scissor 原点在左下，y 要翻转。
+            # moderngl 没有 SCISSOR_TEST 常量，用 enable_direct(GL_SCISSOR_TEST=0x0C11)。
+            self.ctx.scissor = (int((LY_X - 24) * self.res),
+                                int((DESIGN_H - (LY_Y + LY_H)) * self.res),
+                                int((LY_W + 48) * self.res),
+                                int(LY_H * self.res))
+            _sc = True
+            try:
+                self.ctx.enable_direct(_GL_SCISSOR_TEST)
+            except Exception:
+                _sc = False
+            n = len(self.lyr)
+            for k in range(n):
+                sp = self.lyr[k]
                 y = LY_Y + k * LY_LH - self.scrollY
                 if y + LY_LH < LY_Y - 40 or y > LY_Y + LY_H + 40:
                     continue
-                tex, bw, bh = self.lyr[k]
+                tex = sp["tex"]
                 fs = 48.0 + 17.0 * self.act[k]
                 sc = fs / 60.0
-                w, h = bw * sc, bh * sc
-                if w > LY_W - 12:
-                    s2 = (LY_W - 12) / bw
-                    w, h = bw * s2, bh * s2
+                w, h = sp["w"] * sc, sp["h"] * sc
+                if k != idx and w > LY_W - 12:
+                    s2 = (LY_W - 12) / sp["w"]
+                    w, h = sp["w"] * s2, sp["h"] * s2
+                    sc = s2
                 cy = y + LY_LH * 0.5
                 # 视口上下 80px 边缘淡出
                 edge = min(
@@ -714,16 +880,53 @@ class GpuRenderer:
                 alpha = (self.bs[k] + (1 - self.bs[k]) * self.act[k]) * edge
                 blur = self.bl[k] if self.bl[k] is not None else 0.0
                 x = LY_X + 4.0 * self.act[k]
+                kar = -1.0
                 if k == idx:
                     self._draw_text(self.t_bar, LY_X - 13.0, y + 12.0, 3.0, LY_LH - 24.0, 0.85, ROSE)
-                self._draw_text(tex, x, cy - h * 0.5, w, h, alpha, INK, blur)
+                    # 已唱比例 → shader 的 uv 阈值（分母是整幅纹理，故含 pad）
+                    sung = self._sung_x(sp, t)
+                    # ⚠ 分母必须是 sp["w"]（设计坐标宽），不是 sp["w"]*SS：
+                    #   xs 在 prepare 里已除以 SS 转成设计坐标，再乘 SS 会让填充进度
+                    #   慢 SS 倍（4K 下只亮 1/4 行）。
+                    kar = max(0.0, min(1.0, sung / max(1e-3, sp["w"])))
+                    # 长行横向滚动：让「正在唱的字」稳定停在视口 42% 处
+                    view = LY_W - 12.0
+                    if w > view:
+                        want = max(0.0, min(w - view, sung * sc - view * 0.42))
+                    else:
+                        want = 0.0
+                    self.ox[k] += (want - self.ox[k]) * min(1.0, self.dt * 3.2)
+                    x -= self.ox[k]
+                elif abs(self.ox[k]) > 0.5:
+                    self.ox[k] += (0.0 - self.ox[k]) * min(1.0, self.dt * 3.2)
+                self._draw_text(tex, x, cy - h * 0.5, w, h, alpha, INK, blur, kar)
+            if _sc:
+                try:
+                    self.ctx.disable_direct(_GL_SCISSOR_TEST)
+                except Exception:
+                    pass
 
         return self.fbo_final.read(components=4, dtype="f1")
+
+    def warmup(self, t, steps=90):
+        """抽片段时把动效状态预热到 t（否则从 0 起滚会有一段明显「下坠」过渡）。
+
+        缓动都是指数形式，跑满 90 帧（1.5s）后误差 <0.1%，等价于「一直在播」。
+        """
+        if not self.lyrics:
+            return
+        for _ in range(steps):
+            self._update_motion(t)
 
     # ------------------------------------------------------------------
     def run(self):
         self.prepare()
-        dur = self.duration if self.sec is None else min(self.sec, self.duration)
+        if self.t0 > 0:
+            self.warmup(self.t0)
+        dur = self.duration - self.t0
+        if self.sec is not None:
+            dur = min(self.sec, dur)
+        dur = max(0.1, dur)
         frames = max(1, int(round(dur * self.fps)))
         ff = _ffmpeg_path()
         if not os.path.exists(ff):
@@ -767,13 +970,15 @@ def main():
     ap.add_argument("--job", required=True)
     ap.add_argument("--out", default=None)
     ap.add_argument("--sec", type=float, default=None)
+    ap.add_argument("--start", type=float, default=0.0)
     ap.add_argument("--res", type=int, default=None)
     a = ap.parse_args()
     job = json.load(io.open(a.job, "r", encoding="utf-8"))
     out = a.out or job.get("out")
     if not out:
         raise SystemExit("缺少输出路径")
-    GpuRenderer(job, out, sec=a.sec, res=int(a.res or job.get("res") or 2)).run()
+    GpuRenderer(job, out, sec=a.sec, res=int(a.res or job.get("res") or 2),
+                start=a.start).run()
 
 
 if __name__ == "__main__":

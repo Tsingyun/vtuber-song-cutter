@@ -369,11 +369,17 @@ def text_overlap_ratio(lrc, ref_text, n=2):
     return len(a & b) / float(min(len(a), len(b)))
 
 
-def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_text=None):
+def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_text=None,
+                           cover_artist=""):
     """返回 (lrc:str|None, cover_path:str|None, info:dict)。cover 已下载到 cache_dir。
 
     ref_text：本片段的演唱转写原文（SRT 文本）。给了就启用「字面一致性」判据，
     把同名不同歌的错版本候选排到后面，避免成片配着完全不相干的歌词。
+
+    cover_artist：**封面要标谁**（原唱）。artist_hint 是「抓哪版歌词」（可能是改编版），
+    两者语义不同、必须解耦：2026-11-20《唯一》唱邓紫棋改编版，hint=邓紫棋 把封面也
+    换成 G.E.M. 版，违反「画面标原唱」铁律。传了 cover_artist 且与 hint 不同时，
+    封面单独按原唱再查一次。
     """
     info = {}
     cache_dir = cache_dir or os.getcwd()
@@ -421,6 +427,28 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
                         d["cover_path"] = None
                     if not info.get("artist"):
                         info["artist"] = _artist_from_source(info.get("lyrics_source"))
+                    # 封面归属校验：歌词版本(artist_hint) 与封面归属(原唱) 是两件事。
+                    # hint=改编版歌手时，缓存里的图很可能是改编版的专辑图（《唯一》实测）。
+                    # 这里只重下封面，**不动**已核定的歌词轴，避免牵连时间轴。
+                    _want_cov = (cover_artist or "").strip()
+                    if _want_cov:
+                        _have = (info.get("cover_artist") or info.get("artist") or "").strip()
+                        if not artist_matches(_want_cov, _have):
+                            try:
+                                _nl, _nc, _ns, _na, _nd, _nr = _netease(title, _want_cov)
+                                if _nc:
+                                    _r = requests.get(_nc, headers={"User-Agent": UA},
+                                                      timeout=TIMEOUT)
+                                    if _r.status_code == 200:
+                                        _p = os.path.join(cache_dir, "_cover_%s.img" % key)
+                                        io.open(_p, "wb").write(_r.content)
+                                        d["cover_path"] = _p
+                                        info["cover_source"] = _nc.split("?")[0]
+                                        info["cover_artist"] = _na or _want_cov
+                                        json.dump(d, io.open(cache_f, "w", encoding="utf-8"),
+                                                  ensure_ascii=False)
+                            except Exception:
+                                pass
                     return d.get("lrc"), d.get("cover_path"), info
         except Exception:
             pass
@@ -456,6 +484,17 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
                           "cover_url": ncover})
     except Exception:
         pass
+
+    # 封面必须标**原唱**（铁律）：hint 可能是改编版歌手（《唯一》→邓紫棋），
+    # 直接沿用会配成改编版的专辑图。这里按 cover_artist 单独再查一次封面。
+    _want_cov = (cover_artist or "").strip()
+    if _want_cov and not artist_matches(_want_cov, nartist):
+        try:
+            _l2, _c2, _s2, _a2, _d2, _r2 = _netease(title, _want_cov)
+            if _c2:
+                cover_url, nartist = _c2, (_a2 or _want_cov)
+        except Exception:
+            pass
 
     scored = []
     for c in cands:
@@ -524,6 +563,9 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
         # 没有任何可信封面来源时，尝试退回 LRCLIB 的专辑图（若有）
         cover_url = next((s["cover_url"] for s in scored if s.get("cover_url")), None)
     info["cover_source"] = info.get("cover_source") or "none"
+    # 记下封面归属的歌手，下次缓存复用时据此判断要不要只重下封面
+    if cover_url and nartist:
+        info["cover_artist"] = nartist
 
     try:
         json.dump({"lrc": lrc, "cover_path": cover_path, "info": info},
