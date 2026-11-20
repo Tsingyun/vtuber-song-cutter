@@ -74,6 +74,9 @@ _RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
 # 播放器页面：同目录下可并存多版（index.html = 明纸版，index_v10.html = 深夜电台版）。
 # 优先级：--player-page > 环境变量 SONGCUT_PLAYER_PAGE > index.html（保持历史行为）。
 PLAYER_PAGE = os.environ.get("SONGCUT_PLAYER_PAGE") or "index.html"
+# 画面渲染器（2026-11-20）：browser = Chromium 逐帧 toBlob（默认，B 手书唯一通路）；
+# gpu = moderngl 显卡直算 + NVENC（仅 A 唱片 index.html，实测 4K60 72ms/帧 → 15ms/帧）。
+RENDERER = os.environ.get("SONGCUT_RENDERER") or "browser"
 # 风格：A=唱片（index.html）/ B=手书（index_pv.html + 风格弧线 + 人物挂点 + JIZURA）。
 # --style 是高层入口：一个名字同时决定版式与三个可选层，不必在命令行里手拼
 # --player-page/--arc/--live/--jz（漏一个就静默降级，这正是 11-01 的事故原因）。
@@ -1113,6 +1116,32 @@ def _prune_empty_tmp_dir(workdir, date):
         pass
 
 
+def _render_player_video_gpu(workdir, job, ffmpeg=None):
+    """GPU 直算通路：调 renderer/gpu_render.py（moderngl + NVENC）。
+
+    与浏览器通路的差异：
+      · 不落 mjpeg（一帧都不写盘），没有 30GB 级中间产物，也不需要磁盘峰值预检；
+      · job 结构复用同一份（title/artist/lrc/cover/duration/res/bitrate/out）；
+      · 仅 A 唱片 index.html 支持 —— B 手书的 JIZURA / 人物挂点 / 风格弧线
+        在 GPU 渲染器里没有实现，main() 已强制回退 browser。
+    """
+    job_f = os.path.join(workdir, "_render_job.json")
+    io.open(job_f, "w", encoding="utf-8", newline="").write(
+        json.dumps(job, ensure_ascii=False))
+    script = os.path.join(ROOT, "renderer", "gpu_render.py")
+    if not os.path.exists(script):
+        raise RuntimeError("找不到 GPU 渲染器：%s" % script)
+    env = dict(os.environ)
+    if ffmpeg:
+        env["FFMPEG_BIN"] = ffmpeg
+    # 用当前解释器：保证 moderngl / Pillow 与管线在同一套 Python 环境里
+    py = sys.executable or "python"
+    log("[render] GPU 直算模式：moderngl 逐帧计算 + NVENC 编码 → %s" % job["out"])
+    proc = subprocess.run([py, script, "--job", job_f], env=env)
+    if proc.returncode != 0:
+        raise RuntimeError("GPU 渲染失败（rc=%d）" % proc.returncode)
+
+
 def render_player_video(workdir, job, ffmpeg=None):
     """调 render_song.cjs：无头浏览器离线逐帧渲染播放器画面并编码落盘。
 
@@ -1144,6 +1173,10 @@ def render_player_video(workdir, job, ffmpeg=None):
 
     _tot, _used, _free = shutil.disk_usage(_dir)
     log("[DISK] Available: %.1f GB" % (_free / GB))
+
+    # GPU 直算模式：不写 mjpeg，无需按 P=2 估峰值；画面由 moderngl 在显卡上算完直接进 NVENC。
+    if RENDERER == "gpu" and str(job.get("page") or "index.html") == "index.html":
+        return _render_player_video_gpu(workdir, job, ffmpeg)
 
     _br = float(job.get("bitrate") or OUT_BITRATE)
     _dur = float(job.get("duration") or 0)
@@ -1505,6 +1538,17 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     out_mp4 = os.path.join(out_dir, base + ".mp4")
     out_mp3 = os.path.join(out_dir, base + ".mp3")
     onset_abs = None
+    # segments.audio_source：外部预拼接音轨（如現場断歌后人工对齐拼好的 MP3）。
+    # 存在且可读时，第 3 步直接转它出 out_mp3，跳过从源视频切音轨；
+    # 歌词/时间轴仍按 out_mp3 走完整对齐链（CTC/DTW 会以拼接后的实际音轨为准）。
+    _audio_src = (seg.get("audio_source") or "").strip()
+    if _audio_src and not os.path.isabs(_audio_src):
+        _audio_src = os.path.join(workdir, _audio_src)
+    if _audio_src and not os.path.exists(_audio_src):
+        log("  ⚠ 外部音轨不存在：%s → 回退源视频切音轨" % _audio_src)
+        _audio_src = ""
+    if _audio_src:
+        log("  外部音轨: %s（跳过源切音轨）" % _audio_src)
 
     # 1. 切点：优先人工核定（seg.cut_start_abs/cut_end_abs，诊断/复核后手工锁定），
     #    否则波形精修（切点以音频波形为准：伴奏起点 / 尾音静音果断切分）。
@@ -1552,10 +1596,18 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     #    Live 改词句丢对齐。歌手名/封面由 segments 的 artist/cover_path 显式
     #    注入原唱（auto_cut 从曲库取），与演唱版本解耦。
     fetch_name = (seg.get("fetch_title") or seg["title_guess"] or "").strip()
-    _hint = lookup_library_artist(fetch_name)
+    # segments.artist_hint：显式指定「抓哪一版歌词/时长」的歌手提示，优先于曲库原唱。
+    # 用途：实唱是改编版（如《唯一》唱邓紫棋改编、画面仍标原唱告五人）。
+    # 只影响歌词/时长抓取；画面原唱名 artist 与封面 cover_path 仍由 segments 显式指定。
+    _hint = (seg.get("artist_hint") or "").strip() or lookup_library_artist(fetch_name)
     ref_text = ""
+    # ⚠ audio_source 时 cs/ce 是**外部音轨**的时间轴，和 SRT（源视频绝对时间）不是同一个
+    #   坐标系。拿 cs/ce 去切转写会取到完全无关的一段 → 字面重合率跌到 3%，把正确缓存
+    #   判成「同名不同歌」重抓并覆盖（2026-11-20《给我一个理由忘记》实测）。取词一律用
+    #   seg 的 start/end（源视频里的真实演唱位置）。
+    _rt_a, _rt_b = (seg["start"], seg["end"]) if _audio_src else (cs, ce)
     if srt_entries:
-        ref_text = "\n".join(t for (a, b, t) in srt_entries if cs - 2 <= a <= ce + 2)
+        ref_text = "\n".join(t for (a, b, t) in srt_entries if _rt_a - 2 <= a <= _rt_b + 2)
     lrc, cover_path, linfo = lyrics_fetch.fetch_lyrics_and_cover(
         fetch_name, artist_hint=_hint, dur=ce - cs, ref_text=ref_text,
         cache_dir=os.path.join(workdir, "_media_cache"))
@@ -1756,10 +1808,12 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         log("  原曲分析: slope=%.5f 残差RMS=%.3fs%s，锚点=%.3f" % (
             sync["slope"], sync.get("rms", 0.0), corr, sync["onset_abs"]))
         new_ce = round(sync["song_end_abs"] + timeline_sync.TAIL_KEEP, 3)
-        if cs + MIN_SEC <= new_ce < ce - 0.5:
+        if not _audio_src and cs + MIN_SEC <= new_ce < ce - 0.5:
             log("  尾部切点: %.2f → %.2f（伴奏结束 + %.1fs 余韵）" % (
                 ce, new_ce, timeline_sync.TAIL_KEEP))
             ce = new_ce
+        elif _audio_src:
+            log("  尾部切点: 外部音轨接管，维持 %.2f（音轨时长另算）" % ce)
         else:
             log("  尾部切点: 维持波形精修 %.2f（原曲结束点不在合理区间）" % ce)
     else:
@@ -1773,31 +1827,50 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
             % (_sdur, _smargin, LIVE_TAIL_MARGIN))
 
     # 3. 提取 MP3（192k，尾部 1.2s 淡出防硬切/爆音）
-    rc, _, err = run([ffmpeg, "-y", "-v", "error", "-ss", "%.3f" % cs, "-i", src,
-                      "-t", "%.3f" % dur, "-vn",
-                      "-af", "afade=t=out:st=%.3f:d=1.2" % max(0.0, dur - 1.3),
-                      "-c:a", "libmp3lame", "-b:a", "192k",
-                      "-metadata", "title=%s" % seg["title_guess"],
-                      "-id3v2_version", "3", out_mp3])
-    if rc != 0:
-        raise RuntimeError("MP3 提取失败：%s" % err[-300:])
-    # 提取结果长度复核（ffmpeg 越过源尾部时 rc=0 但输出被静默截断，只能靠长度发现）
-    _msz = os.path.getsize(out_mp3) if os.path.exists(out_mp3) else 0
-    _mdur = 0.0
-    if _msz >= 10240:
+    if _audio_src:
+        _adur = 0.0
         try:
-            _mdur = float(ffprobe_json(ffprobe, out_mp3)
+            _adur = float(ffprobe_json(ffprobe, _audio_src)
                           .get("format", {}).get("duration", 0) or 0)
         except Exception:
-            _mdur = 0.0
-    if _msz < 10240 or (_mdur and _mdur < dur - 1.5):
-        raise RuntimeError(
-            "MP3 只提取到 %.1fs / %d 字节（期望 %.1fs）—— 源文件尾部尚未落盘"
-            "（仍在录制？）或切点越过文件尾。已中止，避免产出废片。"
-            % (_mdur, _msz, dur))
-    if _mdur and abs(_mdur - dur) > 1.5:
-        log("  ⚠ MP3 时长 %.1fs 与切点跨度 %.1fs 不符（差 %+.1fs）"
-            % (_mdur, dur, _mdur - dur))
+            pass
+        if _adur <= 0:
+            raise RuntimeError("外部音轨无法读取时长：%s" % _audio_src)
+        dur = _adur
+        rc, _, err = run([ffmpeg, "-y", "-v", "error", "-i", _audio_src, "-vn",
+                          "-af", "afade=t=out:st=%.3f:d=1.2" % max(0.0, dur - 1.3),
+                          "-c:a", "libmp3lame", "-b:a", "192k",
+                          "-metadata", "title=%s" % seg["title_guess"],
+                          "-id3v2_version", "3", out_mp3])
+        if rc != 0:
+            raise RuntimeError("外部音轨转码失败：%s" % err[-300:])
+        log("  音轨: 外部拼接 %.2fs → 192k 重编码完成" % dur)
+    else:
+        rc, _, err = run([ffmpeg, "-y", "-v", "error", "-ss", "%.3f" % cs, "-i", src,
+                          "-t", "%.3f" % dur, "-vn",
+                          "-af", "afade=t=out:st=%.3f:d=1.2" % max(0.0, dur - 1.3),
+                          "-c:a", "libmp3lame", "-b:a", "192k",
+                          "-metadata", "title=%s" % seg["title_guess"],
+                          "-id3v2_version", "3", out_mp3])
+        if rc != 0:
+            raise RuntimeError("MP3 提取失败：%s" % err[-300:])
+        # 提取结果长度复核（ffmpeg 越过源尾部时 rc=0 但输出被静默截断，只能靠长度发现）
+        _msz = os.path.getsize(out_mp3) if os.path.exists(out_mp3) else 0
+        _mdur = 0.0
+        if _msz >= 10240:
+            try:
+                _mdur = float(ffprobe_json(ffprobe, out_mp3)
+                              .get("format", {}).get("duration", 0) or 0)
+            except Exception:
+                _mdur = 0.0
+        if _msz < 10240 or (_mdur and _mdur < dur - 1.5):
+            raise RuntimeError(
+                "MP3 只提取到 %.1fs / %d 字节（期望 %.1fs）—— 源文件尾部尚未落盘"
+                "（仍在录制？）或切点越过文件尾。已中止，避免产出废片。"
+                % (_mdur, _msz, dur))
+        if _mdur and abs(_mdur - dur) > 1.5:
+            log("  ⚠ MP3 时长 %.1fs 与切点跨度 %.1fs 不符（差 %+.1fs）"
+                % (_mdur, dur, _mdur - dur))
 
     # 3.2 片头静音保障：确保开头 ~1s 静音（不足则插入），避免"一进来就是伴奏"
     head_pad = _ensure_head_silence(ffmpeg, out_mp3)
@@ -1987,6 +2060,9 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "vcodec": OUT_VCODEC,             # h264_nvenc（默认，硬编）/ libx264（CPU 回退）
         "pages": OUT_PAGES,               # 并行渲染实例数（默认 3）
         "duration": round(ce - cs, 2),      # 渲染前磁盘预检要用（估算 mjpeg 峰值）
+        # 片头补静音秒数：浏览器通路从「解码后的音频」取时长（已含 pad），GPU 通路只读
+        # job.duration（= 切点跨度），必须显式补上 pad，否则成片短 head_pad，QC A02 报 BLOCK。
+        "head_pad": round(head_pad, 3),
         "out": render_tmp,
     }
     # 音轨副本必须在**开渲之前**备好：out_mp3 在 cuts/<date>/ 下，属人看得到的地方，
@@ -2177,6 +2253,10 @@ def main():
     ap.add_argument("--arc", action="store_true",
                     help="风格弧线（逐句调制配色/字距/转场）。--style B 已默认开启；"
                          "此处供 --player-page index_pv.html 手动组合时使用")
+    ap.add_argument("--renderer", choices=["browser", "gpu"], default=None,
+                    help="画面渲染器：browser=Chromium 逐帧（默认，兼容 B 手书）；"
+                         "gpu=显卡直算 moderngl+NVENC（仅 A 唱片 index.html，"
+                         "4K60 约 15ms/帧，比浏览器快约 4 倍）")
     ap.add_argument("--live", default="", help="人物挂点 live.json；不给则按 "
                                                "cuts/<date>/<歌名>/live/live.json 自动探测")
     ap.add_argument("--jz", default="", help="JIZURA 序列 jz.json；不给则按 "
@@ -2185,7 +2265,7 @@ def main():
 
     global OUT_RES, OUT_BITRATE, PERF_NO, OUT_ENCODER, OUT_PRESET, LRC_OVERRIDE, OUT_VCODEC
     global OUT_PAGES, AUTO_PAGES, GATE_IGNORE, GATE_ALLOW_NO_LRC, PLAYER_PAGE, STYLE
-    global ARC_ENABLED, LIVE_JSON, JZ_JSON
+    global ARC_ENABLED, LIVE_JSON, JZ_JSON, RENDERER
     if getattr(args, "style", None) and getattr(args, "player_page", None):
         raise SystemExit("--style 与 --player-page 只能二选一："
                          "--style 是高层入口（一个名字管版式 + 三个可选层），"
@@ -2202,6 +2282,11 @@ def main():
     ARC_ENABLED = bool(getattr(args, "arc", False) or STYLE["arc"])
     LIVE_JSON = getattr(args, "live", "") or ""
     JZ_JSON = getattr(args, "jz", "") or ""
+    if getattr(args, "renderer", None):
+        RENDERER = args.renderer
+    if RENDERER == "gpu" and "pv" in (PLAYER_PAGE or "").lower():
+        log("[render] --renderer gpu 只支持 A 唱片（index.html）；B 手书自动回退 browser")
+        RENDERER = "browser"
     _pp = os.path.join(_PLAYER_DIR, PLAYER_PAGE)
     if not os.path.exists(_pp):
         raise SystemExit("播放器页面不存在：%s（可选：%s）" % (
