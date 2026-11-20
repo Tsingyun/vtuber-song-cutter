@@ -22,6 +22,7 @@
 import io
 import json
 import os
+import random
 import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,6 +56,7 @@ DEFAULTS = {
     "assets": {
         "sticker": "",                   # 右上角贴图
         "watermark": "",                 # 歌词区右侧背景水印
+        "watermark_pool": [],            # 水印候选池：非空时按（场次+歌名）稳定随机取一张
     },
     # 运行时可执行文件（留空则自动探测）
     "runtime": {
@@ -150,6 +152,24 @@ def expand(p):
     if not p:
         return p
     return os.path.expanduser(os.path.expandvars(p))
+
+
+def pick_watermark(seed_text=""):
+    """歌词区水印立绘：watermark_pool 非空时按（场次+歌名）稳定随机取一张。
+
+    用固定种子而非纯 random：同一首歌重渲必须拿到同一张，否则「重渲换人」。
+    pool 里不存在的路径会被跳过（素材挪了目录不至于整片渲染失败）。
+    """
+    pool = path("assets", "watermark_pool", default=[]) or []
+    if isinstance(pool, str):
+        pool = [pool]
+    pool = [expand(p) for p in pool if p]
+    pool = [p for p in pool if p and os.path.exists(p)]
+    if pool:
+        if len(pool) == 1:
+            return pool[0]
+        return random.Random(str(seed_text)).choice(pool)
+    return expand(path("assets", "watermark", default="") or "")
 
 
 def node_candidates():

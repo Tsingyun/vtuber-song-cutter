@@ -32,6 +32,9 @@ def main():
     ap.add_argument("--artist", default="", help="原唱（画面 ORIGINAL）")
     ap.add_argument("--vocal", default="", help="演唱者（画面 VOCAL）")
     ap.add_argument("--track", default="", help="TRACK 标签，如 TRACK 03")
+    ap.add_argument("--watermark", default="",
+                    help="水印立绘（缺省按 config.assets.watermark_pool + 歌名稳定随机）")
+    ap.add_argument("--sticker", default="", help="右上角刊眉贴纸（缺省取 config.assets.sticker）")
     ap.add_argument("--start", type=float, default=0.0, help="起始秒（全片时间轴）")
     ap.add_argument("--sec", type=float, default=30.0, help="时长秒")
     ap.add_argument("--res", type=int, default=2, help="1=1080p 2=4K")
@@ -54,9 +57,13 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     tmp_v = os.path.join(out_dir, "_demo_v.mp4")
 
+    from songcut import config as CFG
+    wm = a.watermark or CFG.pick_watermark(a.title)
     job = {
         "title": a.title, "artist": a.artist, "vocal": a.vocal,
         "track": a.track, "lrc": lrc, "cover": a.cover,
+        "watermark": wm,
+        "sticker": a.sticker or CFG.expand(CFG.path("assets", "sticker", default="") or ""),
         "duration": dur or (a.start + a.sec), "fps": 60,
         "bitrate": 18_000_000,
     }

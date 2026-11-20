@@ -2249,7 +2249,10 @@ function wmSprite(){
 }
 function drawWatermark(){
   const spr = wmSprite(); if(!spr) return;
-  const h = LY.h * WM.HEIGHT, w = h * spr.width / spr.height;   // 锁定原图宽高比，不拉伸
+  let h = LY.h * WM.HEIGHT, w = h * spr.width / spr.height;   // 锁定原图宽高比，不拉伸
+  /* 横构图素材（16:9 立绘）：按高度算出来的宽度会远超歌词视口，
+     人物被 clip 切掉大半 → 改成按视口宽收口，与 GPU 通路的 bbox 裁切对齐 */
+  if(w > LY.w * 1.02){ w = LY.w * 1.02; h = w * spr.height / spr.width; }
   const dx = LY.x + LY.w - w - WM.RIGHT_PAD;
   const dy = LY.y + LY.h * WM.TOP_RATIO;
   ctx.save();

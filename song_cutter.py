@@ -32,6 +32,7 @@ import glob
 import io
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -2047,7 +2048,7 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "badge": CFG.path("streamer", "badge", default="") or "",   # 刊眉带品牌签名
         "mark": CFG.path("streamer", "mark", default="") or "",      # 品牌短标记（题饰/封面占位）
         "sticker": CFG.expand(CFG.path("assets", "sticker", default="") or ""),
-        "watermark": CFG.expand(CFG.path("assets", "watermark", default="") or ""),
+        "watermark": CFG.pick_watermark("%s|%s" % (date, seg.get("title") or seg.get("name") or "")),
         "lrc": lrc,
         "cover": cover_data,
         "artImage": _art_dataurl(),

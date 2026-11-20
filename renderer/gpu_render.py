@@ -8,11 +8,13 @@ gpu_render.py —— A 唱片「显卡直接算画面」渲染器（moderngl / O
   · CPU 只在启动时做一次性准备（文字→纹理、封面→纹理、噪点→纹理）；
   · 渲染循环里 CPU 只做两件事：推进动效状态、把 GPU 算好的 4K 帧读回来送编码器。
 
-画面管线（每帧 4 个 GPU pass）：
+画面管线（每帧 3 个 GPU pass，全部直接写在 final 缓冲上）：
   Pass1  scene  → 纸底渐变 / 三片光晕 / 纸纹噪点 / 圆角封面 / 进度条
-  Pass2  毛玻璃 → 对歌词区做两趟可分离高斯（1/2 分辨率降采样），得到磨砂底
-  Pass3  合成   → scene + 歌词区毛玻璃面板（圆角 + 磨砂噪点）
-  Pass4  文字   → 标题/信息/歌词/刊眉/时间，歌词用 9-tap 可变半径高斯做连续模糊
+  Pass2  水印   → 歌词区右侧立绘衬景（预烘渐变遮罩 + 预乘模糊，低不透明度）
+  Pass3  文字   → 标题/信息/歌词/刊眉/时间
+
+⚠ 不要给歌词区再叠「毛玻璃面板」：CPU 版根本没有这一层（drawWatermark 直接画在
+  纸底上），GPU 版多出来的模糊+混白+提亮会把那块抬成一块实心白板。见 RULES §146。
 
 歌词动效（对齐 index.html drawLyrics 的 Apple Music 质感）：
   · scrollY 指数缓动（τ≈0.18s）→ 平滑滚动
@@ -39,7 +41,7 @@ import sys
 import time
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 try:
     import moderngl
@@ -49,7 +51,28 @@ except ImportError:
 
 DESIGN_W, DESIGN_H = 1920, 1080
 SS = 2.0                     # 文字纹理超采样倍数（__init__ 里按输出分辨率覆写）
-_GL_SCISSOR_TEST = 0x0C11    # moderngl 未导出该常量，直接给 GL 值
+
+# ---- 歌词模糊：离线预烘多档高斯（RULES §145）----
+# 曾经走「shader 里 11-tap 伪高斯」，半径一大就露馅：采样步长 = 半径 texel，
+# 点与点之间毫无覆盖 → 每个笔画被复制成 11 个幽灵；再加 pad 只有 10 texel，
+# 采样越界被 CLAMP_TO_EDGE 拉成整片实心 → 屏幕上就是一张网格状马赛克。
+# 现在改成与 CPU 端（ctx.filter='blur()' 预烘 5 档）完全相同的策略：
+# 准备阶段用 Pillow 真高斯烘 5 档纹理，运行期只做两张纹理按权重 mix，零开销。
+BLUR_LV = (0.0, 3.0, 6.0, 9.0, 12.0)   # 设计 px，与 CPU 端 BLUR_LV 一致
+LY_PAD = 44.0                # 歌词纹理四周留白（设计 px）：必须 > 3×最大模糊半径
+BLUR_SS = 2.0                # 模糊档纹理的超采样（模糊本身是低频，2 倍足够）
+
+# ---- 歌词区水印立绘（对齐 CPU 端 WM 参数：renderer/player/index.html drawWatermark）----
+# CPU 通路一直是「纸底 → 水印立绘 → 歌词」三层，GPU 迁移时整层丢了。
+WM_ALPHA = 0.17              # 整体不透明度（0.1–0.2 = 水印感）
+WM_BLUR = 2.0                # 高斯半径（设计 px；4K 输出自动变 4 物理 px，与 CPU 同强度）
+WM_HEIGHT = 0.90             # 占歌词视口高度比例
+WM_RIGHT_PAD = 6.0           # 距视口右缘（设计 px）
+WM_TOP = 0.04                # 顶部下移比例
+WM_MASK_TOP = 0.12           # 头顶渐入带宽（0.30 → 1）
+WM_MASK_BOTTOM = 0.76        # 底部渐出起点（→1 渐隐到 0）
+WM_MASK_RIGHT = 0.93         # 右缘渐出起点
+WM_SS = 2.0                  # 纹理超采样（4K 下 1 设计 px = 1 纹理 px = 2 物理 px）
 
 # ---- A 唱片版式常量（对齐 renderer/player/index.html）----
 COVER_X, COVER_Y, COVER_S, COVER_R = 268.0, 96.0, 560.0, 10.0
@@ -266,6 +289,43 @@ def text_mask_chars(text, px, weight=600, pad=10):
     return img, w, h, xs
 
 
+def text_mask_chars_d(text, px, weight=600, pad=8.0, ss=1.0, blur=0.0):
+    """设计单位版 text_mask_chars：px/pad 都是**设计像素**，内部按 ss 放大栅格化。
+
+    与旧接口的区别（旧接口 px/pad 是纹理像素，语义模糊）：字号随 ss 缩放，但版面
+    尺寸（w/h/xs）统一按设计像素返回，调用方不必再除以 SS。blur>0 时在纹理上做
+    Pillow 真高斯——连续卷积，不会像稀疏 tap 那样长出网格。
+
+    **pad 必须足够大**：高斯在纹理边界外没有数据，pad 小于 3σ 就会被裁成硬边。
+    """
+    fpx = max(4, int(round(px * ss)))
+    ppad = float(pad) * ss
+    font = get_font(text, fpx, weight)
+    dummy = ImageDraw.Draw(Image.new("L", (4, 4)))
+    try:
+        bbox = dummy.textbbox((0, 0), text, font=font)
+    except Exception:
+        bbox = (0, 0, int(fpx * len(text) * 0.6), fpx)
+    w = max(1.0, bbox[2] - bbox[0] + ppad * 2)
+    h = max(1.0, bbox[3] - bbox[1] + ppad * 2)
+    img = Image.new("L", (max(1, int(round(w))), max(1, int(round(h)))), 0)
+    d = ImageDraw.Draw(img)
+    ox = ppad - bbox[0]
+    oy = ppad - bbox[1]
+    d.text((ox, oy), text, font=font, fill=255)
+    if blur > 0.01:
+        img = img.filter(ImageFilter.GaussianBlur(float(blur) * ss))
+    xs = []
+    for i in range(len(text)):
+        try:
+            pre = float(font.getlength(text[:i]))
+        except Exception:
+            pre = i * fpx * 0.6
+        xs.append((ox + pre) / ss)
+    # 返回的 w/h 用**实际纹理像素**换算，保证与 uv 严格同比例（取整误差 < 1 texel）
+    return img, img.size[0] / ss, img.size[1] / ss, xs
+
+
 def mask_to_rgba(mask):
     r = Image.new("L", mask.size, 255)
     return Image.merge("RGBA", (r, r, r, mask))
@@ -358,14 +418,50 @@ void main() {
     float hn = fract(sin(dot(p, vec2(12.9898, 78.233)) + u_frame * 3.7) * 43758.5453);
     col += (hn - 0.5) * 0.060;
 
-    vec2 c = p - (u_cover_rect.xy + u_cover_rect.zw * 0.5);
-    float d = sdRoundRect(c, u_cover_rect.zw * 0.5, u_cover_r);
+    /* ---- 封面组：严格对齐 CPU 版 drawCover 的五个层次 ----
+       ① 取色环境光晕  ② 两圈发丝轨道圆 + 冰蓝节点  ③ 贴底落影
+       ④ 圆角封面本体  ⑤ 发丝级内描边（1px 界定轮廓）
+       迁移时只做了 ④，封面于是「一块平贴的图」，少了 editorial 的悬浮感。
+       呼吸缩放 9s ±0.6%（与 CPU 同一节奏），顺带让静止段也有帧间变化（V04）。 */
+    float breathe = 1.0 + sin(u_time / 9.0 * 6.2831853) * 0.006;
+    vec2 csz = u_cover_rect.zw * breathe;
+    vec2 ccen = u_cover_rect.xy + u_cover_rect.zw * 0.5;
+    vec2 c = p - ccen;
+    float ea = 0.5;                       // 抗锯齿带宽（设计 px）
+    vec3 cInk = vec3(0.118, 0.157, 0.212);
+    vec3 cAcc = vec3(0.659, 0.698, 0.745);
+
+    // ① 环境光晕：从封面半径 0.30 处向外柔和扩散到 1.06
+    float da = length(c) / csz.x;
+    col += cAcc * 0.048 * (1.0 - smoothstep(0.30, 1.06, da));
+
+    // ② 轨道圆（两圈，自封面后缘露出）+ 环上冰蓝节点
+    vec2 o1 = vec2(csz.x * 0.14, -csz.x * 0.06);
+    float d1 = abs(length(c - o1) - csz.x * 0.63);
+    col = mix(col, cInk, 0.085 * (1.0 - smoothstep(ea, ea * 1.5, d1)));
+    vec2 o2 = vec2(-csz.x * 0.26, csz.x * 0.30);
+    float d2 = abs(length(c - o2) - csz.x * 0.62);
+    col = mix(col, cInk, 0.060 * (1.0 - smoothstep(ea, ea * 1.5, d2)));
+    float ang = -0.55 + sin(u_time / 7.0) * 0.06;
+    float dn = length(c - (o1 + vec2(cos(ang), sin(ang)) * csz.x * 0.63)) - 2.6;
+    col = mix(col, vec3(0.220, 0.698, 0.816), 0.80 * (1.0 - smoothstep(ea, ea * 1.5, dn)));
+
+    // ③ 落影：极轻的贴底椭圆（editorial 轻投影，不是重阴影）
+    vec2 sh = p - vec2(ccen.x, ccen.y + csz.x * 0.52);
+    float ds = length(vec2(sh.x / (csz.x * 0.60), sh.y / (csz.x * 0.13)));
+    col = mix(col, vec3(0.157, 0.196, 0.275), 0.10 * (1.0 - smoothstep(0.0, 1.0, ds)));
+
+    // ④ 封面本体（圆角裁切）
+    float d = sdRoundRect(c, csz * 0.5, u_cover_r);
     float m = 1.0 - smoothstep(-1.2, 1.2, d);
     if (m > 0.001) {
-        vec2 cuv = (c + u_cover_rect.zw * 0.5) / u_cover_rect.zw;
+        vec2 cuv = (c + csz * 0.5) / csz;
         vec3 cc = texture(u_cover, clamp(cuv, 0.0, 1.0)).rgb;
         col = mix(col, cc, m);
     }
+    // ⑤ 内描边：只在封面内侧 1px 带
+    float inb = step(d, 0.0) * (1.0 - smoothstep(-ea * 2.2, -ea * 0.6, d));
+    col = mix(col, cInk, 0.14 * inb);
 
     float ty = abs(p.y - 1002.0);
     if (p.x >= 96.0 && p.x <= 1824.0 && ty < 1.6) {
@@ -382,97 +478,38 @@ void main() {
 }
 """
 
-# Pass2：可分离高斯（对歌词区）
-FS_BLUR = """
+# Pass2：水印立绘（RGBA 原色直贴，不走 tint —— 人物配色要保留）
+FS_IMG = """
 #version 330
 in vec2 v_uv;
 out vec4 f_color;
-uniform sampler2D u_scene;
-uniform vec4 u_rect;      // 歌词区设计坐标 x,y,w,h
-uniform vec2 u_dir;       // 采样方向（设计坐标单位向量）
-uniform float u_radius;   // 模糊半径（设计坐标像素）
-uniform vec2 u_scene_res;
+uniform sampler2D u_img;
+uniform float u_alpha;
 void main() {
-    vec2 uv = (u_rect.xy + v_uv * u_rect.zw) / vec2(1920.0, 1080.0);
-    uv.y = 1.0 - uv.y;
-    vec2 texel = vec2(1.0) / u_scene_res;
-    vec2 stepv = u_dir * (u_radius * 0.5) * texel;
-    // 9-tap 高斯（权重 1/16,2/16,1/16 的 3x3 近似，扩展到 radius）
-    vec3 sum = texture(u_scene, uv).rgb * 4.0;
-    sum += texture(u_scene, uv + stepv).rgb * 2.0;
-    sum += texture(u_scene, uv - stepv).rgb * 2.0;
-    sum += texture(u_scene, uv + stepv * 2.0).rgb;
-    sum += texture(u_scene, uv - stepv * 2.0).rgb;
-    sum += texture(u_scene, uv + stepv * 0.5).rgb * 2.0;
-    sum += texture(u_scene, uv - stepv * 0.5).rgb * 2.0;
-    sum += texture(u_scene, uv + stepv * 1.5).rgb;
-    sum += texture(u_scene, uv - stepv * 1.5).rgb;
-    f_color = vec4(sum / 16.0, 1.0);
+    vec4 c = texture(u_img, v_uv);
+    if (c.a <= 0.001) discard;
+    f_color = vec4(c.rgb, c.a * u_alpha);
 }
 """
 
-# Pass3：合成（scene + 毛玻璃面板）
-FS_COMP = """
-#version 330
-in vec2 v_uv;
-in vec2 v_pos;
-out vec4 f_color;
-uniform sampler2D u_scene;
-uniform sampler2D u_blur;
-uniform sampler2D u_grain;
-uniform vec4  u_glass_rect;
-uniform float u_glass_r;
-uniform vec2  u_res;
 
-float sdRoundRect(vec2 p, vec2 b, float r) {
-    vec2 q = abs(p) - b + vec2(r);
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
-}
-void main() {
-    vec3 col = texture(u_scene, vec2(v_uv.x, 1.0 - v_uv.y)).rgb;
-
-    vec2 c = v_pos - (u_glass_rect.xy + u_glass_rect.zw * 0.5);
-    float d = sdRoundRect(c, u_glass_rect.zw * 0.5, u_glass_r);
-    float m = 1.0 - smoothstep(-1.5, 1.5, d);
-    if (m > 0.001) {
-        vec2 guv = (c + u_glass_rect.zw * 0.5) / u_glass_rect.zw;
-        guv.y = 1.0 - guv.y;
-        vec3 b = texture(u_blur, clamp(guv, 0.0, 1.0)).rgb;
-        vec3 paper = vec3(0.965, 0.962, 0.949);
-        vec3 glass = mix(b, paper, 0.16) * 1.015;      // 提亮 + 降对比 → 磨砂
-        float g = texture(u_grain, v_pos / 240.0).r;
-        glass += (g - 0.5) * 0.035;                     // 磨砂颗粒
-        col = mix(col, glass, m * 0.94);
-    }
-    f_color = vec4(col, 1.0);
-}
-"""
-
-# Pass4：文字（9-tap 可变半径高斯）
+# Pass4：文字（清晰纹理 / 预烘模糊档 双纹理线性混合，见 RULES §145）
 FS_TEXT = """
 #version 330
 in vec2 v_uv;
 out vec4 f_color;
 uniform sampler2D u_tex;
+uniform sampler2D u_tex2;  // 相邻模糊档；清晰行绑同一张，靠 u_mix=0 跳过
+uniform float u_mix;       // 0 → 全 u_tex，1 → 全 u_tex2
 uniform float u_alpha;
 uniform vec3  u_tint;
-uniform float u_blur;      // 模糊半径（纹理像素）
 uniform vec2  u_texel;     // 1/纹理尺寸
 uniform float u_kar;       // 卡拉OK 填充阈值（uv.x，<0 = 关闭）
 void main() {
     vec2 uv = v_uv;
-    float a;
-    if (u_blur <= 0.01) {
-        a = texture(u_tex, uv).a;
-    } else {
-        vec2 d = u_texel * u_blur;
-        float s = texture(u_tex, uv).a * 4.0;
-        s += (texture(u_tex, uv + vec2(d.x, 0.0)).a + texture(u_tex, uv - vec2(d.x, 0.0)).a) * 2.0;
-        s += (texture(u_tex, uv + vec2(0.0, d.y)).a + texture(u_tex, uv - vec2(0.0, d.y)).a) * 2.0;
-        s += texture(u_tex, uv + d).a + texture(u_tex, uv - d).a;
-        s += texture(u_tex, uv + vec2(d.x, -d.y)).a + texture(u_tex, uv + vec2(-d.x, d.y)).a;
-        s += texture(u_tex, uv + d * 2.0).a + texture(u_tex, uv - d * 2.0).a;
-        a = s / 18.0;
+    float a = texture(u_tex, uv).a;
+    if (u_mix > 0.002) {
+        a = mix(a, texture(u_tex2, uv).a, u_mix);
     }
     if (a <= 0.002) discard;
     vec3 col = u_tint;
@@ -513,15 +550,10 @@ class GpuRenderer:
         log("[gpu] %s | %s" % (self.ctx.info["GL_RENDERER"], self.ctx.info["GL_VERSION"]))
 
         self.prog_scene = self.ctx.program(vertex_shader=VS_POS, fragment_shader=FS_SCENE)
-        self.prog_blur = self.ctx.program(vertex_shader=VS, fragment_shader=FS_BLUR)
-        self.prog_comp = self.ctx.program(vertex_shader=VS, fragment_shader=FS_COMP)
+        self.prog_img = self.ctx.program(vertex_shader=VS, fragment_shader=FS_IMG)
         self.prog_text = self.ctx.program(vertex_shader=VS, fragment_shader=FS_TEXT)
 
         # 全屏 quad（设计坐标）
-        self.vbo_fs = self.ctx.buffer(np.array([
-            0, 0, 0, 0,  DESIGN_W, 0, 1, 0,  0, DESIGN_H, 0, 1,
-            0, DESIGN_H, 0, 1,  DESIGN_W, 0, 1, 0,  DESIGN_W, DESIGN_H, 1, 1,
-        ], dtype="f4").tobytes())
         # 只有位置的版本（场景 pass）
         self.vbo_pos = self.ctx.buffer(np.array([
             0, 0,  DESIGN_W, 0,  0, DESIGN_H,
@@ -530,26 +562,12 @@ class GpuRenderer:
         self.vbo_quad = self.ctx.buffer(reserve=6 * 4 * 4, dynamic=True)
 
         self.vao_scene = self.ctx.vertex_array(self.prog_scene, [(self.vbo_pos, "2f", "in_pos")])
-        self.vao_blur = self.ctx.vertex_array(self.prog_blur, [(self.vbo_fs, "2f 2f", "in_pos", "in_uv")])
-        self.vao_comp = self.ctx.vertex_array(self.prog_comp, [(self.vbo_fs, "2f 2f", "in_pos", "in_uv")])
+        self.vao_img = self.ctx.vertex_array(self.prog_img, [(self.vbo_quad, "2f 2f", "in_pos", "in_uv")])
         self.vao_text = self.ctx.vertex_array(self.prog_text, [(self.vbo_quad, "2f 2f", "in_pos", "in_uv")])
 
-        # FBO：scene(4K) / blur(歌词区，与输出同分辨率) 两趟 / final(4K)
-        # ⚠ 曾用 1/2 分辨率，毛玻璃区放大回 4K 时细节被抹平（肉眼「整块糊」）
-        #   且与文字锐度形成对比，观感像整体降分辨率。见 RULES §144。
-        self.tex_scene = self.ctx.texture((self.W, self.H), 4)
-        self.tex_scene.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self.fbo_scene = self.ctx.framebuffer(color_attachments=[self.tex_scene])
-
-        bw = max(64, int(LY_W * res))
-        bh = max(64, int(LY_H * res))
-        self.tex_b1 = self.ctx.texture((bw, bh), 4)
-        self.tex_b1.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self.fbo_b1 = self.ctx.framebuffer(color_attachments=[self.tex_b1])
-        self.tex_b2 = self.ctx.texture((bw, bh), 4)
-        self.tex_b2.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self.fbo_b2 = self.ctx.framebuffer(color_attachments=[self.tex_b2])
-
+        # FBO：只剩一张输出缓冲。曾经的「歌词区毛玻璃面板」两趟 pass 已移除——
+        # CPU 版歌词区根本没有面板（drawWatermark 直接画在纸底上），GPU 版多出来的
+        # 模糊+混白+提亮把那块抬成实心白板，与周围纸底明显分界。见 RULES §146。
         self.tex_final = self.ctx.texture((self.W, self.H), 4)
         self.fbo_final = self.ctx.framebuffer(color_attachments=[self.tex_final])
 
@@ -591,25 +609,143 @@ class GpuRenderer:
         self.tex_cache.append(tex)
         return tex
 
-    def _set_quad(self, x, y, w, h):
+    def _set_quad(self, x, y, w, h, cx0=None, cx1=None):
+        """写 quad 顶点。给了 cx0/cx1 就做**横向 uv 裁剪**（等价 ctx.clip 左右边）。
+
+        不能用 GL scissor：standalone context 下 ctx.scissor + enable_direct 不生效
+        （长歌词行会直接冲出画布右缘）。裁 uv 是确定性的，不依赖任何 GL 状态。
+        """
+        if cx0 is None and cx1 is None:
+            v = np.array([
+                x, y, 0, 0,  x + w, y, 1, 0,  x, y + h, 0, 1,
+                x, y + h, 0, 1,  x + w, y, 1, 0,  x + w, y + h, 1, 1,
+            ], dtype="f4")
+            self.vbo_quad.write(v.tobytes())
+            return True
+        cx0 = -1e9 if cx0 is None else cx0
+        cx1 = 1e9 if cx1 is None else cx1
+        x0, x1 = x, x + w
+        if x1 <= cx0 or x0 >= cx1 or w <= 0.0:
+            return False                     # 整块在裁剪区外：直接不画
+        X0, X1 = max(x0, cx0), min(x1, cx1)
+        u0 = (X0 - x0) / w
+        u1 = (X1 - x0) / w
         v = np.array([
-            x, y, 0, 0,  x + w, y, 1, 0,  x, y + h, 0, 1,
-            x, y + h, 0, 1,  x + w, y, 1, 0,  x + w, y + h, 1, 1,
+            X0, y, u0, 0,  X1, y, u1, 0,  X0, y + h, u0, 1,
+            X0, y + h, u0, 1,  X1, y, u1, 0,  X1, y + h, u1, 1,
         ], dtype="f4")
         self.vbo_quad.write(v.tobytes())
+        return True
 
-    def _draw_text(self, tex, x, y, w, h, alpha, tint, blur_px=0.0, kar=-1.0):
-        self._set_quad(x, y, w, h)
+    def _draw_text(self, tex, x, y, w, h, alpha, tint, kar=-1.0, tex2=None,
+                   mix=0.0, cx0=None, cx1=None):
+        """贴一张文字纹理。tex2/mix 用于模糊行：在相邻两档预烘纹理间线性插值。
+
+        清晰行传 mix=0（tex2 绑回 tex 本身，避免采样器空绑定）。
+        cx0/cx1 为横向裁剪边界（歌词视口），uv 会同步缩放，卡拉OK 阈值不受影响。
+        """
+        if not self._set_quad(x, y, w, h, cx0, cx1):
+            return
         tex.use(location=0)
+        t2 = tex2 if tex2 is not None else tex
+        t2.use(location=1)
         p = self.prog_text
         p["u_tex"] = 0
-        p["u_res"] = (DESIGN_W, DESIGN_H)
+        try:
+            p["u_tex2"] = 1
+            p["u_mix"] = float(mix) if tex2 is not None else 0.0
+        except KeyError:
+            pass                      # 编译器若优化掉该 uniform，退回单纹理
         p["u_alpha"] = float(alpha)
         p["u_tint"] = tuple(c / 255.0 for c in tint)
-        p["u_blur"] = float(blur_px * SS)
+        # u_texel 只用于卡拉OK 的半像素羽化，仍按清晰纹理算（模糊行不开 kar）
         p["u_texel"] = (1.0 / tex.size[0], 1.0 / tex.size[1])
         p["u_kar"] = float(kar)
+        try:
+            p["u_res"] = (DESIGN_W, DESIGN_H)
+        except KeyError:
+            pass
         self.vao_text.render()
+
+    # ------------------------------------------------------------------
+    # 水印立绘：贴纸式「原图直接压上去」是不可接受的（浅色人物在米白纸上
+    # 会变成一块生硬的白斑，深色人物又会压住歌词）。这里走 CPU 版同一套弱化：
+    # 按 alpha 裁到人物主体 → 纵向/横向渐变遮罩（= CSS mask-image）→ 预乘模糊
+    # → 低不透明度贴到纸底上。视觉上只是一层隐约的衬影。
+    def _prep_watermark(self, path):
+        im = Image.open(path).convert("RGBA")
+        bb = im.getchannel("A").getbbox()
+        if bb:
+            im = im.crop(bb)                       # 只留人物，去掉大片透明画布
+        h = LY_H * WM_HEIGHT
+        w = h * im.width / max(1, im.height)
+        im = im.resize((max(1, int(round(w * WM_SS))),
+                        max(1, int(round(h * WM_SS)))), Image.LANCZOS)
+        aw, ah = im.size
+        arr = np.asarray(im, dtype=np.float32) / 255.0
+        a = arr[..., 3]
+        ys = np.linspace(0.0, 1.0, ah, dtype=np.float32)
+        xs = np.linspace(0.0, 1.0, aw, dtype=np.float32)
+        gv = np.interp(ys, [0.0, WM_MASK_TOP, WM_MASK_BOTTOM, 1.0],
+                       [0.30, 1.0, 1.0, 0.0]).astype(np.float32)
+        gh = np.interp(xs, [0.0, WM_MASK_RIGHT, 1.0], [1.0, 1.0, 0.0]).astype(np.float32)
+        a = a * gv[:, None] * gh[None, :]
+        # 预乘后再模糊：直接对 RGBA 各通道独立模糊，透明区的黑 RGB 会糊出一圈脏边
+        pre = np.concatenate([arr[..., :3] * a[..., None], a[..., None]], axis=-1)
+        pi = Image.fromarray(np.clip(pre * 255.0 + 0.5, 0, 255).astype(np.uint8), "RGBA")
+        if WM_BLUR > 0:
+            pi = pi.filter(ImageFilter.GaussianBlur(WM_BLUR * WM_SS))
+        pa = np.asarray(pi, dtype=np.float32) / 255.0
+        aa = pa[..., 3:4]
+        rgb = np.clip(np.divide(pa[..., :3], np.maximum(aa, 1e-4)), 0.0, 1.0)
+        img = Image.fromarray((np.concatenate([rgb, aa], axis=-1) * 255.0 + 0.5)
+                              .astype(np.uint8), "RGBA")
+        tex = self.ctx.texture(img.size, 4, img.tobytes())
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self.tex_cache.append(tex)
+        self.t_water = tex
+        ww, hh = im.width / WM_SS, im.height / WM_SS
+        self.water_geo = (LY_X + LY_W - ww - WM_RIGHT_PAD, LY_Y + LY_H * WM_TOP, ww, hh)
+        log("[gpu] 水印立绘 %s → %.0fx%.0f 设计 px @ alpha %.2f"
+            % (os.path.basename(path), ww, hh, WM_ALPHA))
+
+    def _prep_sticker(self, path):
+        """刊眉贴纸（右上角，对齐 CPU 版 drawInfo 的 STICKER 分支）。"""
+        im = Image.open(path).convert("RGBA")
+        h = 60.0
+        w = h * im.width / max(1, im.height)
+        im = im.resize((max(1, int(round(w * WM_SS))),
+                        max(1, int(round(h * WM_SS)))), Image.LANCZOS)
+        tex = self.ctx.texture(im.size, 4, im.tobytes())
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self.tex_cache.append(tex)
+        self.t_sticker = tex
+        # CPU: drawImage(img, 1824-bw, 76-bh+11, bw, bh) —— 图片上部 33.6% 是留白
+        self.sticker_geo = (1824.0 - w, 76.0 - h + 11.0, w, h)
+
+    def _draw_image(self, tex, geo, alpha, cx0=None, cx1=None):
+        """贴一张 RGBA 图（水印立绘 / 刊眉贴纸共用）。"""
+        if not tex or not geo:
+            return
+        x, y, w, h = geo
+        if not self._set_quad(x, y, w, h, cx0, cx1):
+            return
+        tex.use(location=0)
+        p = self.prog_img
+        p["u_img"] = 0
+        p["u_alpha"] = float(alpha)
+        # ⚠ VS 靠 u_res 做设计坐标→NDC；漏传会变成除以 0，三角形整个退化，
+        #   画面「什么都没画」却零报错（毛玻璃 pass 早年踩过同一个坑）
+        p["u_res"] = (DESIGN_W, DESIGN_H)
+        self.vao_img.render()
+
+    def _draw_watermark(self):
+        # 立绘宽度可能超过歌词视口，横向裁到视口内（不能压到封面上）
+        self._draw_image(self.t_water, self.water_geo, WM_ALPHA,
+                         LY_X, LY_X + LY_W)
+
+    def _draw_sticker(self):
+        self._draw_image(self.t_sticker, self.sticker_geo, 1.0)
 
     # ------------------------------------------------------------------
     def prepare(self):
@@ -662,16 +798,27 @@ class GpuRenderer:
         self.t_date = self._upload(m)
         self.date_geo = (1824.0 - w / SS, 1054.0 - h / SS * 0.78, w / SS, h / SS)
 
-        # 歌词纹理（清晰一套，模糊由 shader 做）
-        # 每行额外存：字符横向起点 xs（设计坐标）+ 逐字时间 words + 行尾时间 fill，
-        # 供卡拉OK填充用（与 CPU 端 karaokeFrac/karaokeWidth 同一套算法）。
+        # 歌词纹理：清晰一套 + 模糊四档**预烘**（BLUR_LV[1:]）。
+        # 清晰与模糊都用 LY_PAD 留白（设计 px），保证两者 uv 严格同构，混合时不错位；
+        # pad 必须 > 3×最大半径，否则高斯在纹理边界被裁掉，边缘拉成硬块。
+        # 模糊档纹理多一道 resize，把尺寸锁成清晰纹理的 BLUR_SS/SS 倍，消掉取整误差。
         self.lyr = []
         for t, txt, words, fill in self.lyrics:
-            m, w, h, xs = text_mask_chars(txt, int(60 * SS), 700)
+            m, w, h, xs = text_mask_chars_d(txt, 60.0, 700, pad=LY_PAD, ss=SS)
+            tv = self._upload(m)
+            tw = max(1, int(round(m.size[0] * BLUR_SS / SS)))
+            th = max(1, int(round(m.size[1] * BLUR_SS / SS)))
+            bl = []
+            for lv in BLUR_LV[1:]:
+                bm, _, _, _ = text_mask_chars_d(txt, 60.0, 700, pad=LY_PAD,
+                                                ss=BLUR_SS, blur=lv)
+                if bm.size != (tw, th):
+                    bm = bm.resize((tw, th), Image.BILINEAR)
+                bl.append(self._upload(bm))
             self.lyr.append({
-                "tex": self._upload(m),
-                "w": w / SS, "h": h / SS,
-                "xs": [v / SS for v in xs],
+                "tex": tv, "blur": bl,
+                "w": w, "h": h,
+                "xs": xs,
                 "text": txt, "words": words, "fill": fill,
                 "t": t,
             })
@@ -681,6 +828,33 @@ class GpuRenderer:
                          else (self.lyr[i + 1]["t"] if i + 1 < len(self.lyr) else duration))
             if sp["end"] is not None and sp["end"] <= sp["t"] + 0.05:
                 sp["end"] = sp["t"] + max(1.0, duration / max(1, len(self.lyr)))
+        # 水印立绘（歌词区右侧衬景，纸底之上 / 歌词之下）
+        self.t_water = None
+        self.water_geo = None
+        self.t_sticker = None
+        self.sticker_geo = None
+        wm = (j.get("watermark") or "").strip()
+        if wm and os.path.exists(wm):
+            try:
+                self._prep_watermark(wm)
+            except Exception as e:
+                log("[gpu] ⚠ 水印立绘加载失败，按无水印继续：%s" % e)
+        elif wm:
+            log("[gpu] ⚠ 水印立绘路径不存在：%s" % wm)
+        else:
+            log("[gpu] 未配置水印立绘（config.assets.watermark）")
+
+        # 刊眉贴纸（右上角；CPU 版在最上层，这里放在文字之后画）
+        st = (j.get("sticker") or "").strip()
+        if st and os.path.exists(st):
+            try:
+                self._prep_sticker(st)
+                # 贴纸占了右上角，TRACK 文字让位到贴纸左侧（CPU 版同样处理）
+                tx, ty2, tw, th = self.track_geo
+                self.track_geo = (1824.0 - self.sticker_geo[2] - 14.0 - tw, ty2, tw, th)
+            except Exception as e:
+                log("[gpu] ⚠ 贴纸加载失败，跳过：%s" % e)
+
         # 当前行左侧绯玫红标记（3×78 设计像素的纯白块，绘制时 tint 成红色）
         self.t_bar = self._upload(Image.new("L", (max(1, int(3 * SS)), max(1, int(78 * SS))), 255))
 
@@ -778,7 +952,7 @@ class GpuRenderer:
         idx = self._update_motion(t)
 
         # ---------- Pass1: scene ----------
-        self.fbo_scene.use()
+        self.fbo_final.use()
         ctx.clear(0.96, 0.96, 0.95, 1.0)
         ps = self.prog_scene
         ps["u_res"] = (DESIGN_W, DESIGN_H)
@@ -795,38 +969,10 @@ class GpuRenderer:
         self.tex_cover.use(location=0)
         self.vao_scene.render()
 
-        # ---------- Pass2: 毛玻璃（水平→b1，垂直→b2）----------
-        pb = self.prog_blur
-        pb["u_res"] = (DESIGN_W, DESIGN_H)
-        pb["u_scene"] = 0
-        pb["u_rect"] = (LY_X, LY_Y, LY_W, LY_H)
-        pb["u_scene_res"] = (float(self.W), float(self.H))
-        pb["u_radius"] = 34.0 * self.res
-        self.tex_scene.use(location=0)
-        self.fbo_b1.use()
-        pb["u_dir"] = (1.0, 0.0)
-        self.vao_blur.render()
-        self.fbo_b2.use()
-        self.tex_b1.use(location=0)
-        pb["u_dir"] = (0.0, 1.0)
-        self.vao_blur.render()
+        # ---------- Pass2: 水印立绘（纸底之上 / 歌词之下，与 CPU 版 drawWatermark 同层）----------
+        self._draw_watermark()
 
-        # ---------- Pass3: 合成 ----------
-        self.fbo_final.use()
-        ctx.clear(0.96, 0.96, 0.95, 1.0)
-        pc = self.prog_comp
-        pc["u_res"] = (DESIGN_W, DESIGN_H)
-        pc["u_scene"] = 0
-        pc["u_blur"] = 1
-        pc["u_grain"] = 2
-        pc["u_glass_rect"] = (LY_X, LY_Y, LY_W, LY_H)
-        pc["u_glass_r"] = 12.0
-        self.tex_scene.use(location=0)
-        self.tex_b2.use(location=1)
-        self.tex_grain.use(location=2)
-        self.vao_comp.render()
-
-        # ---------- Pass4: 文字 ----------
+        # ---------- Pass3: 文字 ----------
         self._draw_text(self.t_brand, *self.brand_geo, 0.55, INK)
         self._draw_text(self.t_track, *self.track_geo, 0.55, INK)
         self._draw_text(self.t_len, *self.len_geo, 0.55, INK)
@@ -845,32 +991,21 @@ class GpuRenderer:
 
         # 歌词（Apple Music 式）
         if idx >= 0 and self.lyr:
-            # 视口裁剪（等价 CPU 端 ctx.clip）：当前行超宽横向滚动时文字会顶到画布边缘，
-            # 不裁就像「跑出面板」。GL 的 scissor 原点在左下，y 要翻转。
-            # moderngl 没有 SCISSOR_TEST 常量，用 enable_direct(GL_SCISSOR_TEST=0x0C11)。
-            self.ctx.scissor = (int((LY_X - 24) * self.res),
-                                int((DESIGN_H - (LY_Y + LY_H)) * self.res),
-                                int((LY_W + 48) * self.res),
-                                int(LY_H * self.res))
-            _sc = True
-            try:
-                self.ctx.enable_direct(_GL_SCISSOR_TEST)
-            except Exception:
-                _sc = False
+            # 视口左右边界（等价 CPU 端 ctx.clip）：当前行超宽横向滚动时不能冲出画布。
+            # 走 uv 裁剪而非 GL scissor —— standalone context 下 scissor 不生效（踩过）。
+            clip_l, clip_r = LY_X - 24.0, LY_X + LY_W + 24.0
             n = len(self.lyr)
             for k in range(n):
                 sp = self.lyr[k]
                 y = LY_Y + k * LY_LH - self.scrollY
                 if y + LY_LH < LY_Y - 40 or y > LY_Y + LY_H + 40:
                     continue
-                tex = sp["tex"]
                 fs = 48.0 + 17.0 * self.act[k]
                 sc = fs / 60.0
+                cw = sp["w"] - 2 * LY_PAD          # 文字实际占宽（设计 px，扣掉留白）
+                if k != idx and cw * sc > LY_W - 12:
+                    sc = (LY_W - 12) / cw
                 w, h = sp["w"] * sc, sp["h"] * sc
-                if k != idx and w > LY_W - 12:
-                    s2 = (LY_W - 12) / sp["w"]
-                    w, h = sp["w"] * s2, sp["h"] * s2
-                    sc = s2
                 cy = y + LY_LH * 0.5
                 # 视口上下 80px 边缘淡出
                 edge = min(
@@ -878,7 +1013,17 @@ class GpuRenderer:
                     max(0.0, min(1.0, ((LY_Y + LY_H + 42) - (y + LY_LH)) / 120.0)))
                 edge = edge * edge * (3 - 2 * edge)
                 alpha = (self.bs[k] + (1 - self.bs[k]) * self.act[k]) * edge
-                blur = self.bl[k] if self.bl[k] is not None else 0.0
+                # 模糊：在相邻两档**预烘**纹理间线性插值（0=清晰 / 3 / 6 / 9 / 12 设计 px）
+                tex, tex2, mix = sp["tex"], None, 0.0
+                blv = self.bl[k] if self.bl[k] is not None else 0.0
+                nb = len(sp["blur"])
+                if blv > 0.4 and nb:
+                    f = min(float(nb), max(0.0, blv) / BLUR_LV[1])
+                    lo = int(math.floor(f))
+                    hi = min(nb, lo + 1)
+                    mix = f - lo
+                    tex = sp["tex"] if lo == 0 else sp["blur"][lo - 1]
+                    tex2 = sp["tex"] if hi == 0 else sp["blur"][hi - 1]
                 x = LY_X + 4.0 * self.act[k]
                 kar = -1.0
                 if k == idx:
@@ -886,25 +1031,23 @@ class GpuRenderer:
                     # 已唱比例 → shader 的 uv 阈值（分母是整幅纹理，故含 pad）
                     sung = self._sung_x(sp, t)
                     # ⚠ 分母必须是 sp["w"]（设计坐标宽），不是 sp["w"]*SS：
-                    #   xs 在 prepare 里已除以 SS 转成设计坐标，再乘 SS 会让填充进度
-                    #   慢 SS 倍（4K 下只亮 1/4 行）。
+                    #   xs 已是设计坐标，再乘 SS 会让填充进度慢 SS 倍（4K 下只亮 1/4 行）。
                     kar = max(0.0, min(1.0, sung / max(1e-3, sp["w"])))
                     # 长行横向滚动：让「正在唱的字」稳定停在视口 42% 处
                     view = LY_W - 12.0
-                    if w > view:
-                        want = max(0.0, min(w - view, sung * sc - view * 0.42))
+                    if cw * sc > view:
+                        want = max(0.0, min(cw * sc - view, sung * sc - view * 0.42))
                     else:
                         want = 0.0
                     self.ox[k] += (want - self.ox[k]) * min(1.0, self.dt * 3.2)
                     x -= self.ox[k]
                 elif abs(self.ox[k]) > 0.5:
                     self.ox[k] += (0.0 - self.ox[k]) * min(1.0, self.dt * 3.2)
-                self._draw_text(tex, x, cy - h * 0.5, w, h, alpha, INK, blur, kar)
-            if _sc:
-                try:
-                    self.ctx.disable_direct(_GL_SCISSOR_TEST)
-                except Exception:
-                    pass
+                # x 是「文字左端」，quad 左边界要再退 LY_PAD*sc（纹理四周留白同比例缩放）
+                self._draw_text(tex, x - LY_PAD * sc, cy - h * 0.5, w, h,
+                                alpha, INK, kar, tex2, mix, clip_l, clip_r)
+
+        self._draw_sticker()          # 刊眉贴纸压在最上层（CPU 版同样是最后画）
 
         return self.fbo_final.read(components=4, dtype="f1")
 
