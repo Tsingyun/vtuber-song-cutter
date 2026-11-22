@@ -1357,11 +1357,15 @@ HEAD_SIL_MIN = 0.8        # 低于该值则补插静音
 
 
 def _shift_lrc(lrc_text, pad):
-    """LRC 全部时间戳后移 pad 秒（片头补静音后，歌词时间轴同步平移）。"""
+    """LRC 全部时间戳后移 pad 秒（片头补静音后，歌词时间轴同步平移）。
+
+    ⚠ 必须同时平移增强型逐字标签 <mm:ss.xx>：只移行首 [mm:ss.xx] 会让行首与
+    逐字标签相差 pad，卡拉OK 填充整行错位（曾出现行首 1.65s、首字 0.80s 的劈叉）。
+    """
     def rep(m):
-        t = float(m.group(1)) * 60 + float(m.group(2)) + pad
-        return "[%02d:%05.2f]" % (int(t // 60), t % 60)
-    return re.sub(r"\[(\d+):(\d+(?:\.\d+)?)\]", rep, lrc_text)
+        t = max(0.0, float(m.group(2)) * 60 + float(m.group(3)) + pad)
+        return "%s%02d:%05.2f%s" % (m.group(1), int(t // 60), t % 60, m.group(4))
+    return re.sub(r"([\[<])(\d+):(\d+(?:\.\d+)?)([\]>])", rep, lrc_text)
 
 
 def _ensure_head_silence(ffmpeg, mp3_path, target=HEAD_SIL_TARGET, min_sil=HEAD_SIL_MIN):
