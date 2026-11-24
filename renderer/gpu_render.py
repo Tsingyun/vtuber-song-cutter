@@ -78,6 +78,7 @@ WM_SS = 2.0                  # 纹理超采样（4K 下 1 设计 px = 1 纹理 p
 COVER_X, COVER_Y, COVER_S, COVER_R = 268.0, 96.0, 560.0, 10.0
 LY_X, LY_Y, LY_W, LY_H, LY_LH = 980.0, 140.0, 844.0, 844.0, 102.0
 FOCAL_Y = LY_Y + LY_H * 0.242          # 当前行落点（≈344）
+FILL_SEC_PER_CHAR = 0.45               # 逐字填充的时长估价（秒/字），只在行间长间奏时兜底
 BAR_X, BAR_Y, BAR_W = 96.0, 1002.0, 1728.0
 INK = (30, 40, 54)                     # #1E2836
 PAPER_TOP = (250, 249, 246)
@@ -828,6 +829,17 @@ class GpuRenderer:
                          else (self.lyr[i + 1]["t"] if i + 1 < len(self.lyr) else duration))
             if sp["end"] is not None and sp["end"] <= sp["t"] + 0.05:
                 sp["end"] = sp["t"] + max(1.0, duration / max(1, len(self.lyr)))
+            # 行间长间奏保护（2026-11-25）：逐字填充的推进时长取「下一行起点」，
+            # 副歌最后一句后面跟一整段间奏时（实测《快乐的扑满》L16：跨 10.2s，
+            # 实际只唱 2.6s），字会被拖成每 1.1 秒才点亮一个 —— 观感是「唱完还
+            # 卡在这句」。跨度超过字数估价 2.2 倍时压回估价；阈值放这么宽是为了
+            # 不碰真正的慢歌（10 字唱 8 秒不会触发）。
+            if sp["fill"] is None and sp["end"] is not None:
+                _n = len(sp["words"]) if sp["words"] else len(
+                    [c for c in sp["text"] if c.strip()])
+                _est = max(1.6, FILL_SEC_PER_CHAR * _n)
+                if sp["end"] - sp["t"] > 2.2 * _est:
+                    sp["end"] = sp["t"] + _est
         # 水印立绘（歌词区右侧衬景，纸底之上 / 歌词之下）
         self.t_water = None
         self.water_geo = None

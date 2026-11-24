@@ -43,8 +43,20 @@ def parse_lrc(text_or_path):
     return out
 
 
+MIN_ANCHOR_RUN = 0.9   # 短于此的乐句不可能是整行歌词的起点（QC line_dur_min 是 0.8s）
+_RUN_FORBID = 1e6
+
+
 def match_anchors(lines, runs, win=2.5, skip_line=6.0, skip_run=3.0, gap_min=0.45):
-    """单调一对一匹配。返回 list[(行号, 乐句号 or None, 偏差 or None, 是否锚点)]"""
+    """单调一对一匹配。返回 list[(行号, 乐句号 or None, 偏差 or None, 是否锚点)]
+
+    MIN_ANCHOR_RUN 的作用（2026-11-25）：DP 只看「乐句起点 vs 行时间」的距离，
+    不看这个乐句能不能装下一整行歌词。11/22《快乐的扑满》里 51.57~52.34 是一个
+    0.77 秒的尾音气口，DP 却把「还是喜欢小吃」配了上去（距离 1.49s，比跳过该段的
+    代价 skip_run=3.0 更便宜），把本该 +0.13s 的正确锚点挤掉 —— L09 因此报出
+    −1.49s 的假偏差并判 BLOCK。短乐句必须**直接禁止**参与匹配（试过只加 6.0 惩罚，
+    DP 仍会「把行 18 精确配上下一段」来省代价，整体反而更划算，惩罚形同虚设）。
+    """
     NL, NR = len(lines), len(runs)
     lt = [l["t"] for l in lines]
     rs = [r[0] for r in runs]
@@ -56,7 +68,9 @@ def match_anchors(lines, runs, win=2.5, skip_line=6.0, skip_run=3.0, gap_min=0.4
     for i in range(NL - 1, -1, -1):
         for j in range(NR - 1, -1, -1):
             dt = abs(rs[j] - lt[i])
-            c1 = dp[i + 1][j + 1] + (dt if dt <= win else win + 8.0)
+            usable = (runs[j][1] - runs[j][0]) >= MIN_ANCHOR_RUN
+            c1 = (dp[i + 1][j + 1] + (dt if dt <= win else win + 8.0)) \
+                if usable else INF
             c2 = dp[i + 1][j] + skip_line
             c3 = dp[i][j + 1] + skip_run
             best = min((c1, 1), (c2, 2), (c3, 3), key=lambda kv: kv[0])

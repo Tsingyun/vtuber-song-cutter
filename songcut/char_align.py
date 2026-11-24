@@ -36,6 +36,7 @@ PAD_TAIL = 0.45
 MIN_SEG = 1.2       # 忽略过短乐句
 CHAR_SEC = 0.22     # 行首字未命中时，按平均字距回推
 OUTLIER_S = 4.0     # 与邻域趋势偏差超过此值 → 判为重复段误匹配
+WINDOW_S = 7.0      # 第二轮局部匹配的搜索半径（相对「原曲时间 + 全局偏移」）
 
 _pf = None
 
@@ -163,8 +164,8 @@ def _score(a, b):
     return _lcs(a, b) / float(min(len(a), len(b)))
 
 
-def _hit_anchors(rows, chars):
-    """LCS 对齐 → 每行锚点 {行号: (时刻, 置信字数)}。chars 为 cut 相对时间。"""
+def _lcs_hits(rows, chars):
+    """全局 LCS → {行号: (时刻, 命中字数)}。"""
     L, idx_of = [], []
     for i, (_t, txt) in enumerate(rows):
         for ch in txt:
@@ -189,14 +190,89 @@ def _hit_anchors(rows, chars):
     return anchors
 
 
+def _robust_offset(anchors, rows):
+    """锚点偏差的中位数 / MAD。MAD 小 = 全曲速度恒定，可用「单一全局偏移」判据。"""
+    ds = sorted(anchors[li][0] - rows[li][0] for li in anchors)
+    n = len(ds)
+    if n < 5:
+        return None, None
+    med = ds[n // 2] if n % 2 else 0.5 * (ds[n // 2 - 1] + ds[n // 2])
+    dev = sorted(abs(d - med) for d in ds)
+    m = len(dev)
+    mad = dev[m // 2] if m % 2 else 0.5 * (dev[m // 2 - 1] + dev[m // 2])
+    return med, mad
+
+
+def _window_hits(rows, chars, med, win=WINDOW_S):
+    """第二轮：按「原曲时间 + 全局偏移」预测每行位置，只在预测窗内做局部 LCS。
+
+    为什么必须这么做（2026-11-25 事故）：整首歌的**副歌出现三遍**，全局 LCS 会
+    把靠后的行匹到别的遍数上。11/22《快乐的扑满》实测 L29~L32 被匹到第三遍副歌
+    （整体偏 +4.5s），连带把正确的 L28 判成离群剔除 —— 于是 L28 之后整段向右
+    平移约 20 秒，用户听到的就是「45 秒之后全对不上」。
+    局部窗把候选锁死在该行该在的位置，重复段无法跨窗抢锚点。
+    """
+    out = {}
+    for li, (t0, txt) in enumerate(rows):
+        tgt = _cjk(txt)
+        if len(tgt) < 2:
+            continue
+        pred = t0 + med
+        sub = [(t, ch) for (t, ch) in chars
+               if pred - win <= t <= pred + win and "\u4e00" <= ch <= "\u9fff"]
+        if len(sub) < 2:
+            continue
+        sm = difflib.SequenceMatcher(None, tgt,
+                                     "".join(ch for _t, ch in sub),
+                                     autojunk=False)
+        hit = None
+        for blk in sm.get_matching_blocks():
+            if blk.size >= 2:                  # 局部匹配要求 >=2 字，1 字太容易撞
+                hit = (blk.a, blk.b, blk.size)
+                break
+        if hit is None:
+            continue
+        off, boff, size = hit
+        out[li] = (sub[boff][0] - CHAR_SEC * off, size)
+    return out
+
+
+def _hit_anchors(rows, chars):
+    """两轮锚点：全局 LCS 定全局偏移 → 局部窗逐行修正。chars 为 cut 相对时间。"""
+    anc = _lcs_hits(rows, chars)
+    if len(anc) < 5:
+        return anc
+    med, _mad = _robust_offset(anc, rows)
+    if med is None:
+        return anc
+    anc.update(_window_hits(rows, chars, med))
+    return anc
+
+
 def _drop_outliers(anchors, rows):
-    """重复副歌会让 LCS 把某行匹配到别的实例（实测《快乐的扑满》偏 +20s）。
-    用邻域（前后各 2 个锚点）的线性预测做残差检验，超阈值即剔除。"""
+    """两层离群剔除。
+
+    ① 全局偏移一致时（MAD 小），用中位偏差做判据 —— 这是抓「整块行被匹到别的
+       遍数」的唯一有效手段：那种错误**彼此自洽**，邻域线性预测完全看不出问题
+       （11/22 实测 L29~L32 一起偏 +4.5s，邻域法全部放行）。
+    ② 邻域线性预测兜底，对付速度真的不均匀的情形。
+    """
     keys = sorted(anchors)
     if len(keys) < 5:
         return anchors
-    bad = []
+    bad = set()
+    med, mad = _robust_offset(anchors, rows)
+    if med is not None and mad <= 4.0:
+        tol = max(3.0, 5.0 * mad)
+        for li in keys:
+            if abs(anchors[li][0] - rows[li][0] - med) > tol:
+                bad.add(li)
+        if len(bad) > 0.35 * len(keys):
+            # 一旦要剔除三分之一以上，说明「全曲恒定偏移」这个前提本身就不成立
+            bad.clear()
     for k, li in enumerate(keys):
+        if li in bad:
+            continue
         t_abs, _n = anchors[li]
         # 用前后最近的锚点做线性预测（跨过本行，避免自证）
         prv = keys[max(0, k - 3):k]
@@ -209,9 +285,9 @@ def _drop_outliers(anchors, rows):
             continue
         pred = a0 + (rows[li][0] - t0) / (t1 - t0) * (a1 - a0)
         if abs(t_abs - pred) > OUTLIER_S:
-            bad.append(li)
+            bad.add(li)
     for li in bad:
-        del anchors[li]
+        anchors.pop(li, None)
     return anchors
 
 
