@@ -270,39 +270,90 @@ def load_sum_cfg():
     return {"summarize": llm, "paths": {}}
 
 
+# 备用模型链：主模型过载（503）或配额（429）时依次顶替。
+# 不写进共享 config（那套被上游总结流程用着），只在本模块兜底。
+DETECT_MODEL_FALLBACKS = ("gemini-3.5-flash", "gemini-2.5-flash",
+                          "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.8-flash")
+
+
+def _model_chain(sc):
+    first = sc.get("model") or "gemini-3.8-flash"
+    seen, chain = set(), []
+    for mm in [first] + list(sc.get("fallback_models") or []) + list(DETECT_MODEL_FALLBACKS):
+        if mm and mm not in seen:
+            seen.add(mm)
+            chain.append(mm)
+    return chain
+
+
 def _call_google(sc, system_prompt, user_content):
+    """调用 Gemini 生成；失败按「接地 → 无接地 → 换模型」逐级降级。
+
+    两个坑（2026-11-24 实测）：
+    ① `google_search` 接地走**独立配额**，配额耗尽时只回 429。旧实现把它当整体
+       配额受限直接降级 GLM，而 GLM 对「整段转写找唱歌片段」只会**逐行吐废条目**
+       （start==end、把闲聊当歌）→ 识别结果清零，且日志看着像"本段没唱"。
+       ⇒ 429 先去掉接地重试，识别不需要联网（歌名核实在出片前人工做）。
+    ② 主模型（gemini-4-hydrogen）会回 503「high demand」，属瞬时过载，但同一 key
+       下的 3.5-flash / 2.5-flash 当时正常。⇒ 必须带模型降级链，别把单模型
+       的过载当成整条通道挂掉。
+    ③ 推理型模型 thinking 会吃掉输出预算，8192 时见过 finishReason=MAX_TOKENS
+       但 text 为空；输出上限抬到 16k 起，空回复则换模型。
+    """
     import requests
-    model = sc.get("model", "gemini-3.8-flash")
-    base = (sc.get("api_host") or "https://generativelanguage.googleapis.com/v1beta/models").rstrip("/")
-    url = "%s/%s:generateContent?key=%s" % (base, model, sc.get("api_key", ""))
+    base = (sc.get("api_host") or
+            "https://generativelanguage.googleapis.com/v1beta/models").rstrip("/")
     proxies = None
     if sc.get("proxy"):
         proxies = {"http": sc["proxy"], "https": sc["proxy"]}
-    payload = {
+    try:
+        max_out = max(16384, int(sc.get("max_output_tokens") or 0))
+    except Exception:  # noqa
+        max_out = 16384
+    root = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": user_content}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
-        # 联网核对：歌词→真实歌名 靠检索而非记忆，治歌名幻觉
-        "tools": [{"google_search": {}}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_out},
     }
-    last_err = None
-    for attempt in range(1, 4):
-        try:
-            r = requests.post(url, json=payload, timeout=(20, 600), proxies=proxies)
-            if r.status_code == 200:
-                data = r.json()
-                text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
-                return text
-            last_err = "HTTP %s: %s" % (r.status_code, r.text[:200])
-            if r.status_code == 429:
-                raise RuntimeError("Google 配额受限（429）")
-        except RuntimeError:
-            raise
-        except Exception as e:  # noqa
-            last_err = repr(e)
-        log("  LLM 第 %d 次尝试失败：%s" % (attempt, last_err))
-        time.sleep(8 * attempt)
-    raise RuntimeError("LLM 调用失败：%s" % last_err)
+    bodies = [dict(root, tools=[{"google_search": {}}]), root]   # 先带接地，429 再去接地
+    errs = []
+    primary = sc.get("model") or ""
+    for model in _model_chain(sc):
+        url = "%s/%s:generateContent?key=%s" % (base, model, sc.get("api_key", ""))
+        drop_model = False
+        for bi, body in enumerate(bodies):
+            for attempt in (1, 2):
+                try:
+                    r = requests.post(url, json=body, timeout=(20, 600), proxies=proxies)
+                except Exception as e:  # noqa
+                    errs.append("%s 网络错误 %s" % (model, repr(e)[:60]))
+                    time.sleep(5 * attempt)
+                    continue
+                if r.status_code == 200:
+                    cand = (r.json().get("candidates") or [{}])[0]
+                    text = "".join(p.get("text", "") for p in
+                                   ((cand.get("content") or {}).get("parts") or []))
+                    if text.strip():
+                        if model != primary:
+                            log("  改用备用模型 %s（%s 不可用）" % (model, primary))
+                        if bi:
+                            log("  （本次未带搜索接地）")
+                        return text
+                    errs.append("%s 空回复（%s）" % (model, cand.get("finishReason")))
+                    drop_model = True
+                    break
+                errs.append("%s HTTP %s %s"
+                            % (model, r.status_code, r.text[:120].replace("\n", " ")))
+                if r.status_code == 429 and bi == 0:
+                    log("  %s 搜索接地配额受限（429），去掉接地重试…" % model)
+                    break                      # 换下一个 body（无接地）
+                drop_model = True              # 5xx / 其余 4xx：放弃本模型
+                break
+            if drop_model:
+                break
+        if errs:
+            log("  模型 %s 跳过：%s" % (model, errs[-1][:110]))
+    raise RuntimeError("LLM 调用失败：" + "；".join(errs[-3:]))
 
 
 def _call_zhipu(system_prompt, user_content):
@@ -378,6 +429,10 @@ def extract_json(text):
                 songs_out.append(obj)             # 碎裂输出中的完整单首对象，继续扫
     if songs_out:
         return {"songs": songs_out}
+    # 空数组是合法结果：「本段没有唱歌片段」的模型常直接回 []，
+    # 不能当解析失败（否则会被记成"该段识别失败"，看起来像漏检）
+    if re.fullmatch(r"\[\s*\]|\{\s*\"songs\"\s*:\s*\[\s*\]\s*\}", t.strip()):
+        return {"songs": []}
     raise ValueError("回复中找不到合法 JSON：" + t[:200])
 
 
@@ -525,6 +580,134 @@ def _clean_time_field(v):
     return m.group(0) if m else str(v)
 
 
+DETECT_CHUNK_CTX = 120.0   # 分块识别：块前后各带多少秒上下文（防跨界歌被切半）
+
+
+def _build_detect_prompt(transcript, lib, expected_titles, chunk_note=""):
+    """拼识别提示词；chunk_note 非空时置顶（分块模式的时间轴说明）。"""
+    prompt = (USER_TMPL.replace("{transcript}", transcript)
+                       .replace("{song_library}", lib or "（歌单加载失败，跳过接地）"))
+    if expected_titles:
+        prompt += ("\n\n★ 今日已确认歌单（在线歌单表当日记录，权威参考，按演唱顺序）：\n"
+                   + "\n".join("%d. %s" % (i + 1, t) for i, t in enumerate(expected_titles))
+                   + "\n要求：识别片段应与该清单一一对应（数量与顺序尽量一致）；"
+                     "title_guess 必须直接采用清单中的歌名原文，不要改写；"
+                     "若本场未唱清单中的某首、或唱了清单外的歌，请在 evidence 中说明。")
+    if chunk_note:
+        prompt = chunk_note + "\n\n" + prompt
+    return prompt
+
+
+def _parse_song_item(sng, idx=0):
+    """把 LLM 给出的单个片段清洗成内部结构；不可用时返回 None。"""
+    try:
+        st = hms_to_sec(_clean_time_field(sng.get("start", "")))
+        en = hms_to_sec(_clean_time_field(sng.get("end", "")))
+    except Exception:
+        log("  丢弃无法解析时间的条目 #%d" % (idx + 1))
+        return None
+    if en <= st:
+        st, en = en, st
+    dur = en - st
+    if dur < MIN_SEC or dur > MAX_SEC:
+        log("  丢弃时长异常（%.0fs）：%s" % (dur, sng.get("title_guess", "?")))
+        return None
+    return {
+        "title_guess": str(sng.get("title_guess") or "未知").strip() or "未知",
+        "start": st, "end": en,
+        "lang": str(sng.get("lang") or "zh"),
+        "confidence": float(sng.get("confidence") or 0.5),
+        "evidence": sng.get("evidence") or [],
+    }
+
+
+def _merge_song_items(items):
+    """合并分块识别结果。
+
+    跨界歌会被相邻两块各看到一半（块间带 DETECT_CHUNK_CTX 秒上下文），
+    所以「时间区间重叠」即视为同一首：取并集，歌名优先保留非「未知」的那个。
+    现场重唱的两段中间隔着整段间奏、区间不重叠，仍是两条。
+    """
+    out = []
+    for it in sorted(items, key=lambda x: (x["start"], -x["end"])):
+        hit = None
+        for o in out:
+            inter = min(o["end"], it["end"]) - max(o["start"], it["start"])
+            shorter = min(o["end"] - o["start"], it["end"] - it["start"])
+            if (shorter > 0 and inter > 0.4 * shorter) or abs(o["start"] - it["start"]) <= 20:
+                hit = o
+                break
+        if hit is None:
+            out.append(dict(it))
+            continue
+        hit["start"] = min(hit["start"], it["start"])
+        hit["end"] = max(hit["end"], it["end"])
+        hit["confidence"] = max(hit.get("confidence", 0), it.get("confidence", 0))
+        if hit.get("title_guess") in (None, "", "未知") and \
+                it.get("title_guess") not in (None, "", "未知"):
+            hit["title_guess"] = it["title_guess"]
+        for ev in (it.get("evidence") or []):
+            if ev not in (hit.get("evidence") or []):
+                hit.setdefault("evidence", []).append(ev)
+    out.sort(key=lambda x: x["start"])
+    return out
+
+
+def _detect_chunked(cfg, entries, lib, expected_titles, out_json, chunk_sec,
+                    delay=5.0, ctx=DETECT_CHUNK_CTX):
+    """分块识别：长转写整篇灌入时备用通道召回率断崖（RULES §148）。
+
+    块内时间戳仍是全场绝对时间，模型无需偏移；越界片段按块窗口丢弃。
+    返回 (items, failed)；failed 里是识别失败或不可解析的段，需人工复核。
+    """
+    t0, t1 = entries[0][0], entries[-1][1]
+    bounds, t = [], t0
+    while t < t1:
+        bounds.append((t, t + chunk_sec))
+        t += chunk_sec
+    items, failed = [], []
+    for i, (lo, hi) in enumerate(bounds, 1):
+        sub = [(s, e, x) for s, e, x in entries if lo - ctx <= s < hi]
+        if len(sub) < 10:
+            continue
+        seg_txt = "\n".join("[%s] %s" % (sec_to_hms(s), x.replace("\n", " "))
+                             for s, e, x in sub)
+        note = ("【分段说明】本场转写过长，已切成 %d 段分别识别，这是第 %d 段（本段 %d 句）。\n"
+                "时间戳均为全场绝对时间，与完整转写同一坐标系，不要做任何偏移。\n"
+                "只输出 start 落在 %s ~ %s 之间的片段；"
+                "若一首歌在第 %d 段开始前就已起唱、仅因上下文被带入，不要重复输出。"
+                % (len(bounds), i, len(sub), sec_to_hms(lo), sec_to_hms(hi), i))
+        prompt = _build_detect_prompt(seg_txt, lib, expected_titles, note)
+        log("  分块 %d/%d：%s ~ %s（%d 句）…"
+            % (i, len(bounds), sec_to_hms(lo), sec_to_hms(hi), len(sub)))
+        try:
+            raw = call_llm(cfg["summarize"], SYSTEM_PROMPT, prompt)
+        except Exception as e:  # noqa
+            log("  ⚠ 分块 %d 识别失败：%s（跳过，该段需人工复核）" % (i, e))
+            failed.append((i, sec_to_hms(lo), sec_to_hms(hi), str(e)[:120]))
+            continue
+        io.open("%s.raw%02d.txt" % (out_json, i), "w", encoding="utf-8", newline="").write(raw)
+        try:
+            data = extract_json(raw)
+        except ValueError:
+            log("  ⚠ 分块 %d 回复无法解析，原始回复留存：%s.raw%02d.txt" % (i, out_json, i))
+            failed.append((i, sec_to_hms(lo), sec_to_hms(hi), "JSON 解析失败"))
+            continue
+        n0 = len(items)
+        for k, sng in enumerate(data.get("songs") or []):
+            it = _parse_song_item(sng, k)
+            if not it:
+                continue
+            if not (lo - 5 <= it["start"] < hi + 5):
+                log("  忽略越界片段（%.0fs 不在本块）：%s" % (it["start"], it["title_guess"]))
+                continue
+            items.append(it)
+        log("      → 本块 %d 首（累计 %d）" % (len(items) - n0, len(items)))
+        if i < len(bounds):
+            time.sleep(delay)
+    return _merge_song_items(items), failed
+
+
 def detect_songs(cfg, date, srt_path, out_json, force=False, expected_titles=None):
     if os.path.exists(out_json) and not force:
         data = json.load(io.open(out_json, encoding="utf-8"))
@@ -537,48 +720,47 @@ def detect_songs(cfg, date, srt_path, out_json, force=False, expected_titles=Non
         lines.append("[%s] %s" % (sec_to_hms(s), t.replace("\n", " ")))
     transcript = "\n".join(lines)
     lib = load_song_library()
-    prompt = (USER_TMPL.replace("{transcript}", transcript)
-                       .replace("{song_library}", lib or "（歌单加载失败，跳过接地）"))
-    if expected_titles:
-        prompt += ("\n\n★ 今日已确认歌单（在线歌单表当日记录，权威参考，按演唱顺序）：\n"
-                   + "\n".join("%d. %s" % (i + 1, t) for i, t in enumerate(expected_titles))
-                   + "\n要求：识别片段应与该清单一一对应（数量与顺序尽量一致）；"
-                     "title_guess 必须直接采用清单中的歌名原文，不要改写；"
-                     "若本场未唱清单中的某首、或唱了清单外的歌，请在 evidence 中说明。")
-    log("转写规模：%d 句 / %d 字，歌单 %d 字，调用 LLM 识别…" % (
-        len(lines), len(transcript), len(lib)))
-    raw = call_llm(cfg["summarize"], SYSTEM_PROMPT, prompt)
-    io.open(out_json + ".raw.txt", "w", encoding="utf-8", newline="").write(raw)  # 留存原始回复
+    prompt = _build_detect_prompt(transcript, lib, expected_titles)
+    log("转写规模：%d 句 / %d 字，歌单 %d 字" % (len(lines), len(transcript), len(lib)))
+    sum_cfg = cfg.get("summarize") or {}
     try:
-        data = extract_json(raw)
-    except ValueError:
-        log("  JSON 解析失败，原始回复已留存：%s.raw.txt" % out_json)
-        raise
-    songs = data.get("songs") or []
-    # 清洗
-    cleaned, seen = [], []
-    for i, sng in enumerate(songs):
+        chunk_min = int(sum_cfg.get("chunk_minutes") or 0)
+    except Exception:  # noqa
+        chunk_min = 0
+    span = (entries[-1][1] - entries[0][0]) if entries else 0.0
+    cleaned = []
+    if chunk_min > 0 and span > chunk_min * 60 * 1.5:
+        # 长转写必须分块：整篇灌入时备用通道只扫片头就收工（RULES §148）
+        log("识别分块：全场 %s，按每段 %d 分钟切开（块间重叠 %.0fs 上下文）"
+            % (sec_to_hms(span), chunk_min, DETECT_CHUNK_CTX))
         try:
-            st = hms_to_sec(_clean_time_field(sng.get("start", "")))
-            en = hms_to_sec(_clean_time_field(sng.get("end", "")))
-        except Exception:
-            log("  丢弃无法解析时间的条目 #%d" % (i + 1))
-            continue
-        if en <= st:
-            st, en = en, st
-        dur = en - st
-        if dur < MIN_SEC or dur > MAX_SEC:
-            log("  丢弃时长异常（%.0fs）：%s" % (dur, sng.get("title_guess", "?")))
-            continue
-        cleaned.append({
-            "seq": len(cleaned) + 1,
-            "title_guess": str(sng.get("title_guess") or "未知").strip() or "未知",
-            "start": st, "end": en,
-            "lang": str(sng.get("lang") or "zh"),
-            "confidence": float(sng.get("confidence") or 0.5),
-            "evidence": sng.get("evidence") or [],
-        })
-        seen.append((st, en))
+            delay = float(sum_cfg.get("inter_chunk_delay_sec") or 5)
+        except Exception:  # noqa
+            delay = 5.0
+        items, failed = _detect_chunked(cfg, entries, lib, expected_titles,
+                                        out_json, chunk_min * 60, delay=delay)
+        cleaned = list(items)
+        if failed:
+            log("  ⚠ 有 %d 段没识别成功、内容未被覆盖，需人工复核：%s"
+                % (len(failed), "；".join("%s~%s(%s)" % (a, b, c) for _i, a, b, c in failed)))
+        log("  分块合并后：%d 首" % len(cleaned))
+    else:
+        log("调用 LLM 识别…")
+        raw = call_llm(cfg["summarize"], SYSTEM_PROMPT, prompt)
+        io.open(out_json + ".raw.txt", "w", encoding="utf-8", newline="").write(raw)  # 留存原始回复
+        try:
+            data = extract_json(raw)
+        except ValueError:
+            log("  JSON 解析失败，原始回复已留存：%s.raw.txt" % out_json)
+            raise
+        for i, sng in enumerate(data.get("songs") or []):
+            it = _parse_song_item(sng, i)
+            if it:
+                cleaned.append(it)
+    cleaned.sort(key=lambda x: x["start"])
+    for i, sng in enumerate(cleaned):
+        sng["seq"] = i + 1
+
     # 边界留白（防重叠）
     cleaned.sort(key=lambda x: x["start"])
     for i, sng in enumerate(cleaned):
@@ -1356,6 +1538,23 @@ HEAD_SIL_TARGET = 1.0     # 片头静音目标时长（秒）
 HEAD_SIL_MIN = 0.8        # 低于该值则补插静音
 
 
+def _lrc_line_starts(lrc):
+    """取出 LRC 各行起始时间（秒），供时间轴体检用。"""
+    out = []
+    for ln in (lrc or "").splitlines():
+        m = re.search(r"\[(\d{1,3}):(\d{2}(?:[.:]\d{1,3})?)\]", ln)
+        if m:
+            out.append(int(m.group(1)) * 60 + float(m.group(2).replace(":", ".")))
+    return out
+
+
+def _lrc_min_line_dur(lrc):
+    ts = _lrc_line_starts(lrc)
+    if len(ts) < 2:
+        return None
+    return min(b - a for a, b in zip(ts, ts[1:]))
+
+
 def _shift_lrc(lrc_text, pad):
     """LRC 全部时间戳后移 pad 秒（片头补静音后，歌词时间轴同步平移）。
 
@@ -1921,6 +2120,20 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
             tl_src = "asr"
             log("  歌词时间轴: ASR 对齐降级（%s）" % ainfo.get("summary", "?"))
             tl_offset = ainfo.get("offset_in_cut")
+            # 常数偏移只成立在「跟着原曲伴奏唱」的场合。主播清唱/自带节奏时速度比随段而变，
+            # 匹配行数会低到个位数（实测《小跳蛙》1/32 行、报出 −13.22s 假偏移），
+            # 此时改走分段对齐：单调 DP 取锚点 + 块间线性插值（RULES §149）。
+            _nl = len([x for x in (src_lrc or "").splitlines()
+                       if re.search(r"\[\d{1,3}:\d{2}", x)])
+            if ainfo.get("matched", 0) < max(3, 0.5 * _nl):
+                _lrc3, _pinfo = lyric_align.align_lrc_piecewise(
+                    src_lrc, srt_entries, cs, ce)
+                if _lrc3:
+                    log("  歌词时间轴: %s" % _pinfo.get("summary"))
+                    lrc, tl_src, tl_offset = _lrc3, "asr-piecewise", None
+                else:
+                    log("  ⚠ 分段对齐不可用（%s），沿用上面的结果"
+                        % _pinfo.get("summary", "?"))
             if tl_offset is not None and abs(tl_offset) > TL_OFFSET_WARN_S:
                 log("  ⚠ 切点自检：ASR 对齐偏移 %+.2fs（阈值 %.1fs）——疑切点未对齐：%s"
                     % (tl_offset, TL_OFFSET_WARN_S,
@@ -1932,6 +2145,24 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
             log("  歌词时间轴: 无原曲对齐结果且无 SRT，保持原时间轴")
         if lrc and head_pad > 0:
             lrc = _shift_lrc(lrc, head_pad)   # 片头补静音 → 歌词整体后移，保持同步
+
+    # 3.75 时间轴体检兜底（2026-11-24）：DTW/CTC 在「清唱 + ASR 质量差」时会把若干行
+    #     压到 0.1~0.3s（L05 BLOCK，画面上等于一行闪一下）。此时用分段对齐重算，
+    #     取「最短行更宽」的那一版——《快乐的扑满》CTC 56% 出了 4 行 0.1s。
+    if tl_src in ("ctc", "dtw") and srt_entries and src_lrc:
+        _dmin = _lrc_min_line_dur(lrc)
+        if _dmin is not None and _dmin < 0.5:
+            _lrc4, _pinfo = lyric_align.align_lrc_piecewise(src_lrc, srt_entries, cs, ce)
+            _d4 = _lrc_min_line_dur(_lrc4) if _lrc4 else None
+            if _lrc4 and _d4 is not None and _d4 > _dmin:
+                log("  歌词时间轴: %s 有 %.1fs 短行 → 改用分段对齐（%s）"
+                    % (tl_src, _dmin, _pinfo.get("summary")))
+                lrc, tl_src = _lrc4, "asr-piecewise"
+                if head_pad > 0:
+                    lrc = _shift_lrc(lrc, head_pad)
+            else:
+                log("  ⚠ 时间轴有 %.1fs 短行，分段对齐未能改善（%s）"
+                    % (_dmin, _pinfo.get("summary", "?")))
 
     # 3.85 歌词快照落盘：src=抓取原文（QC 参照），final=时间轴对齐后（渲染实际使用）
     lrc_snap = os.path.splitext(out_mp4)[0] + ".lrc"

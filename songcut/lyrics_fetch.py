@@ -360,9 +360,15 @@ def text_overlap_ratio(lrc, ref_text, n=2):
         # lyric_body_text 会把空白也删掉，取词必须用保留空白的原文
         raw = re.sub(r"\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]", "", lrc or "")
         lw, rw = set(_latin_words(raw)), set(_latin_words(ref_text))
-        if not lw or not rw:
-            return 0.0
-        return len(lw & rw) / float(len(lw))
+        ov_latin = (len(lw & rw) / float(len(lw))) if (lw and rw) else 0.0
+        # ⚠ 中文儿歌/动画歌常有大段「La-la-la」，latin 占比会超过 50% 被判成英文歌，
+        #   中文正文完全不参与比对 → 正确版本被算成 0%（2026-11-24《小跳蛙》实测，
+        #   ref_text 里就是「快乐池塘栽种了梦想」原句，却报「重合率仅 0.0%」并作废缓存）。
+        #   因此 latin 分支之外再算一遍纯中文 n-gram，取两者较大值。
+        a = _grams_of("".join(ch for ch in body if "\u4e00" <= ch <= "\u9fff"), n)
+        b = _grams_of("".join(ch for ch in str(ref_text) if "\u4e00" <= ch <= "\u9fff"), n)
+        ov_cjk = (len(a & b) / float(min(len(a), len(b)))) if (a and b) else 0.0
+        return max(ov_latin, ov_cjk)
     a, b = _grams_of(body, n), _grams_of(ref_text, n)
     if not a or not b:
         return 0.0
@@ -417,6 +423,12 @@ def fetch_lyrics_and_cover(title, artist_hint="", dur=None, cache_dir=None, ref_
                         info["cache_invalidated"] = (
                             "歌词与演唱内容字面重合率仅 %.1f%%（阈值 %.0f%%）"
                             % ((c_ov or 0.0) * 100, LRC_TEXT_OV_OK * 100))
+                    else:
+                        # 缓存里可能留着上一版（判据有 bug 时）写下的告警，复用时要清掉，
+                        # 否则每次都会打印「歌词版本存疑 0.0%」这种假警报
+                        # （2026-11-24《小跳蛙》：重合率 77.8%，却仍报 0.0%）。
+                        info.pop("warn_lyrics_mismatch", None)
+                        info.pop("cache_invalidated", None)
                 if stale:
                     # 歌手不符 →旧缓存里的封面图同样属于那个错误歌手，必须作废，
                     # 否则重抓失败时会继续用翻唱版专辑图出片（2026-10-06 连名带姓事故）。

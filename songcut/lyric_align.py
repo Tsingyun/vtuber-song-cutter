@@ -83,6 +83,150 @@ def _shift_tag(m, a, delta):
     return "%s%02d:%05.2f%s" % (m.group(1), mm, ss, m.group(5))
 
 
+# ---------------------------- 分段对齐（清唱 / 速度比不为 1） ----------------------------
+
+def _cjk(t):
+    return "".join(ch for ch in str(t) if "\u4e00" <= ch <= "\u9fff")
+
+
+def _lcs_len(a, b):
+    """最长公共子串长度（行长短，O(n*m) 足够）。"""
+    if not a or not b:
+        return 0
+    prev, best = [0] * (len(b) + 1), 0
+    for ca in a:
+        cur = [0] * (len(b) + 1)
+        for k, cb in enumerate(b, 1):
+            if ca == cb:
+                cur[k] = prev[k - 1] + 1
+                if cur[k] > best:
+                    best = cur[k]
+        prev = cur
+    return best
+
+
+def _pair_score(line_txt, seg_txt, min_lcs=4):
+    """一行歌词与一句 ASR 的匹配分：只比中文字，取 LCS / min(两串中文长)。"""
+    a, b = _cjk(line_txt), _cjk(seg_txt)
+    if len(a) < 3 or len(b) < 2:
+        return 0.0
+    l = _lcs_len(a, b)
+    if l < min_lcs:
+        return 0.0
+    return l / float(min(len(a), len(b)))
+
+
+def _assign_lines_to_segs(lines, seg, min_score=0.5, lookahead=9):
+    """贪心单调配对：一句 ASR 吃掉紧随其后的若干行歌词。
+
+    ASR 会把 4~6 行歌词并成一句（22s 一条），若只给「最像的那一行」锚点，
+    首段就会锚到最后一行、把前几行挤成 0 秒（2026-11-24《小跳蛙》实测）。
+    返回 [(seg 下标, [行下标...])]，两侧下标均严格递增。
+    """
+    out, li = [], 0
+    for sj, (s, e, txt) in enumerate(seg):
+        got, k = [], li
+        while k < min(len(lines), li + lookahead):
+            if _pair_score(lines[k][1], txt) >= min_score:
+                got.append(k)
+                k += 1
+            elif got:
+                break
+            else:
+                k += 1
+        if got:
+            out.append((sj, got))
+            li = got[-1] + 1
+    return out
+
+
+def align_lrc_piecewise(lrc, srt_entries, cut_start, cut_end):
+    """分段对齐：ASR 锚点 + 句内铺开 + 句间线性插值，逐行平移（行级 + 逐字）。
+
+    返回 (aligned_lrc, info)；锚点不足 3 个返回 (None, info) 交由上游降级。
+    """
+    info = {}
+    lines = _parse_lrc(lrc)
+    if not lines:
+        info["summary"] = "无有效歌词行"
+        return None, info
+    seg = [(s, e, txt) for (s, e, txt) in (srt_entries or [])
+           if cut_start - 15 <= s <= cut_end + 25]
+    if len(seg) < 3:
+        info["summary"] = "片段内 ASR 行不足（%d）" % len(seg)
+        return None, info
+    anchors = []
+    for sj, idxs in _assign_lines_to_segs(lines, seg):
+        s, e, _t = seg[sj]
+        m = len(idxs)
+        for r, li in enumerate(idxs):
+            anchors.append((lines[li][0], s + (e - s) * (r / float(m))))
+    info["anchors"] = len(anchors)
+    if len(anchors) < 3:
+        info["summary"] = "锚点仅 %d 个，不足以分段" % len(anchors)
+        return None, info
+    clean = []
+    for t, a in anchors:                       # 保证两侧都严格单调
+        if clean and (a <= clean[-1][1] or t <= clean[-1][0]):
+            continue
+        clean.append((t, a))
+    anchors = clean
+    dur = cut_end - cut_start
+
+    def _slope(a, b):
+        return min(2.0, max(0.5, (b[1] - a[1]) / max(1e-6, b[0] - a[0])))
+
+    def to_abs(t):
+        if t <= anchors[0][0]:
+            k = _slope(anchors[0], anchors[1]) if len(anchors) > 1 else 1.0
+            return anchors[0][1] - (anchors[0][0] - t) * k
+        if t >= anchors[-1][0]:
+            k = _slope(anchors[-2], anchors[-1]) if len(anchors) > 1 else 1.0
+            return anchors[-1][1] + (t - anchors[-1][0]) * k
+        for k in range(len(anchors) - 1):
+            (t0, a0), (t1, a1) = anchors[k], anchors[k + 1]
+            if t0 <= t <= t1:
+                return a0 + (t - t0) / max(1e-6, t1 - t0) * (a1 - a0)
+        return anchors[-1][1]
+
+    out, last, kept = [], -1.0, 0
+    rows = []                                  # [(行文本, 原时间, 新时间)]
+    for line in (lrc or "").splitlines():
+        if META_TAG.match(line.strip()):
+            continue
+        m = TIME_TAG.search(line)
+        if not m:
+            if not re.search(r"<\d{1,3}:\d{2}", line):
+                out.append("")
+            continue
+        t_old = _tag_time(m)
+        rows.append([line, t_old, to_abs(t_old) - cut_start])
+    # 片尾兜底：插值/外推可能越过片长，不能简单截断——那会把末尾若干行压成同一时刻
+    # （2026-11-24《小跳蛙》实测 5 行全落在 139.40s，画面上等于整段闪一下）。
+    # 改成把越界的那一撮在「上一行 ~ 片尾前 0.3s」之间均分。
+    limit = max(0.05, dur - 0.30)
+    over = [k for k, r in enumerate(rows) if r[2] > limit]
+    if over:
+        p = over[0]
+        base = rows[p - 1][2] if p > 0 else 0.0
+        n = len(rows) - p
+        # 片尾这一撮至少每行 0.55s（QC L05 的 BLOCK 线是 0.4s），够了再往外铺
+        limit = min(max(0.05, dur - 0.25), max(base + 0.55 * n, dur - 1.0))
+        if limit <= base:
+            limit = min(max(0.05, dur - 0.10), base + 0.55 * n)
+        for k in range(p, len(rows)):
+            rows[k][2] = base + (limit - base) * ((k - p + 1) / float(n))
+    for line, t_old, t_new in rows:
+        t_new = max(last + 0.02, t_new)
+        last = t_new
+        kept += 1
+        d = t_new - t_old
+        out.append(TIME_TAG.sub(lambda mm: _shift_tag(mm, 1.0, d), line))
+    info["summary"] = ("分段对齐 %d 行（%d 个锚点，句内铺开 + 句间插值）"
+                       % (kept, len(anchors)))
+    return "\n".join(out).strip(), info
+
+
 def align_lrc(lrc, srt_entries, cut_start, cut_end):
     """对齐 LRC 到切出音频 0 点。
     @param lrc          原始/清洗后的 LRC 文本
