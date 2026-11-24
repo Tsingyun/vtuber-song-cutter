@@ -296,6 +296,53 @@ def _repair_tail(fused, lines, runs, total, log=_log):
     return bad
 
 
+def fine_phrases(mp3_path, workdir, merge_gap=0.18, min_run=0.6, log=_log):
+    """从**切出音频本身**切出细换气片段，逐段 ASR，返回 [(start, end, text)]。
+
+    为什么要它：上游 SRT 是长音频转写，VAD 把整段连续演唱并成一条 20~28s 的
+    「一句」，一句里 4~7 行歌词，行间没有任何时间信息 —— 这正是 2026-11-24
+    《小跳蛙》《快乐的扑满》时间轴整体漂移的根源（只能按行数均分/插值）。
+
+    这里把 `merge_gap` 从 0.30 收到 0.18：句内换气不再被合并，一个换气片段
+    通常就是 1~2 行歌词；再对每段单独识别，文本与时间同时到位。
+    实测《小跳蛙》34 段 / 每段 1~3 行，逐行锚点从 13 个增加到 25 个。
+    """
+    import soundfile
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import vocal_activity as VA
+    x = VA.load_audio(mp3_path)
+    total = len(x) / VA.SR
+    runs, _sal, _t = VA.detect_phrases(x, merge_gap=merge_gap, min_run=min_run)
+    if len(runs) < 4:
+        return []
+    model = _get_model()
+    seg_dir = os.path.join(workdir, "_tmp_phrase")
+    os.makedirs(seg_dir, exist_ok=True)
+    out = []
+    for k, (s, e) in enumerate(runs):
+        a, b = max(0.0, s - PAD), min(total, e + PAD_TAIL)
+        w = os.path.join(seg_dir, "p%03d.wav" % k)
+        rc = subprocess.call([FFMPEG, "-y", "-v", "error", "-ss", "%.3f" % a,
+                              "-t", "%.3f" % (b - a), "-i", mp3_path,
+                              "-ar", "16000", "-ac", "1", w],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if rc != 0:
+            continue
+        try:
+            res = model.generate(input=w, cache={}, language="auto",
+                                 use_itn=False, batch_size_s=60)
+        except Exception:
+            continue
+        txt = ""
+        if res:
+            txt = res[0].get("text") or ""
+            txt = re.sub(r"<\|[^|]*\|>", "", txt).strip()
+        out.append((round(s, 2), round(e, 2), txt))
+    log("  细片段: %d 段 / %d 段有文本（换气切分 %.2fs）"
+        % (len(out), sum(1 for _s, _e, t in out if t), merge_gap))
+    return out
+
+
 def align_lrc(lrc_text, mp3_path, workdir, log=_log):
     """主入口。返回 (new_lrc, info)；失败时 new_lrc=None。"""
     info = {"ok": False, "reason": "", "n_words": 0, "match_ratio": 0.0}

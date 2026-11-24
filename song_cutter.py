@@ -1609,7 +1609,61 @@ GATE_IGNORE = False                   # --ignore-gate：闸门降级为警告（
 GATE_ALLOW_NO_LRC = False             # --allow-no-lrc：放行无歌词的片
 
 
-def _pre_render_gate(dur, lrc, linfo, tl_src, cov, date, disp):
+def _pick_timeline(src_lrc, srt_entries, out_mp3, cs, ce, head_pad, workdir, log=print):
+    """两条降级通路都算一遍，用「短 ASR 句体检命中率」挑更好的那条。
+
+    为什么不是固定顺序：11/22 实测《小跳蛙》细片段通路 100%、《快乐的扑满》
+    反而是 SRT 通路更好（0.95 vs 0.84）—— 谁是更优解取决于这首歌的换气是否清晰，
+    事先无法判断，只能各算一次再用独立裁判选。裁判（audit_timeline）不看时间轴，
+    只看「那一刻高亮的行是不是正在唱的那行」，选优不会自证。
+    """
+    cands = []
+    try:
+        ph = ctc_align.fine_phrases(out_mp3, workdir, log=log)
+    except Exception as _e:
+        ph = []
+        log("  ⚠ 细片段识别失败（%s）" % _e)
+    if len(ph) >= 5:
+        ent = [(cs + s - head_pad, cs + e - head_pad, t) for (s, e, t) in ph]
+        l, inf = lyric_align.align_lrc_piecewise(src_lrc, ent, cs, ce)
+        if l:
+            cands.append(("phrases", l, inf, len(ph)))
+    l2, inf2 = lyric_align.align_lrc_piecewise(src_lrc, srt_entries, cs, ce)
+    if l2:
+        cands.append(("asr-piecewise", l2, inf2, len(srt_entries)))
+    best = None
+    for tag, l, inf, n in cands:
+        ll = _shift_lrc(l, head_pad) if head_pad > 0 else l
+        a = lyric_align.audit_timeline(ll, srt_entries, cs, head_pad)
+        rate = a.get("rate")
+        log("  候选时间轴 %-14s 锚点 %-3d 命中率 %s（通过 %d 错位 %d）"
+            % (tag, inf.get("anchors", 0),
+               "n/a" if rate is None else "%.0f%%" % (rate * 100),
+               a.get("ok", 0), a.get("bad", 0)))
+        if best is None or (rate is not None and (best[4] is None or rate > best[4])):
+            best = (tag, l, inf, n, rate)
+    # 相差 12 个百分点以内时优先细片段：它给出的是逐句真实换气边界，
+    # 而 SRT 通路只能对 20~28s 的合并句做均分/插值。文本体检本身有噪声
+    # （ASR 会吐「再继续轻哼」这类垃圾句，判不出就记 skip），不宜唯它是从。
+    ph = [c for c in cands if c[0] == "phrases"]
+    if ph and best and best[0] != "phrases" and best[4] is not None:
+        p = ph[0]
+        pa = lyric_align.audit_timeline(
+            _shift_lrc(p[1], head_pad) if head_pad > 0 else p[1],
+            srt_entries, cs, head_pad).get("rate")
+        if pa is not None and pa >= best[4] - 0.12:
+            log("  选优: 细片段 %.0f%% vs 最优 %.0f%%，差距 %.0f 个百分点 → 取细片段"
+                % (pa * 100, best[4] * 100, (best[4] - pa) * 100))
+            best = (p[0], p[1], p[2], p[3], pa)
+    if not best:
+        return None, {}, None
+    if best[2].get("max_gap_s", 0) > 15:
+        log("  ⚠ 锚点空窗 %.1fs（@%.1fs）：该段只能靠插值，务必抽帧复核"
+            % (best[2]["max_gap_s"], best[2].get("max_gap_at", 0)))
+    return best[1], best[2], best[0]      # 返回**未加 head_pad** 的版本，由调用方统一平移
+
+
+def _pre_render_gate(dur, lrc, linfo, tl_src, cov, date, disp, audit=None):
     """渲染前闸门：返回 (fail[], warn[])。fail 非空 → 不该进渲染。
 
     只拦「成片一定有问题」的硬伤，判据全部来自既有常量与已发生的事故，
@@ -1651,6 +1705,20 @@ def _pre_render_gate(dur, lrc, linfo, tl_src, cov, date, disp):
         warn.append("G4 歌词完整性 %.0f%% < 80%%：末行 %.1fs / 片段 %.1fs，疑漏 outro 或"
                     "重复副歌，请复核歌词版本" % (cov * 100,
                                                linfo.get("lyrics_tail_sec", 0.0), dur))
+    # G5 时间轴错位（2026-11-24 新增）：QC 只查行时长/重叠，查不出「唱的与显示的不是同一句」。
+    #    11/22《小跳蛙》分段对齐把 L24 漂了 8s 仍 0 BLOCK 出片。判据来自 audit_timeline：
+    #    用短 ASR 句（VAD 语音活动真值）取句中点，看该时刻高亮的行是不是正在唱的那行。
+    if audit and audit.get("rate") is not None:
+        _n = audit["ok"] + audit["bad"]
+        if _n >= 6:
+            _r = audit["rate"]
+            _msg = ("G5 时间轴命中率 %.0f%%（%d/%d 判得出）：歌词与演唱不同步，"
+                    "用户看到的就是「唱到下一句还停在上一句」" % (_r * 100, audit["ok"], _n))
+            if _r < 0.65:
+                fail.append(_msg + "。先用 --force 重取时间轴；仍不行则手工做 "
+                                  "--lrc-override（口径：cut 相对时间、不含补静音）")
+            elif _r < 0.85:
+                warn.append(_msg + "。建议抽帧复核 %s" % (audit.get("fails") or ""))
     return fail, warn
 
 
@@ -2126,11 +2194,11 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
             _nl = len([x for x in (src_lrc or "").splitlines()
                        if re.search(r"\[\d{1,3}:\d{2}", x)])
             if ainfo.get("matched", 0) < max(3, 0.5 * _nl):
-                _lrc3, _pinfo = lyric_align.align_lrc_piecewise(
-                    src_lrc, srt_entries, cs, ce)
+                _lrc3, _pinfo, _tag3 = _pick_timeline(
+                    src_lrc, srt_entries, out_mp3, cs, ce, head_pad, workdir, log)
                 if _lrc3:
-                    log("  歌词时间轴: %s" % _pinfo.get("summary"))
-                    lrc, tl_src, tl_offset = _lrc3, "asr-piecewise", None
+                    log("  歌词时间轴: %s（%s）" % (_pinfo.get("summary"), _tag3))
+                    lrc, tl_src, tl_offset = _lrc3, _tag3, None
                 else:
                     log("  ⚠ 分段对齐不可用（%s），沿用上面的结果"
                         % _pinfo.get("summary", "?"))
@@ -2152,12 +2220,13 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     if tl_src in ("ctc", "dtw") and srt_entries and src_lrc:
         _dmin = _lrc_min_line_dur(lrc)
         if _dmin is not None and _dmin < 0.5:
-            _lrc4, _pinfo = lyric_align.align_lrc_piecewise(src_lrc, srt_entries, cs, ce)
+            _lrc4, _pinfo, _tag4 = _pick_timeline(
+                src_lrc, srt_entries, out_mp3, cs, ce, head_pad, workdir, log)
             _d4 = _lrc_min_line_dur(_lrc4) if _lrc4 else None
             if _lrc4 and _d4 is not None and _d4 > _dmin:
-                log("  歌词时间轴: %s 有 %.1fs 短行 → 改用分段对齐（%s）"
-                    % (tl_src, _dmin, _pinfo.get("summary")))
-                lrc, tl_src = _lrc4, "asr-piecewise"
+                log("  歌词时间轴: %s 有 %.1fs 短行 → 改用分段对齐（%s · %s）"
+                    % (tl_src, _dmin, _tag4, _pinfo.get("summary")))
+                lrc, tl_src = _lrc4, _tag4
                 if head_pad > 0:
                     lrc = _shift_lrc(lrc, head_pad)
             else:
@@ -2174,13 +2243,28 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         log("  ⚠ 歌词快照落盘失败（QC 将无法比对文本）：%s" % e)
         lrc_snap = src_snap = None
 
+    # 3.87 时间轴体检（2026-11-24）：用短 ASR 句当独立裁判，验证「这一刻是否真在唱这一行」。
+    #   这条不通过就别渲 —— 4K60 一首 14 分钟，渲完才发现错位等于白烧。
+    _audit = {}
+    if lrc and srt_entries:
+        try:
+            _audit = lyric_align.audit_timeline(lrc, srt_entries, cs, head_pad)
+            if _audit.get("rate") is not None:
+                log("  时间轴体检: 通过 %d / 错位 %d / 跳过 %d → 命中率 %.0f%%"
+                    % (_audit["ok"], _audit["bad"], _audit["skip"],
+                       _audit["rate"] * 100))
+                for _f in (_audit.get("fails") or [])[:4]:
+                    log("      错位 @%.1fs 显示「%s」实唱「%s」" % (_f[0], _f[1], _f[2]))
+        except Exception as _e:
+            log("  ⚠ 时间轴体检失败（%s），跳过" % _e)
+
     # ── 3.9 渲染前闸门（快速失败）──────────────────────────────────────────
     # 4K60 单首渲染约 14 分钟。以下任一条件成立时，成片**必然**是废片或错片，
     # 与其渲完才发现（浪费 14 min + 35 GB 临时空间），不如在渲染前就拦下来。
     # 判据全部复用已有常量，不新增阈值；每条都给出可照做的修复动作。
     _gate_fail, _gate_warn = _pre_render_gate(
         dur=dur, lrc=lrc, linfo=linfo, tl_src=tl_src,
-        cov=linfo.get("lyrics_coverage"), date=date, disp=disp)
+        cov=linfo.get("lyrics_coverage"), date=date, disp=disp, audit=_audit)
     if _gate_fail and not GATE_IGNORE:
         raise PreRenderGateError(
             "%s：渲染前闸门未通过 ——\n      %s\n    "

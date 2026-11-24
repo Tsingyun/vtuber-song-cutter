@@ -89,6 +89,24 @@ def _cjk(t):
     return "".join(ch for ch in str(t) if "\u4e00" <= ch <= "\u9fff")
 
 
+_LA_RUN = re.compile(r"(?:la)+")
+
+
+def _ono_form(t):
+    """拟声词归一：`La-la-la` / `啦啦啦` / `哩哩哩` / `leap frog` 一律折成 `la`。
+
+    歌词站写的是拉丁 "La-la-la"，而 ASR 一律转成「啦啦啦」「哩哩哩」，
+    旧版 `_cjk` 把拉丁全剔掉后行文本变成空串 → 整首一半的 La 行永远配不上锚点
+    → 只能做长距离插值（2026-11-24《小跳蛙》L24 因此漂了 8s）。
+    """
+    s = str(t).lower()
+    s = re.sub(r"leap\s*frog", "la", s)
+    s = s.replace("啦", "la").replace("哩", "la")
+    s = re.sub(r"[^a-z\u4e00-\u9fff]+", "", s)
+    return _LA_RUN.sub("la", s)
+
+
+
 def _lcs_len(a, b):
     """最长公共子串长度（行长短，O(n*m) 足够）。"""
     if not a or not b:
@@ -105,18 +123,30 @@ def _lcs_len(a, b):
     return best
 
 
-def _pair_score(line_txt, seg_txt, min_lcs=4):
-    """一行歌词与一句 ASR 的匹配分：只比中文字，取 LCS / min(两串中文长)。"""
-    a, b = _cjk(line_txt), _cjk(seg_txt)
-    if len(a) < 3 or len(b) < 2:
+def _pair_score(line_txt, seg_txt, min_lcs=None):
+    """一行歌词与一句 ASR 的匹配分：归一化后取 LCS / min(两串长)。
+
+    2026-11-24 起改用 `_ono_form`（保留拟声词并折叠），不再只比中文字；
+    短 ASR 句（「友情」3 字、「啦啦啦」）也允许作锚点，门槛随长度自适应。
+    """
+    a, b = _ono_form(line_txt), _ono_form(seg_txt)
+    if len(a) < 2 or len(b) < 1:
         return 0.0
+    n = min(len(a), len(b))
+    need = min_lcs if min_lcs is not None else (2 if n <= 6 else 4)
     l = _lcs_len(a, b)
-    if l < min_lcs:
+    if l < need:
         return 0.0
-    return l / float(min(len(a), len(b)))
+    # 必须至少有一个**汉字**参与匹配：纯「啦啦啦 / La-la-la」之间互相都能 100% 配中，
+    # 一旦允许它们当锚点，一段 7s 的「啦啦啦」会把后面 4 行 La 全吸进去
+    # （2026-11-24 实测：18 行被压进 7 秒，比原来的漂移更糟）。
+    # 纯拟声行一律不产锚点，交给两侧汉字锚点插值。
+    if _lcs_len(_cjk(line_txt), _cjk(seg_txt)) < 1:
+        return 0.0
+    return l / float(n)
 
 
-def _assign_lines_to_segs(lines, seg, min_score=0.5, lookahead=9):
+def _assign_lines_to_segs(lines, seg, min_score=0.35, lookahead=9):
     """贪心单调配对：一句 ASR 吃掉紧随其后的若干行歌词。
 
     ASR 会把 4~6 行歌词并成一句（22s 一条），若只给「最像的那一行」锚点，
@@ -158,10 +188,27 @@ def align_lrc_piecewise(lrc, srt_entries, cut_start, cut_end):
     anchors = []
     for sj, idxs in _assign_lines_to_segs(lines, seg):
         s, e, _t = seg[sj]
-        m = len(idxs)
-        for r, li in enumerate(idxs):
-            anchors.append((lines[li][0], s + (e - s) * (r / float(m))))
+        # 段内按「原曲节奏」铺开，而不是按行数均分：一句 ASR 吞 4~7 行时，
+        # 各行字数/长短本来就不等，均分会把长句压短、短句拉长并在段尾累积漂移。
+        t0 = lines[idxs[0]][0]
+        if len(idxs) > 1:
+            t1 = lines[idxs[-1]][0]
+            d_last = (t1 - t0) / float(len(idxs) - 1)   # 末行按平均行距估宽，避免落在段尾
+            span = max(1e-6, (t1 - t0) + d_last)
+        else:
+            span = max(1e-6, e - s)
+        for li in idxs:
+            anchors.append((lines[li][0],
+                            s + (lines[li][0] - t0) / span * (e - s)))
     info["anchors"] = len(anchors)
+    # 锚点空窗体检：两锚点之间空得越久，中间行越只能靠插值猜。
+    # 空窗 > 15s 一律记进 info，供上游决定是否放行（RULES §150）。
+    if len(anchors) >= 2:
+        gaps = [(anchors[k + 1][1] - anchors[k][1], anchors[k][1])
+                for k in range(len(anchors) - 1)]
+        g_max, g_at = max(gaps)
+        info["max_gap_s"] = round(g_max, 1)
+        info["max_gap_at"] = round(g_at - cut_start, 1)
     if len(anchors) < 3:
         info["summary"] = "锚点仅 %d 个，不足以分段" % len(anchors)
         return None, info
@@ -225,6 +272,64 @@ def align_lrc_piecewise(lrc, srt_entries, cut_start, cut_end):
     info["summary"] = ("分段对齐 %d 行（%d 个锚点，句内铺开 + 句间插值）"
                        % (kept, len(anchors)))
     return "\n".join(out).strip(), info
+
+
+def audit_timeline(lrc, srt_entries, cut_start, head_pad=0.0, max_seg=6.0,
+                   min_score=0.45):
+    """时间轴体检：用「短 ASR 句」当独立裁判，判断歌词行与真实演唱是否对得上。
+
+    原理：VAD 短句（<=6s）的起止是语音活动真值，与任何对齐算法无关。
+    取句中点，看该时刻高亮的是哪一行：
+      · 文本命中该行              → 通过
+      · 文本命中前/后一行         → **错位**（用户看到的「唱到下一句还停在上一句」）
+      · 都命不中（ASR 吐垃圾）    → 无法判定，跳过
+    返回 {ok, bad, skip, rate, fails}。rate 只统计「判得出」的样本。
+
+    2026-11-24 加此函数：分段对齐把《小跳蛙》L24 漂了 8s 却仍 0 BLOCK 出片，
+    QC 只查行时长/重叠、不查「这一刻是否真在唱这一行」。此函数补上这个洞。
+    """
+    info = {"ok": 0, "bad": 0, "skip": 0, "rate": None, "fails": []}
+    rows = _parse_lrc(lrc)
+    if len(rows) < 4 or not srt_entries:
+        return info
+
+    def _score(a, b):
+        a, b = _ono_form(a), _ono_form(b)
+        if not a or not b:
+            return 0.0
+        return _lcs_len(a, b) / float(min(len(a), len(b)))
+
+    end_cut = rows[-1][0]
+    for s, e, txt in srt_entries:
+        if e - s > max_seg or e - s < 0.4:
+            continue
+        if not (cut_start - 2.0 <= s <= cut_start + end_cut - head_pad + 6.0):
+            continue
+        if len(_ono_form(txt)) < 2:
+            continue
+        tm = (s + e) / 2.0 - cut_start + head_pad
+        k = -1
+        for i in range(len(rows)):
+            if rows[i][0] <= tm:
+                k = i
+            else:
+                break
+        if k < 0:
+            continue
+        cur = _score(rows[k][1], txt)
+        if cur >= min_score:
+            info["ok"] += 1
+            continue
+        nb = max(_score(rows[j][1], txt) for j in (k - 1, k + 1)
+                 if 0 <= j < len(rows)) if (k > 0 or k + 1 < len(rows)) else 0.0
+        if nb >= min_score:
+            info["bad"] += 1
+            info["fails"].append((round(tm, 1), rows[k][1][:12], txt[:12]))
+        else:
+            info["skip"] += 1
+    judged = info["ok"] + info["bad"]
+    info["rate"] = round(info["ok"] / float(judged), 3) if judged else None
+    return info
 
 
 def align_lrc(lrc, srt_entries, cut_start, cut_end):

@@ -50,6 +50,7 @@ desktop.ini
 # 中间产物（波形切片/CTC 分段/临时 wav）
 _tmp/
 _tmp_ctcseg/
+_tmp_phrase/
 _tmpwav/
 _chk/
 _tmpctc/
