@@ -45,6 +45,7 @@ from songcut import config as CFG                     # noqa: E402  集中配置
 from songcut import lyrics_fetch                      # noqa: E402  歌词/封面自动匹配
 from songcut import lyric_align                       # noqa: E402  歌词时间轴对齐
 from songcut import ctc_align                         # noqa: E402  CTC 强制对齐
+from songcut import char_align                        # noqa: E402  字符级强制对齐（Paraformer 逐字时间戳）
 from songcut import wave_refine                       # noqa: E402  波形边界精修
 from songcut import decor_pick                        # noqa: E402  标题装饰方案自动匹配
 from songcut import timeline_sync                     # noqa: E402  切入点检测 + 时间轴同步
@@ -1618,6 +1619,26 @@ def _pick_timeline(src_lrc, srt_entries, out_mp3, cs, ce, head_pad, workdir, log
     只看「那一刻高亮的行是不是正在唱的那行」，选优不会自证。
     """
     cands = []
+    # ① 字符级强制对齐（2026-11-24 新增，精度最高，优先使用）：
+    #    下面两条通路都建立在「VAD 段起点 = 段内首行起唱时刻」之上。这次两首清唱的
+    #    第一个 VAD 段都吞进了 8~16 秒无声前导（《小跳蛙》实测段 0 = 0.92~15.68s），
+    #    于是 L1 被钉在 1.0s，而真实起唱在 9.5s —— 用户看到的「还没开始唱，歌词
+    #    已经滚到第二句」。字符级通路取模型自己的逐字时间，不依赖任何段起点假设。
+    _ch = None
+    try:
+        _ch = char_align.timed_chars(out_mp3, workdir, log=log)
+    except Exception as _e:
+        log("  ⚠ 字符级识别失败（%s）" % _e)
+    if _ch:
+        _rel = [(t - head_pad, c) for (t, c) in _ch]
+        _lc, _ic = char_align.align_lrc_chars(src_lrc, _rel, cs, ce, log=log)
+        _nr = len([x for x in (src_lrc or "").splitlines()
+                   if re.search(r"\[\d{1,3}:\d{2}", x)])
+        if _lc and _ic.get("anchors", 0) >= max(4, 0.2 * _nr):
+            return _lc, _ic, "chars"
+        if _lc or _ic.get("anchors") is not None:
+            log("  ⚠ 字符级锚点偏少（%s / %d 行），改用分段对齐"
+                % (_ic.get("anchors", 0), _nr))
     try:
         ph = ctc_align.fine_phrases(out_mp3, workdir, log=log)
     except Exception as _e:
@@ -1708,7 +1729,20 @@ def _pre_render_gate(dur, lrc, linfo, tl_src, cov, date, disp, audit=None):
     # G5 时间轴错位（2026-11-24 新增）：QC 只查行时长/重叠，查不出「唱的与显示的不是同一句」。
     #    11/22《小跳蛙》分段对齐把 L24 漂了 8s 仍 0 BLOCK 出片。判据来自 audit_timeline：
     #    用短 ASR 句（VAD 语音活动真值）取句中点，看该时刻高亮的行是不是正在唱的那行。
-    if audit and audit.get("rate") is not None:
+    if audit and audit.get("slide") and audit["slide"].get("judged", 0) >= 8:
+        _sv = audit["slide"]
+        _md, _p90 = _sv.get("median_dev") or 0.0, _sv.get("p90_dev") or 0.0
+        _hr = _sv.get("hit_rate") or 0.0
+        _msg = ("G5 时间轴验收：中位偏差 %+.2fs / P90 %+.2fs / 通过率 %.0f%%"
+                "（滑窗 ASR 独立复测 %d 行）" % (_md, _p90, _hr * 100,
+                                                _sv.get("judged", 0)))
+        if abs(_md) > 1.2 or _p90 > 2.5:
+            fail.append(_msg + "。歌词与演唱整体不同步（唱到下一句还停在上一句 / "
+                              "还没开口就滚）。先 --force 重取时间轴；仍不行则手工 "
+                              "--lrc-override（口径：cut 相对时间、不含补静音）")
+        elif _p90 > 1.8 or _hr < 0.60:
+            warn.append(_msg + "。个别行偏早/偏晚，建议抽帧复核")
+    elif audit and audit.get("ok") is not None and audit.get("rate") is not None:
         _n = audit["ok"] + audit["bad"]
         if _n >= 6:
             _r = audit["rate"]
@@ -2243,18 +2277,27 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         log("  ⚠ 歌词快照落盘失败（QC 将无法比对文本）：%s" % e)
         lrc_snap = src_snap = None
 
-    # 3.87 时间轴体检（2026-11-24）：用短 ASR 句当独立裁判，验证「这一刻是否真在唱这一行」。
-    #   这条不通过就别渲 —— 4K60 一首 14 分钟，渲完才发现错位等于白烧。
+    # 3.87 时间轴验收（2026-11-24 二次修订）：改用**固定网格滑窗 ASR** 复测。
+    #   旧 audit_timeline 只吃 <=6s 的 SRT 短句（两首歌各只剩 11 个样本），长合并句
+    #   全被跳过，于是 8 秒整体错位也拿到「命中率 100%」—— 这条假验收放过了一版废片。
+    #   新判据独立于对齐算法：滑窗（1.5s 窗 / 0.75s 步长）逐窗识别，找每行歌词首次
+    #   出现的时刻，算「歌词 vs 实际演唱」的偏差中位数与 P90（实测正解 P90≈1.6s，
+    #   错版 P90≈2.9s）。
     _audit = {}
-    if lrc and srt_entries:
+    if lrc and os.path.exists(out_mp3):
         try:
-            _audit = lyric_align.audit_timeline(lrc, srt_entries, cs, head_pad)
-            if _audit.get("rate") is not None:
-                log("  时间轴体检: 通过 %d / 错位 %d / 跳过 %d → 命中率 %.0f%%"
-                    % (_audit["ok"], _audit["bad"], _audit["skip"],
-                       _audit["rate"] * 100))
-                for _f in (_audit.get("fails") or [])[:4]:
-                    log("      错位 @%.1fs 显示「%s」实唱「%s」" % (_f[0], _f[1], _f[2]))
+            _sv = char_align.slide_verify(lrc, out_mp3, workdir, log=log)
+            if _sv.get("judged"):
+                log("  %s" % _sv.get("summary"))
+                for _f in (_sv.get("fails") or [])[:5]:
+                    if _f[1] is None:
+                        log("      未匹配 @%.1fs「%s」（该时刻附近没有这句）" % (_f[0], _f[2]))
+                    else:
+                        log("      偏差 %+.2fs @%.1fs「%s」" % (_f[1], _f[0], _f[2]))
+            _audit = {"slide": _sv, "rate": _sv.get("hit_rate")}
+        except Exception as _e:
+            log("  ⚠ 时间轴验收失败（%s），跳过" % _e)
+            _audit = {}
         except Exception as _e:
             log("  ⚠ 时间轴体检失败（%s），跳过" % _e)
 

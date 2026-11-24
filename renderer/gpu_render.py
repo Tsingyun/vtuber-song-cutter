@@ -867,6 +867,7 @@ class GpuRenderer:
         self._cur_sec = None
         self._cur_sec_tex = None
         self._prev_idx = -999
+        self._hi = -1              # 真正正在唱的行（-1 = 还没到第一行，不高亮）
 
         log("[gpu] 准备完成：%d 行歌词 / %d 张文字纹理 / 输出 %dx%d@%d"
             % (n, len(self.tex_cache), self.W, self.H, self.fps))
@@ -882,21 +883,26 @@ class GpuRenderer:
         if n == 0:
             return -1
         idx = cur_index(t, lyr)
+        # raw = 真正「正在唱」的行号；还没到第一行时为 -1。
+        # 旧代码把 -1 直接当 0，于是从片头到第一行之前，第一行一直是高亮 + 竖线 +
+        # 逐字填充 —— 用户看到的就是「还没开始唱，歌词已经亮着/在滚」。
+        raw = idx
         if idx < 0:
             idx = 0
+        self._hi = raw
         anchor = idx
         # scrollY 指数缓动（τ≈0.18s）
         target = (idx * LY_LH) - (FOCAL_Y - LY_Y)
         self.scrollY += (target - self.scrollY) * min(1.0, self.dt * 5.5)
 
         for i in range(n):
-            tg = 1.0 if i == idx else 0.0
+            tg = 1.0 if i == raw else 0.0
             k = 9.0 if tg > self.act[i] else 4.2
             self.act[i] += (tg - self.act[i]) * min(1.0, self.dt * k)
 
             if i < anchor:
                 base = 0.34
-            elif i == idx:
+            elif i == raw:
                 base = 1.0
             else:
                 d = i - idx
@@ -905,10 +911,10 @@ class GpuRenderer:
                 self.bs[i] = base
             self.bs[i] += (base - self.bs[i]) * min(1.0, self.dt * 9.0)
 
-            bt = 0.0 if i == idx else (0.0 if i < anchor else self._blur_level(abs(i - anchor)))
+            bt = 0.0 if i == raw else (0.0 if i < anchor else self._blur_level(abs(i - anchor)))
             if self.bl[i] is None:
                 self.bl[i] = bt
-            self.bl[i] += (bt - self.bl[i]) * min(1.0, self.dt * (12.0 if i == idx else 5.5))
+            self.bl[i] += (bt - self.bl[i]) * min(1.0, self.dt * (12.0 if i == raw else 5.5))
         self._prev_idx = idx
         return idx
 
@@ -1026,7 +1032,7 @@ class GpuRenderer:
                     tex2 = sp["tex"] if hi == 0 else sp["blur"][hi - 1]
                 x = LY_X + 4.0 * self.act[k]
                 kar = -1.0
-                if k == idx:
+                if k == self._hi:
                     self._draw_text(self.t_bar, LY_X - 13.0, y + 12.0, 3.0, LY_LH - 24.0, 0.85, ROSE)
                     # 已唱比例 → shader 的 uv 阈值（分母是整幅纹理，故含 pad）
                     sung = self._sung_x(sp, t)

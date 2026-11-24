@@ -316,7 +316,11 @@ def fine_phrases(mp3_path, workdir, merge_gap=0.18, min_run=0.6, log=_log):
     if len(runs) < 4:
         return []
     model = _get_model()
-    seg_dir = os.path.join(workdir, "_tmp_phrase")
+    # ⚠ 按音频隔离：workdir 在同场次各首之间共享，p000.wav 若「存在即复用」，
+    #   第二首会读到第一首的切片并识别出别首歌的文本（2026-11-24《快乐的扑满》
+    #   实测锚点从 38 掉到 5）。
+    _tag = re.sub(r"[^\w.-]+", "_", os.path.basename(mp3_path))[:60]
+    seg_dir = os.path.join(workdir, "_tmp_phrase", _tag)
     os.makedirs(seg_dir, exist_ok=True)
     out = []
     for k, (s, e) in enumerate(runs):
