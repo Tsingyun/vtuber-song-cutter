@@ -2197,6 +2197,10 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     if LRC_OVERRIDE and os.path.exists(LRC_OVERRIDE):
         lrc = io.open(LRC_OVERRIDE, encoding="utf-8").read()
         tl_src = "override"
+        # QC 参照文本同源：override 就是人工核定的权威轴，若 src_lrc 仍留抓取稿
+        # （通常只有官方第一遍），L02 必然把「现场重复段」全判成多余行而 BLOCK
+        # （2026-11-24《东风破》实测：源 16 行 / 成片 36 行，L09 MAE 0.139s 却报不通过）。
+        src_lrc = lrc
         log("  歌词时间轴: 使用 --lrc-override 指定文件（%d 行，跳过对齐链）"
             % len(lrc.splitlines()))
         # ⚠ override 文件按「cut 相对时间」书写，与 dtw/asr/ctc 三条路径口径一致；
