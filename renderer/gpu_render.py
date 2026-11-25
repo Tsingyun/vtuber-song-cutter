@@ -912,7 +912,12 @@ class GpuRenderer:
             k = 9.0 if tg > self.act[i] else 4.2
             self.act[i] += (tg - self.act[i]) * min(1.0, self.dt * k)
 
-            if i < anchor:
+            if raw < 0:
+                # 还没到第一行（前奏 / 长间奏开头）：所有行都按「未来行」处理。
+                # 旧逻辑借用 idx=0 的 d=0 分支，第一行算出 0.89 亮度、第二行 0.60，
+                # 观众看到的是「人还没开口，前两句已经唱过了」（2026-11-24 前奏补齐后实测）。
+                base = 0.24 + 0.36 * math.exp(-i / 1.7)
+            elif i < anchor:
                 base = 0.34
             elif i == raw:
                 base = 1.0

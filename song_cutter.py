@@ -2195,7 +2195,24 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     tl_src = "raw"
     tl_offset = None          # ASR 对齐推出的「原曲起点 − 切点」，用于切点自检
     if LRC_OVERRIDE and os.path.exists(LRC_OVERRIDE):
-        lrc = io.open(LRC_OVERRIDE, encoding="utf-8").read()
+        _ov_text = io.open(LRC_OVERRIDE, encoding="utf-8").read()
+        # 前奏闸门（2026-11-24 事故）：override 的「首行相对时间」应当≈原曲官方首行
+        # 时间。如果它只有 1~2s 而抓取稿首行有 20s，说明切点落在了第一句歌词上，
+        # 卡拉OK 伴奏的前奏整段被切掉 —— 这种片子 QC 全绿（L02/L09/滑窗都是拿人工轴
+        # 自证），但观众听到的是「人声一上来就唱」。三首同时中招过一次，必须拦。
+        def _f1(txt):
+            for _ln in txt.splitlines():
+                _m = re.match(r"\[(\d+):(\d+(?:\.\d+)?)\]", _ln.strip())
+                if _m:
+                    return int(_m.group(1)) * 60 + float(_m.group(2))
+            return None
+        _f_ov, _f_off = _f1(_ov_text), _f1(lrc or "")
+        if _f_ov is not None and _f_off is not None and (_f_off - _f_ov) > 6.0:
+            log("  ⚠ 前奏闸门：override 首行 %.1fs，抓取稿首行 %.1fs（差 %.1fs）——"
+                " 抓取稿是原曲时间轴，差这么多通常是切点落在第一句歌词、"
+                "把伴奏前奏整段切掉了；确认 cut_start_abs 是否应为「伴奏起点」。"
+                % (_f_ov, _f_off, _f_off - _f_ov))
+        lrc = _ov_text
         tl_src = "override"
         # QC 参照文本同源：override 就是人工核定的权威轴，若 src_lrc 仍留抓取稿
         # （通常只有官方第一遍），L02 必然把「现场重复段」全判成多余行而 BLOCK
