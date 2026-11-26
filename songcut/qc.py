@@ -998,7 +998,10 @@ def render_report(rep, verbose=True):
 # ── CLI ─────────────────────────────────────────────────────────────────
 def _pick_entry(manifest, mp4):
     for e in manifest.get("songs", []):
-        if os.path.abspath(e.get("mp4", "")) == os.path.abspath(mp4):
+        # mp4 可能是 None：渲染前被闸门拦下的条目就是空壳（2026-11-26 实测，
+        # abspath(None) 直接 TypeError，QC 连一条都没跑就栈崩）。
+        _p = e.get("mp4")
+        if _p and os.path.abspath(_p) == os.path.abspath(mp4):
             return e
     return {}
 

@@ -788,8 +788,11 @@ def ffprobe_json(ffprobe, path):
     return json.loads(out)
 
 
-def find_video(date):
+def find_video(date, explicit=""):
     """定位当天录播（排除压缩残留，必要时回退到录播根目录）。
+
+    explicit 非空时直接用它：同一天多场（下午场 + 晚上场）「最长」不代表
+    「有唱歌」，必须由调用方点场。
 
     两个坑（2026-10-11 实测）：
     ① 日期目录可能残留上游压缩**中断**的半成品，形如
@@ -800,6 +803,11 @@ def find_video(date):
        日期子目录 ⇒ 日期目录只剩 .part 残件。此时需回退到根目录按场次日期匹配。
     """
     exts = (".mp4", ".flv", ".mkv")
+    if explicit:
+        if not os.path.exists(explicit):
+            raise FileNotFoundError("--src 指定的录播不存在：" + explicit)
+        log("录播由 --src 显式指定：%s" % os.path.basename(explicit))
+        return explicit
     d = os.path.join(REC_ROOT, date)
     ymd = re.sub(r"\D", "", str(date))
     vids = []
@@ -2572,6 +2580,11 @@ def cleanup_outputs(manifest, seg_dir, keep_mp3=False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True, help="直播日期 YYYY-MM-DD")
+    # 同一自然日可能有两场（下午场 + 晚上场），find_video 默认取最长的一路——
+    # 但「最长」不等于「有唱歌」（2026-11-26 实测：下午场 3h27m 在玩双人成行 0 首，
+    # 晚上场 2h41m 唱了 2 首，默认选中下午场直接识别 0 首）。多场时必须显式点场。
+    ap.add_argument("--src", default="",
+                    help="显式指定录播文件（多场时必用；不给则按目录扫描取最长的一场）")
     ap.add_argument("--workdir", default=DEFAULT_WORKDIR)
     ap.add_argument("--min-confidence", type=float, default=0.0)
     ap.add_argument("--limit", type=int, default=0, help="只切前 N 首（调试用）")
@@ -2750,7 +2763,7 @@ def main():
     out_dir = os.path.join(args.workdir, "cuts", args.date)
     os.makedirs(out_dir, exist_ok=True)
 
-    src = find_video(args.date)
+    src = find_video(args.date, args.src)
     vinfo = ffprobe_json(ffprobe, src)
     vdur = float(vinfo["format"]["duration"])
     srts = match_srts_to_video(srts, src)
@@ -2843,14 +2856,28 @@ def main():
                         # 渲染前就被拦下：本首不出片，但**不牵连同场其他首**
                         log("  ✗ " + str(e).replace("\n", "\n  "))
                         qc_fail += 1
-                        manifest["songs"].append({
+                        # 闸门拦截**不能**把上一轮已经出片的条目清成空壳：那会让
+                        # manifest 与磁盘上的成片脱节（QC 崩在 abspath(None)，
+                        # 人还以为这首从没渲过）。已有成片时保留其字段，只追加记录。
+                        _keep = {}
+                        try:
+                            if os.path.exists(mf):
+                                for _s in json.load(io.open(mf, encoding="utf-8")).get("songs", []):
+                                    if _s.get("title") == disp and _s.get("mp4") \
+                                            and os.path.exists(_s["mp4"]):
+                                        _keep = _s
+                                        break
+                        except Exception:
+                            _keep = {}
+                        _entry = dict(_keep) if _keep else {
                             "title": disp, "title_guess": seg["title_guess"],
                             "start": seg["start_hms"], "end": seg["end_hms"],
                             "confidence": seg["confidence"],
                             "mp4": None, "specs": {}, "specs_ok": False,
                             "renderer": "blocked-by-gate",
-                            "gate_blocked": str(e)[:400],
-                        })
+                        }
+                        _entry["gate_blocked"] = str(e)[:400]
+                        manifest["songs"].append(_entry)
                         continue
             specs = verify_specs(ffprobe, out_mp4)
             # 规格判据不再写在这里：30fps 的手书 PV 曾因写死 59.9 被判「不达标」。
