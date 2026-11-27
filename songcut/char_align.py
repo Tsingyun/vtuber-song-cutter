@@ -57,6 +57,23 @@ def _get_paraformer():
     return _pf
 
 
+def _audio_tag(mp3_path):
+    """切片缓存目录名：文件名 + 音频体积/修改时间。
+
+    ⚠ 只用文件名会在「同一天改了切点、成品同名重出」时命中**上一轮的**滑窗/逐字
+      缓存：新音频没被识别，QC 却拿旧音频的识别结果给新片打分。
+      2026-11-27《五块钱的伞》切点后移 0.87s 复渲，滑窗立刻报「中位 +1.23s」假
+      BLOCK（旧版真值 +0.36s），偏差恰好等于切点位移 —— 就是缓存没失效。
+      带上 st_size + mtime 后，重新产出音频必然换目录。
+    """
+    base = re.sub(r"[^\w.-]+", "_", os.path.basename(mp3_path))[:50]
+    try:
+        st = os.stat(mp3_path)
+        return "%s_%d_%d" % (base, st.st_size, int(st.st_mtime))
+    except OSError:
+        return base
+
+
 def timed_chars(mp3_path, workdir, merge_gap=0.18, min_run=0.6, log=_log):
     """成片音频 → [(time_s, ch)]，时间相对 mp3 起点；按 VAD 细乐句分段识别。
 
@@ -88,7 +105,7 @@ def timed_chars(mp3_path, workdir, merge_gap=0.18, min_run=0.6, log=_log):
     # ⚠ 目录必须按音频隔离：workdir 在同一场次的所有歌之间是共享的，段文件若按
     #   c000.wav 命名并「存在即复用」，第二首会直接读到第一首的切片 —— 识别出的是
     #   别首歌的文本，LCS 只匹配得上寥寥几行（11/22《快乐的扑满》实测只剩 5/38）。
-    _tag = re.sub(r"[^\w.-]+", "_", os.path.basename(mp3_path))[:60]
+    _tag = _audio_tag(mp3_path)
     segdir = os.path.join(workdir, "_tmp_char", _tag)
     os.makedirs(segdir, exist_ok=True)
     chars, nseg, nfail = [], 0, 0
@@ -400,7 +417,7 @@ def slide_verify(lrc_text, mp3_path, workdir, win=1.5, hop=0.75, log=_log):
         return info
 
     # 同样按音频隔离（理由见 timed_chars）：滑窗是固定网格，跨首复用会直接串音。
-    _tag = re.sub(r"[^\w.-]+", "_", os.path.basename(mp3_path))[:60]
+    _tag = _audio_tag(mp3_path)
     d = os.path.join(workdir, "_tmp_slide", _tag)
     os.makedirs(d, exist_ok=True)
     wins, t, i = [], 0.0, 0
