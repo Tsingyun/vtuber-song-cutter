@@ -2231,9 +2231,22 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         # ⚠ override 文件按「cut 相对时间」书写，与 dtw/asr/ctc 三条路径口径一致；
         # 片头补静音会让成片时间轴整体后移 head_pad，这里必须同步平移，
         # 否则渲染出的歌词会比人声早 head_pad（0.93s 级），QC 的 L09 也会系统性偏差。
-        if lrc and head_pad > 0:
-            lrc = _shift_lrc(lrc, head_pad)
-            log("  歌词时间轴: 片头补静音 %.2fs → 歌词整体后移（override 口径对齐）" % head_pad)
+        #
+        # 轴文件可用首行注释声明 `# expect_head_pad=0.811`：建轴时按该值把「成片时刻」
+        # 换算成 override 口径，渲染时也按该值平移回去。若这次实测的补静音量与声明
+        # 不同（切点微调、源片前导静音变化都会影响），仍按声明值平移 —— 歌词只关心
+        # 「相对画面的位置」，用实测值反而会把整轴推走 (实测−声明) 秒。
+        _ov_pad = head_pad
+        _m_exp = re.search(r"expect_head_pad\s*=\s*([0-9.]+)", _ov_text)
+        if _m_exp:
+            _ov_pad = float(_m_exp.group(1))
+            if abs(_ov_pad - head_pad) > 0.05:
+                log("  ⚠ 轴文件声明 expect_head_pad=%.3f，本次实测补静音 %.3f（差 %+.3f）；"
+                    "按声明值平移以保持歌词与画面的相对关系"
+                    % (_ov_pad, head_pad, head_pad - _ov_pad))
+        if lrc and _ov_pad > 0:
+            lrc = _shift_lrc(lrc, _ov_pad)
+            log("  歌词时间轴: 片头补静音 %.3fs → 歌词整体后移（override 口径对齐）" % _ov_pad)
     if tl_src == "raw" and lrc and sync.get("ok"):
         lrc2 = timeline_sync.render_lrc(sync, lrc, head_pad)
         if lrc2:

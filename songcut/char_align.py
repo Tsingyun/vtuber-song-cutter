@@ -459,28 +459,38 @@ def slide_verify(lrc_text, mp3_path, workdir, win=1.5, hop=0.75, log=_log):
     devs = []
     prev_hit = -1e9
     prev_txt = ""
+    _cj = [_cjk(s) for s in texts]
     for li, (t_row, txt) in enumerate(rows):
         tgt = _cjk(txt)
         if len(tgt) < 3:
             continue
-        # 逐行推进下界：歌词里「重复副歌」很常见（《小跳蛙》连唱两遍同一句），
-        # 不设下界就会把前一遍当成这一遍，凭空造出 −4s 的假偏差。
+        # ⚠ 只认「行首」4 个字，不做整行匹配。
+        # 旧实现用 _score(整行, 窗文本) >= 0.55 找命中窗，然后 dev 取「窗中心 − 行起点」。
+        # 一行 14 字要 4~5s，1.5s 的窗从行首出发只能覆盖 4~5 字（score≈0.35），永远不达标；
+        # 达标的那一窗必然是**行中后段**，于是 dev 恒为正 —— 长行全部被误判「偏晚 1~2s」。
+        # 11/26《易燃易爆炸》滑窗中位 +1.83s、通过率 29%，其实轴只偏 0.34s（L09 互证），
+        # 假 BLOCK 直接拦掉了一条本来可用的片子。
+        # 改成「窗文本里命中行首 4 字中的 2 个」即算开始唱，dev 取窗起点 + 0.3（首字在窗内
+        # 前 1/3 出现），既有下界也不会被行中段带跑。
+        head = tgt[:4]
+        need = min(2, len(head))
         same = (txt.strip() == prev_txt.strip())
         lo = max(t_row - 6.0, prev_hit + (2.5 if same else 0.3))
         first = None
-        for (ws, _p), s in zip(wins, texts):
+        for i, (ws, _p) in enumerate(wins):
             if ws > t_row + 6.0:
                 break
             if ws + win < lo:
                 continue
-            if _score(txt, s) >= 0.55:
+            s = _cj[i]
+            if sum(1 for ch in head if ch in s) >= need and _score(txt, s) >= 0.30:
                 first = ws
                 break
         if first is None:
             info["fails"].append((round(t_row, 1), None, txt[:12]))
             prev_txt = txt
             continue
-        dev = (first + win / 2.0) - t_row
+        dev = (first + 0.30) - t_row
         devs.append(dev)
         info["judged"] += 1
         prev_hit = first
