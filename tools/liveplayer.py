@@ -363,7 +363,9 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 try:
                     self.wfile.write(chunk)
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError,
+                        OSError):
+                    # 浏览器 seek 会主动断开正在传的响应，属正常现象，不要刷栈
                     return
                 left -= len(chunk)
 
