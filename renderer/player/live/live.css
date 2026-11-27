@@ -336,20 +336,30 @@ html, body {
   display: none;
 }
 
-/* 曲目切换（≥2 首才显示） */
+/* 曲目步进器（≥2 首才显示，单行，只占标题带，不下探乐谱头） */
 #setlist {
-  position: absolute; right: 3.1cqw; top: 4.4cqh; z-index: 7;
+  position: absolute; right: 3.1cqw; top: 4.1cqh; z-index: 7;
+  display: flex; align-items: baseline; gap: .85cqw;
   font-family: var(--mono); font-size: .6cqw; letter-spacing: .16em;
-  color: rgba(242,236,230,.45); text-align: right;
-}
-#setlist .row {
-  display: block; padding: .5cqh 0; cursor: pointer;
-  transition: color 300ms ease;
+  color: rgba(242,236,230,.45); max-width: 40cqw;
   white-space: nowrap;
 }
-#setlist .row:hover { color: var(--ink); }
-#setlist .row.on { color: var(--accent); }
-#setlist .row span { opacity: .45; margin-right: .7cqw; }
+#setlist .t {
+  font-family: var(--sans); font-weight: 400; font-size: .66cqw;
+  letter-spacing: .14em; color: rgba(242,236,230,.58);
+  max-width: 20cqw; overflow: hidden; text-overflow: ellipsis;
+}
+#setlist .n { font-style: normal; letter-spacing: .1em; color: rgba(242,236,230,.42); }
+#setlist .n s { text-decoration: none; opacity: .45; margin: 0 .1em; }
+#setlist .pg { display: flex; align-items: baseline; gap: .1cqw; }
+#setlist .ar {
+  background: none; border: 0; margin: 0; padding: 0 .22cqw;
+  font: inherit; font-size: .95cqw; line-height: 1;
+  color: rgba(242,236,230,.38); cursor: pointer;
+  transition: color 240ms ease;
+}
+#setlist .ar:hover { color: var(--accent); }
+#setlist .ar:focus-visible { color: var(--accent); outline: none; }
 
 @media (prefers-reduced-motion: reduce) {
   #frame, #ambient, #grain { animation: none; }

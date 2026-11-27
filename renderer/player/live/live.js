@@ -114,7 +114,9 @@
     }
     trackEl.appendChild(frag);
     lnAll.textContent = String(lines.length).padStart(3, '0');
+    // 换曲后重置：S.active 直接等于首帧的 -1 会让 setActive 提前 return，行号必须就地归零
     S.active = -1;
+    lnNow.textContent = '000';
   }
 
   function layoutTrack() {
@@ -390,12 +392,22 @@
     const nav = $('#setlist');
     nav.innerHTML = '';
     if (S.tracks.length > 1) {
-      S.tracks.forEach((tr) => {
-        const r = document.createElement('span');
-        r.className = 'row' + (tr.index === meta.index ? ' on' : '');
-        r.innerHTML = `<span>${String(tr.index + 1).padStart(2, '0')}</span>${tr.title}`;
-        r.onclick = () => switchTo(tr.index);
-        nav.appendChild(r);
+      const i = Math.max(0, S.tracks.findIndex((t) => t.index === meta.index));
+      const pad = (n) => String(n).padStart(2, '0');
+      nav.innerHTML =
+        `<b class="t">${meta.title || ''}</b>` +
+        `<i class="n">${pad(i + 1)}<s>/</s>${pad(S.tracks.length)}</i>` +
+        `<span class="pg">` +
+          `<button class="ar" data-d="-1" aria-label="上一首">\u2039</button>` +
+          `<button class="ar" data-d="1" aria-label="下一首">\u203a</button>` +
+        `</span>`;
+      nav.querySelectorAll('.ar').forEach((b) => {
+        b.onclick = (e) => {
+          e.stopPropagation();
+          b.blur();
+          const j = (i + (+b.dataset.d) + S.tracks.length) % S.tracks.length;
+          switchTo(S.tracks[j].index);
+        };
       });
     }
   }
