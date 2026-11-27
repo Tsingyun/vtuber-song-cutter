@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Cue · 歌切</title>
+<link rel="stylesheet" href="/live.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="ambient" width="96" height="54"></canvas>
+
+  <section id="portrait" aria-label="主播实时画面">
+    <div id="frame">
+      <video id="vid" playsinline preload="auto"></video>
+    </div>
+  </section>
+
+  <div id="vignette"></div>
+  <div id="grain"></div>
+
+  <section id="score" aria-label="歌词">
+    <div id="scoreRule"></div>
+    <div id="scoreHead">
+      <span>歌词 · lyrics</span>
+      <span class="cnt"><b id="lnNow">000</b> / <span id="lnAll">000</span></span>
+    </div>
+    <div id="lyricView"><div id="lyricTrack"></div></div>
+  </section>
+
+  <header id="brand">
+    <b>岁己</b><i>／</i><span>live cue</span>
+  </header>
+  <nav id="setlist"></nav>
+  <div id="spine"><span id="spineText">live cue</span></div>
+
+  <footer id="rail">
+    <div id="now">
+      <div class="orig" id="mOrig">original</div>
+      <div class="title" id="mTitle">—</div>
+      <div class="sub"><span id="mVocal">vocal</span><em>·</em><span id="mDate">—</span></div>
+    </div>
+    <div id="clock">
+      <span class="cur" id="tCur">00:00</span>
+      <span class="sep">/</span>
+      <span class="tot" id="tTot">00:00</span>
+    </div>
+  </footer>
+
+  <div id="progress" role="slider" aria-label="播放进度" tabindex="0">
+    <div class="track"></div>
+    <div class="fill" id="pFill"></div>
+    <div class="dot" id="pDot"></div>
+  </div>
+
+  <div id="loading">reading tape</div>
+
+  <div id="gate">
+    <div class="gateInner">
+      <div class="ring"><div class="tri"></div></div>
+      <div class="cap">play</div>
+      <div class="hint">点击开始 · 空格暂停 · ←→ 快进</div>
+    </div>
+  </div>
+
+  <div id="err"></div>
+</div>
+<script src="/live.js"></script>
+</body>
+</html>
