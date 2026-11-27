@@ -154,8 +154,8 @@
       const ln = S.lines[k];
       const d = k - i;
       ln.el.className = 'line ' + (d === 0 ? 'active' : d < 0 ? 'past' : 'future');
-      ln.el.style.opacity = d === 0 ? 1 : d === -1 ? .62 : d === -2 ? .4 : d === -3 ? .24 :
-        d === 1 ? .9 : d === 2 ? .62 : d === 3 ? .34 : .14;
+      ln.el.style.opacity = d === 0 ? 1 : d === -1 ? .58 : d === -2 ? .36 : d === -3 ? .2 :
+        d === 1 ? .88 : d === 2 ? .58 : d === 3 ? .3 : .12;
       if (d === 0) {
         ln.offs = measureLine(ln.el);
         // 活动行换行后列宽可能变化，其余行缓存作废（行数少，重建代价可忽略）
