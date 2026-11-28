@@ -101,20 +101,49 @@ UI_CHARS = ("岁己歌词原唱演唱曲目点击开始空格暂停快进重播�
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 
-def _build_font(charset: str, out_path: Path) -> bool:
-    """按当前曲目文本做衬线字体子集（woff2）。找不到字体就跳过，页面回退系统衬线。"""
+FONT_SRC = {
+    ("serif", "jp"): ["C:/Windows/Fonts/NotoSerifJP-VF.ttf",
+                      "official_pv/engine/fonts/NotoSerifJP_wght_.ttf"],
+    ("serif", "sc"): ["C:/Windows/Fonts/NotoSerifSC-VF.ttf",
+                      "official_pv/engine/fonts/NotoSerifSC_wght_.ttf"],
+    ("sans", "sc"):  ["C:/Windows/Fonts/NotoSansSC-VF.ttf",
+                      "official_pv/engine/fonts/NotoSansSC_wght_.ttf"],
+    ("sans", "jp"):  ["C:/Windows/Fonts/NotoSansJP-VF.ttf",
+                      "official_pv/engine/fonts/NotoSansJP_wght_.ttf"],
+}
+
+
+def text_lang(text: str) -> str:
+    """判断一段歌词的书写系统：ja / zh / en。只用于选字族，不参与业务。"""
+    kana = sum(1 for c in text if "\u3040" <= c <= "\u30ff")
+    han = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+    latin = sum(1 for c in text if c.isascii() and c.isalpha())
+    if kana >= 3:
+        return "ja"
+    if han >= 3:
+        return "zh"
+    if latin:
+        return "en"
+    return "ja"
+
+
+def _build_font(charset: str, out_path: Path, kind: str = "serif",
+                lang: str = "jp") -> bool:
+    """按当前曲目文本做字体子集（woff2）。找不到字体就跳过，页面回退系统字体。"""
     try:
         from fontTools import subset
     except Exception:
-        print("  ⚠ 没有 fontTools，跳过字体子集（页面回退系统衬线）")
+        print("  ⚠ 没有 fontTools，跳过字体子集（页面回退系统字体）")
         return False
-    cands = [os.environ.get("LIVE_SERIF_FONT"),
-             "C:/Windows/Fonts/NotoSerifJP-VF.ttf",
-             "C:/Windows/Fonts/NotoSerifSC-VF.ttf",
-             "/System/Library/Fonts/Supplemental/Songti.ttc"]
-    src = next((c for c in cands if c and Path(c).exists()), None)
+    env = os.environ.get("LIVE_SERIF_FONT") if kind == "serif" else None
+    cands = [env] + [c if os.path.isabs(c) else str(ROOT / c)
+                     for c in FONT_SRC.get((kind, lang), [])]
+    cands += [c for c in FONT_SRC.get((kind, "jp" if lang != "jp" else "sc"), [])
+              if os.path.isabs(c) or True]
+    cands = [c if os.path.isabs(c) else str(ROOT / c) for c in cands if c]
+    src = next((c for c in cands if Path(c).exists()), None)
     if not src:
-        print("  ⚠ 未找到衬线字体源，跳过子集")
+        print("  ⚠ 未找到 %s/%s 字体源，跳过子集" % (kind, lang))
         return False
     try:
         opts = subset.Options()
@@ -127,7 +156,8 @@ def _build_font(charset: str, out_path: Path) -> bool:
         ss.populate(text=charset)
         ss.subset(font)
         subset.save_font(font, str(out_path), opts)
-        print("  [font] %s → %.0f KB" % (Path(src).name, out_path.stat().st_size / 1024))
+        print("  [font] %-22s → %-5.0f KB（%s）"
+              % (Path(src).name, out_path.stat().st_size / 1024, out_path.name))
         return True
     except Exception as e:
         print("  ⚠ 字体子集失败：%s" % e)
@@ -165,13 +195,59 @@ def _seg_lookup(date: str, title: str) -> dict:
     return out
 
 
-def prepare(date: str, index: int, src: str | None, force: bool) -> int:
+def _songs_from_segments(date: str) -> list[dict]:
+    """台账缺失时，从 segments/<date>-*.json 取曲目（切点字段是 cut_start_abs）。"""
+    out = []
+    for f in sorted((ROOT / "segments").glob("*%s*.json" % date.replace("-", ""))):
+        if f.name.endswith(".bak") or f.name.endswith(".bak2"):
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for k, s in enumerate(d.get("songs") or []):
+            if not isinstance(s, dict):
+                continue
+            cs, ce = s.get("cut_start_abs"), s.get("cut_end_abs")
+            if cs is None or ce is None:
+                continue
+            out.append({"title": s.get("title_guess") or s.get("title"),
+                        "artist": s.get("artist") or "",
+                        "lang": s.get("lang"),
+                        "cut_start": cs, "cut_end": ce,
+                        "head_pad": s.get("head_pad"),
+                        "lrc_src_path": s.get("lrc_src_path"),
+                        "lrc_path": s.get("lrc_path"),
+                        "seq": s.get("seq") or (k + 1)})
+    return out
+
+
+def _guess_src(date: str) -> str | None:
+    """在录播目录里按日期找源，优先 merged。"""
+    base = Path(os.environ.get("LIVE_SRC_DIR") or "D:/录播")
+    if not base.exists():
+        return None
+    tag = date.replace("-", "")
+    hits = sorted(base.rglob("*%s*.mp4" % tag))
+    if not hits:
+        return None
+    merged = [h for h in hits if "merged" in h.name.lower()]
+    return str((merged or hits)[0])
+
+
+def prepare(date: str, index: int, src: str | None, force: bool,
+            no_trans: bool = False, lrc_override: str | None = None) -> int:
     mpath = ROOT / "cuts" / date / "manifest.json"
-    if not mpath.exists():
-        print("没有台账：%s" % mpath, file=sys.stderr)
-        return 2
-    man = json.loads(mpath.read_text(encoding="utf-8"))
-    songs = man.get("songs") or []
+    if mpath.exists():
+        man = json.loads(mpath.read_text(encoding="utf-8"))
+        songs = man.get("songs") or []
+    else:
+        songs = _songs_from_segments(date)
+        man = {"songs": songs, "source": None}
+        if not songs:
+            print("既没有台账也没有段文件：%s" % date, file=sys.stderr)
+            return 2
+        print("[prepare] 无出片台账，改用段文件（%d 首）" % len(songs))
     if index < 0 or index >= len(songs):
         print("index 越界（共 %d 首）" % len(songs), file=sys.stderr)
         return 2
@@ -180,9 +256,11 @@ def prepare(date: str, index: int, src: str | None, force: bool) -> int:
     if cs is None or ce is None:
         print("这首歌没有切点（%s），先出片再用播放器" % seg.get("title"), file=sys.stderr)
         return 2
-    src = src or man.get("source")
+    if lrc_override:
+        seg = dict(seg, lrc_src_path=lrc_override)
+    src = src or man.get("source") or _guess_src(date)
     if not src or not Path(src).exists():
-        print("找不到录播源：%s" % src, file=sys.stderr)
+        print("找不到录播源：%s（可用 --src 指定）" % src, file=sys.stderr)
         return 2
 
     out_dir = CACHE / date
@@ -244,9 +322,44 @@ def prepare(date: str, index: int, src: str | None, force: bool) -> int:
             return 5
         print(r.stdout.decode("utf-8", "ignore").strip())
 
-    font_out = out_dir / ("%d.woff2" % index)
-    if force or not font_out.exists():
-        _build_font(UI_CHARS + lrc_out.read_text(encoding="utf-8"), font_out)
+    axis_text = lrc_out.read_text(encoding="utf-8")
+
+    # ---- 译文：只取真实中文译文（网易云 tlyric），按原文相似度排除同名不同曲
+    tr_out = out_dir / ("%d.zh.lrc" % index)
+    tr_rec = None
+    if not no_trans:
+        try:
+            sys.path.insert(0, str(ROOT))
+            from songcut.lyrics_trans import fetch_and_cache
+            from songcut.lyrics_fetch import cache_key
+            tr_rec = fetch_and_cache(seg.get("title") or seg.get("title_guess") or "",
+                                     axis_text, ROOT / "_media_cache",
+                                     cache_key(seg.get("title") or seg.get("title_guess") or ""),
+                                     seg.get("artist") or "")
+            if tr_rec:
+                tr_out.write_text(tr_rec["lrc"], encoding="utf-8")
+                m = tr_rec.get("meta") or {}
+                print("  [译文] %d/%d 行（网易云 %s · %s · 相似度 %.2f）"
+                      % (m.get("lines", 0), m.get("of", 0), m.get("name", ""),
+                         m.get("artist", ""), m.get("similarity", 0)))
+            else:
+                print("  [译文] 无可信中文译文，保持单语")
+        except Exception as e:
+            print("  [译文] 获取失败（不影响原文）：%s" % e)
+    if tr_out.exists() and (no_trans or tr_rec is None):
+        tr_out.unlink()
+
+    # ---- 字体：衬线（歌词原文）+ 黑体（译文 / 界面），按本曲实际用字子集化
+    lang = text_lang(axis_text)
+    serif_out = out_dir / ("%d.serif.woff2" % index)
+    sans_out = out_dir / ("%d.sans.woff2" % index)
+    serif_lang = "jp" if lang in ("ja", "en") else "sc"
+    tr_text = tr_out.read_text(encoding="utf-8") if tr_out.exists() else ""
+    if force or not serif_out.exists():
+        _build_font(UI_CHARS + axis_text + tr_text, serif_out, "serif", serif_lang)
+    if force or not sans_out.exists():
+        _build_font(UI_CHARS + tr_text + axis_text, sans_out, "sans", "sc")
+    font_out = serif_out      # 兼容旧字段
 
     probe = json.loads(_run([_bin("ffprobe"), "-v", "error", "-show_entries",
                              "format=duration", "-show_entries",
@@ -269,7 +382,13 @@ def prepare(date: str, index: int, src: str | None, force: bool) -> int:
         "video": "/media/%s/%d.mp4" % (date, index),
         "lrc": "/media/%s/%d.lrc" % (date, index),
         "track": "/media/%s/%d.track.json" % (date, index),
-        "font": ("/media/%s/%d.woff2" % (date, index)) if font_out.exists() else None,
+        "font": ("/media/%s/%d.serif.woff2" % (date, index)) if font_out.exists() else None,
+        "fonts": {
+            "serif": ("/media/%s/%d.serif.woff2" % (date, index)) if serif_out.exists() else None,
+            "sans": ("/media/%s/%d.sans.woff2" % (date, index)) if sans_out.exists() else None,
+        },
+        "lang": lang,
+        "trans": ("/media/%s/%d.zh.lrc" % (date, index)) if tr_out.exists() else None,
         "source": os.path.basename(src),
     }
     meta_out.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -411,7 +530,17 @@ def play(date: str, index: int, port: int) -> int:
     rc = prepare(date, index, None, False)
     if rc != 0:
         return rc
-    url = "http://127.0.0.1:%d/?i=%d" % (port, index)
+    # ?i= 是列表位置（不同场次的 index 会撞号），这里换算一次
+    pos = 0
+    try:
+        idx = json.loads((CACHE / "index.json").read_text(encoding="utf-8")).get("tracks") or []
+        for k, t in enumerate(idx):
+            if t.get("date") == date and int(t.get("index", -1)) == index:
+                pos = k
+                break
+    except Exception:
+        pass
+    url = "http://127.0.0.1:%d/?i=%d" % (port, pos)
     print("[play] %s" % url)
 
     def _open():
@@ -433,6 +562,8 @@ def main() -> int:
     p1.add_argument("--index", type=int, default=0)
     p1.add_argument("--src", default=None)
     p1.add_argument("--force", action="store_true")
+    p1.add_argument("--lrc", default=None, help="指定歌词轴（cut 相对时间）")
+    p1.add_argument("--no-trans", action="store_true", help="跳过中文译文")
     p2 = sub.add_parser("serve")
     p2.add_argument("--port", type=int, default=8777)
     p2.add_argument("--host", default="127.0.0.1")
@@ -442,7 +573,8 @@ def main() -> int:
     p3.add_argument("--port", type=int, default=8777)
     a = ap.parse_args()
     if a.cmd == "prepare":
-        return prepare(a.date, a.index, a.src, a.force)
+        return prepare(a.date, a.index, a.src, a.force,
+                   no_trans=a.no_trans, lrc_override=a.lrc)
     if a.cmd == "play":
         return play(a.date, a.index, a.port)
     return serve(a.port, a.host)

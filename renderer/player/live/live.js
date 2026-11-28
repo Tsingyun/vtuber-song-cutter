@@ -92,9 +92,16 @@
   }
 
   /* ------------------------------------------------ 构建歌词 */
-  function buildLyrics(lines) {
+  function buildLyrics(lines, trArr) {
     S.lines = lines;
     trackEl.innerHTML = '';
+    // 译文按时间戳挂到对应行（同一时间点=同一行，工具层写轴时已保证）
+    const trMap = new Map();
+    if (trArr && trArr.length) {
+      for (const o of trArr) trMap.set(Math.round(o.t * 100), o.text);
+    }
+    S.hasTrans = trMap.size > 0;
+    trackEl.classList.toggle('has-tr', S.hasTrans);
     const frag = document.createDocumentFragment();
     for (let i = 0; i < lines.length; i++) {
       const d = document.createElement('div');
@@ -103,11 +110,21 @@
       const b = document.createElement('span');
       b.className = 'base';
       b.textContent = lines[i].text;
+      let trEl = null;
+      if (S.hasTrans) {
+        trEl = document.createElement('span');
+        trEl.className = 'trans';
+        // 无译文的行留一个零宽占位，保证每行高度一致（换行时不抖）
+        trEl.textContent = trMap.get(Math.round(lines[i].t * 100)) || '\u200b';
+      }
       const f = document.createElement('span');
       f.className = 'fill';
       f.dataset.text = lines[i].text;
       f.setAttribute('aria-hidden', 'true');
-      d.append(b, f);
+      // 顺序：原文 → 译文 → 逐字填充（填充是绝对定位覆盖层，必须在原文之上）
+      d.append(b);
+      if (trEl) d.append(trEl);
+      d.append(f);
       frag.appendChild(d);
       lines[i].el = d;
       lines[i].w = charWeights(lines[i].text);
@@ -133,19 +150,50 @@
   function fitLyrics() {
     if (!S.lines.length) return;
     const col = viewEl.clientWidth;
+    const viewH = viewEl.clientHeight;
     const stageW = stage.clientWidth || 1600;
     const ref = 100;
+    const kTr = 0.50;                       // 与 --s-trans 保持一致
+    // 拉丁文歌词单词长、整行放不下：允许折行，按 75 分位收字，只有最长的几行会折
+    const wrap = S.meta && (S.meta.lang === 'en' || S.meta.lang === 'latin');
+    S.wrap = !!wrap;
+    // 量自然宽度时必须临时关掉折行，否则每行都被容器夹住，量不出真实长度
+    trackEl.classList.toggle('wrap', false);
     trackEl.style.fontSize = ref + 'px';
-    let maxW = 0;
+    const ws = [];
     for (const ln of S.lines) {
       const b = ln.el.querySelector('.base');
-      if (b) maxW = Math.max(maxW, b.getBoundingClientRect().width);
+      if (b) ws.push(b.getBoundingClientRect().width);
+      const t = ln.el.querySelector('.trans');
+      if (t) ws.push(t.getBoundingClientRect().width / kTr);
+    }
+    let maxW = 0;
+    if (ws.length) {
+      ws.sort((a, b) => a - b);
+      maxW = wrap ? ws[Math.min(ws.length - 1, Math.floor(ws.length * 0.75))] : ws[ws.length - 1];
     }
     let fs = stageW * 0.0215;
-    if (maxW > 0) fs = Math.min(fs, col * 0.985 / (maxW / ref) / 1.22);
+    const scale = wrap ? 1.06 : 1.22;       // 折行时活动行放大更克制，靠换行消化长度
+    const usable = wrap ? 0.94 : 0.985;     // 折行模式右侧留 6% 给放大余量
+    if (maxW > 0) fs = Math.min(fs, col * usable / (maxW / ref) / scale);
+    // 纵向预算：活动行连同译文不超过视口的 46%
+    if (S.hasTrans) {
+      const emH = 1.64 + 0.34 + 1.52 * kTr;
+      fs = Math.min(fs, (viewH * 0.46) / 1.22 / emH);
+    }
     fs = Math.max(stageW * 0.0128, fs);
     trackEl.style.fontSize = fs.toFixed(2) + 'px';
+    trackEl.classList.toggle('wrap', !!wrap);
     for (const ln of S.lines) ln.offs = null;
+    // 行高对齐：取 90 分位作为统一行高，换行/无译文的行都不会让整列跳动
+    trackEl.style.removeProperty('--row-h');
+    if (wrap) {
+      const hs = S.lines.map((l) => l.el.offsetHeight).sort((a, b) => a - b);
+      if (hs.length) {
+        const p90 = hs[Math.min(hs.length - 1, Math.floor(hs.length * 0.9))];
+        trackEl.style.setProperty('--row-h', p90.toFixed(1) + 'px');
+      }
+    }
     layoutTrack();
   }
 
@@ -292,7 +340,25 @@
     t1 = Math.min(t1, t0 + Math.max(est * 1.6, 1.2));
     const span = Math.max(0.35, t1 - t0);
     let pr = clamp((t - t0) / span, 0, 1);
+    if (S.wrap) {
+      // 折行的拉丁文行做不了逐字定位（第二行 x 会回退），改用整行横向推进。
+      // 用带羽化的 mask 而不是硬边 clip：英文单词会被从中间切开，硬边看起来像故障。
+      const fw = ln.el.querySelector('.fill');
+      if (fw) {
+        const a = Math.max(0, pr * 100 - 5), b = Math.min(100, pr * 100 + 5);
+        const md = `linear-gradient(90deg, #000 ${a.toFixed(1)}%, rgba(0,0,0,0) ${b.toFixed(1)}%)`;
+        if (fw._c !== md) {
+          fw._c = md;
+          fw.style.clipPath = 'none';
+          fw.style.webkitMaskImage = md;
+          fw.style.maskImage = md;
+        }
+      }
+      return;
+    }
     if (!ln.offs) ln.offs = measureLine(ln.el);
+    { const f0 = ln.el.querySelector('.fill');
+      if (f0 && f0.style.maskImage) { f0.style.maskImage = ''; f0.style.webkitMaskImage = ''; f0._c = ''; } }
     if (ln.offs && ln.offs.length) {      const w = ln.w;
       let idx = 0;
       while (idx < w.length - 1 && w[idx] < pr) idx++;
@@ -363,13 +429,38 @@
   });
 
   /* ------------------------------------------------ 初始化 */
-  async function loadFont(src) {
-    if (!src) return;
+  /* 字体：衬线（歌词/标题）+ 黑体（译文/界面）。任一失败只降级到系统同类字族。 */
+  async function loadFont(src) { return loadFonts({ font: src }); }
+
+  async function loadFonts(meta) {
+    const f = meta.fonts || {};
+    const serif = f.serif || meta.font || null;
+    const sans = f.sans || null;
+    const jobs = [];
+    if (serif) jobs.push(new FontFace('LC Serif', `url(${serif})`, { weight: '100 900' }));
+    if (sans) jobs.push(new FontFace('LC Sans', `url(${sans})`, { weight: '100 900' }));
+    for (const ff of jobs) {
+      try {
+        await ff.load();
+        document.fonts.add(ff);
+      } catch (e) {
+        console.warn('字体回退：' + ff.family + ' 未加载，改用系统同类字体', e);
+      }
+    }
+  }
+
+  /* 中文译文：时间戳与我方轴逐行一致（由工具层按轴生成），无需重新对齐 */
+  async function fetchTrans(meta) {
+    if (!meta.trans) return null;
     try {
-      const ff = new FontFace('LC Serif', `url(${src})`, { weight: '100 900' });
-      await ff.load();
-      document.fonts.add(ff);
-    } catch (e) { console.warn('font fallback', e); }
+      const r = await fetch(meta.trans, { cache: 'no-store' });
+      if (!r.ok) return null;
+      const arr = parseLRC(await r.text());
+      return arr.length ? arr : null;
+    } catch (e) {
+      console.warn('译文读取失败（原文照常显示）', e);
+      return null;
+    }
   }
 
   function bindTrack(meta) {
@@ -387,12 +478,12 @@
       `${(meta.date || '').replace(/-/g, '.')} — live cue — no.${String((meta.index || 0) + 1).padStart(2, '0')}`;
     document.title = `${meta.title} · Live Cue`;
     tTot.textContent = fmt(meta.duration);
-    history.replaceState(null, '', `?i=${meta.index}`);
+    history.replaceState(null, '', `?i=${S.tracks.indexOf(meta)}`);
 
     const nav = $('#setlist');
     nav.innerHTML = '';
     if (S.tracks.length > 1) {
-      const i = Math.max(0, S.tracks.findIndex((t) => t.index === meta.index));
+      const i = Math.max(0, S.tracks.indexOf(meta));
       const pad = (n) => String(n).padStart(2, '0');
       nav.innerHTML =
         `<b class="t">${meta.title || ''}</b>` +
@@ -406,24 +497,27 @@
           e.stopPropagation();
           b.blur();
           const j = (i + (+b.dataset.d) + S.tracks.length) % S.tracks.length;
-          switchTo(S.tracks[j].index);
+          switchTo(j);
         };
       });
     }
   }
 
-  async function switchTo(i) {
-    const meta = S.tracks.find((t) => t.index === i) || S.tracks[0];
+  async function switchTo(pos) {
+    const meta = S.tracks[pos] || S.tracks[0];
     if (!meta) return;
+    S.pos = S.tracks.indexOf(meta);
     if (meta === S.meta) return;
     gate.classList.add('hidden');
     loading.classList.remove('hidden');
-    const [lrcText, tk] = await Promise.all([
+    const [lrcText, tk, trArr] = await Promise.all([
       fetch(meta.lrc, { cache: 'no-store' }).then((r) => r.text()),
       fetch(meta.track, { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+      fetchTrans(meta),
     ]);
     bindTrack(meta);
-    setTrackData(lrcText, tk);
+    await loadFonts(meta);
+    setTrackData(lrcText, tk, trArr);
     await new Promise((res) => {
       if (vid.readyState >= 1) return res();
       vid.addEventListener('loadedmetadata', res, { once: true });
@@ -439,8 +533,8 @@
     play();
   }
 
-  function setTrackData(lrcText, tk) {
-    buildLyrics(parseLRC(lrcText));
+  function setTrackData(lrcText, tk, trArr) {
+    buildLyrics(parseLRC(lrcText), trArr);
     S.cxArr = tk && tk.cx && tk.cx.length ? Float32Array.from(tk.cx) : null;
     S.trackFps = tk?.fps || 4;
     if (tk && tk.w) { S.srcW = tk.w; S.srcH = tk.h; }
@@ -485,20 +579,24 @@
       return;
     }
 
-    const want = parseInt(Q.get('i') || '0', 10) || 0;
-    const meta = S.tracks.find((t) => t.index === want) || S.tracks[0];
-    await loadFont(meta.font);
+    // ?i= 是列表位置（不同场次的 index 会撞号，不能按 index 找）
+    const want = Math.max(0, parseInt(Q.get('i') || '0', 10) || 0);
+    const meta = S.tracks[want] || S.tracks[0];
+    S.pos = S.tracks.indexOf(meta);
+    await loadFonts(meta);
     await document.fonts.ready;
 
-    let lrcText = '', tk = null;
+    let lrcText = '', tk = null, trArr = null;
     try {
       const rs = await Promise.all([
         fetch(meta.lrc, { cache: 'no-store' }),
         fetch(meta.track, { cache: 'no-store' }).catch(() => null),
+        fetchTrans(meta),
       ]);
       if (!rs[0].ok) throw new Error('lrc HTTP ' + rs[0].status);
       lrcText = await rs[0].text();
       tk = rs[1] && rs[1].ok ? await rs[1].json() : null;
+      trArr = rs[2];
     } catch (e) {
       loading.classList.add('hidden');
       errBox.style.display = 'block';
@@ -506,7 +604,7 @@
       return;
     }
     bindTrack(meta);
-    setTrackData(lrcText, tk);
+    setTrackData(lrcText, tk, trArr);
 
     await new Promise((res) => {
       if (vid.readyState >= 1) return res();

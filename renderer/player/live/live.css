@@ -12,10 +12,25 @@
   --ink-dim: rgba(242, 236, 230, .55);
   --hair: rgba(242, 236, 230, .13);
   --accent: #e8a4b6;              /* 主播发色 · 雨粉 */
+  /* ---------------- 全项目字体规范 ----------------
+     两族四角色，不做无逻辑混搭：
+       衬线 LC Serif  → 歌词原文、歌名（明朝体，按曲目语言在 jp/sc 两套字形间切换）
+       黑体 LC Sans   → 中文译文、界面标签、按钮、时间数字
+     中文译文用黑体、原文用衬线，是刻意的层级差（不是随手换字体）：
+     两者共属 Noto 同族，拉丁字母与标点的基线、字宽一致，中英日混排不会突兀。
+     回退链一律落到系统已装的 Noto → 宋体/黑体，网络字体失败也不会字形错乱。 */
   --serif: "LC Serif", "Noto Serif JP", "Noto Serif SC", "Source Han Serif SC",
-           "Songti SC", "Yu Mincho", "MS Mincho", serif;
-  --sans: "Inter", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
-  --mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+           "Songti SC", "Yu Mincho", "MS Mincho", "SimSun", serif;
+  --sans: "LC Sans", "Noto Sans SC", "Noto Sans JP", "PingFang SC",
+          "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --mono: "LC Sans", "Noto Sans SC", ui-monospace, "Consolas", monospace;
+  /* 字号阶梯（1cqw = 舞台宽的 1%，随窗口等比缩放） */
+  --s-title: 3.06cqw;      /* 歌名：唯一的大字号 */
+  --s-meta: .60cqw;        /* 原唱 / 演唱 / 日期：微型标签 */
+  --s-clock: 1.30cqw;      /* 当前时间 */
+  --s-clock-sub: .86cqw;   /* 总时长 */
+  --s-label: .58cqw;       /* 按钮与辅助文字 */
+  --s-trans: .50em;        /* 译文 = 原文的 0.50 倍，随原文自适应 */
   --ease: cubic-bezier(.22, .9, .16, 1);
   --split: 55cqw;                 /* 人物区右边界（55:45 非对称） */
   --score-left: 59.4cqw;
@@ -155,6 +170,15 @@ html, body {
   transition: transform 820ms var(--ease);
 }
 
+/* 拉丁文歌词（英文等）：单词长、整行放不下，允许折行。
+   折行后逐字定位会失效，改用整行横向推进（见 live.js 的 wrap 分支）。 */
+#lyricTrack.wrap .line { white-space: normal; padding-right: 6%; }
+#lyricTrack.wrap .line .base { display: block; }
+#lyricTrack.wrap .line .fill { white-space: normal; left: 0; right: 6%; width: auto; }
+#lyricTrack.wrap .line.active { transform: scale(1.06); }
+/* 折行后行高不等，统一到 90 分位，整列按固定节拍滚动（值由 JS 量出） */
+#lyricTrack.wrap .line { min-height: var(--row-h, 0px); }
+
 .line {
   position: relative;
   display: block;
@@ -170,6 +194,21 @@ html, body {
   transition: color 620ms var(--ease), filter 620ms var(--ease),
               opacity 620ms var(--ease), transform 820ms var(--ease);
 }
+/* 中文译文：原文的正下方，同一视觉单元（随整行一起缩放/淡入淡出） */
+.line .trans {
+  display: block;
+  font-family: var(--sans);
+  font-weight: 300;
+  font-size: var(--s-trans);
+  line-height: 1.52;
+  letter-spacing: .055em;
+  margin-top: .34em;
+  color: rgba(242, 236, 230, .46);
+  transition: color 620ms var(--ease);
+}
+.line.active .trans { color: rgba(242, 236, 230, .70); }
+.line.past .trans { color: rgba(242, 236, 230, .26); }
+
 .line .fill {
   position: absolute; left: 0; top: .40em; width: 100%;
   color: #fffdfb;
