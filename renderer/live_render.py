@@ -9,9 +9,13 @@
   必要的内存搬运（源帧 nv12 下载 3.1MB/帧、成片 RGBA 回读 33MB/帧），
   这是「用 Python + ffmpeg 管道」这条链路无法消除的下限，已实测不是瓶颈。
 
-歌词动效严格复刻旧版 Apple Music 参数（见 index.html drawLyrics / gpu_render._update_motion）：
-  scrollY τ≈0.18s；act 聚焦 dt*9 / 失焦 dt*4.2；bl 当前行 dt*12 / 其余 dt*5.5；
-  透明度 已唱 .34 / 当前 1.0 / 未唱 .24+.36·exp(-(d-1)/1.7)；字号 1.0→1.22；视口边缘淡出。
+歌词版式与动效继承 A 方案（renderer/player/index.html drawLyrics）：
+  · 字体 —— 粗体无衬线（Noto Sans 700），不是细体字幕；译文同族 500，只降字号与字重。
+  · 动效 —— scrollY dt*5.5；act 聚焦 dt*9 / 失焦 dt*4.2；bl 当前行 dt*12 / 其余 dt*5.5；
+    透明度 已唱 .30 / 当前 1.0（未唱 .42，单遍卡拉 OK 填充）/ 未唱 .20+.30·exp(-(d-1)/1.7)；
+    字号 1.0→1.16（以原文底边为锚向上生长）；视口上下沿淡出；长行按演唱进度横移。
+  · 版面 —— 只有字、色、光：颜色由这一帧的环境色决定（深场 + 焦点柔光），
+    没有任何框线 / 圆环 / 点阵 / 空心大字 / 频谱条（#164 明确移除）。
 """
 from __future__ import annotations
 
@@ -37,24 +41,24 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SW, SH = 1920.0, 1080.0
 PANEL_W = SW * 0.55                 # 人物面板宽（55%，与新播放器一致）
 PANEL_X = 0.0
-LYR_X = 1150.0                      # 歌词列左缘（列框 / 淡入边界都按这条线算）
-LYR_RAIL_X = LYR_X - 34.0           # 左侧竖条所在的轨线（装饰层里也烘焙一条细线）
-LYR_TEXT_X = LYR_X + 6.0            # 文字起点：比列框右移 6px，避开左缘软淡入的尾巴
-LYR_W = 668.0                       # 列宽：LYR_TEXT_X + 668 = 1824 = 底栏时间码右对齐线
-LYR_FADE = (LYR_X - 30.0, LYR_X + 8.0)    # 左缘软淡入区间（设计坐标）：滚出列框的文字在这里
-                                    # 化到 0，而竖条在 1120 之前——所以横移永远压不到竖条，
-                                    # 也不会出现「一个字被硬切掉一半」的断口
-LYR_TOP = 132.0                     # 歌词视口上沿（顶栏发丝线）
-LYR_BOT = 792.0                     # 歌词视口下沿（再往下是装饰带与底栏）
-DECOR_X0 = 1020.0                   # 装饰层只覆盖右侧这一条（左边是人物，全透明不画）
-FOCAL_Y = 322.0                     # 活动行**顶边**（+行内 ~40 → 中心落在 33%，即画面上部 1/3）
-BASE_PX = 42.0                      # 歌词主字号（设计像素）
-LH = 104.0                          # 行高：原文 + 译文 + 呼吸（活动行放大 1.26× 也要塞得下）
-LH_NOTRANS = 80.0                   # 无译文行时的行高：42px 字配 80px ≈ 1.9 倍行距
-TRANS_PX = 21.0                     # 译文
-TRANS_DY = 52.0                     # 译文相对原文顶的间距（活动行另按放大比例下推）
-TRANS_K = 0.66                      # 译文 / 原文 的不透明度比例（**常数**：两条曲线同步变化）
-TRANS_WEIGHT = 330                  # 译文用 Noto Serif SC，字重比原文（380）轻一档，同族同气质
+LYR_X = 1102.0                      # 歌词列左缘（文字起点 / 淡入边界都按这条线算）
+LYR_MARK_X = LYR_X - 50.0           # 活动行标记竖条所在的位置（永远在文字左侧）
+LYR_W = 722.0                       # 列宽：LYR_X + 722 = 1824 = 底栏时间码右对齐线
+LYR_FADE = (LYR_X - 26.0, LYR_X)    # 左缘软淡出区间（设计坐标 / 屏幕空间）：
+                                    # 滚出列框的文字在这里化到 0，而竖条右缘在 LYR_X−24，
+                                    # 所以横移永远压不到竖条，也不会出现「半个字」的断口
+LYR_TOP = 118.0                     # 歌词视口上沿
+LYR_BOT = 902.0                     # 歌词视口下沿（再往下是底栏）
+FOCAL_Y = 296.0                     # 活动行**顶边**（原文+译文整体中心 ≈ 33%，画面上部 1/3）
+BASE_PX = 52.0                      # 歌词主字号（设计像素）—— A 方案的字号量级，不是小字幕
+BASE_WEIGHT = 700                   # 原文一律粗体（A 方案辨识度的来源，不许退成细体）
+LH = 118.0                          # 行高：52px 粗体 + 24px 译文 + 呼吸
+LH_NOTRANS = 92.0                   # 无译文时收紧：52px 配 92px ≈ 1.77 倍行距
+TRANS_PX = 24.0                     # 译文
+TRANS_DY = 64.0                     # 译文相对原文顶的间距
+TRANS_K = 0.60                      # 译文 / 原文 的不透明度比例（**常数**：两条曲线同步变化）
+TRANS_WEIGHT = 500                  # 译文与原文同族同风格，只靠字号 + 字重分主次
+INK_TINT = 0.22                     # 歌词墨色向画面色相偏移的强度（0 = 纯白，1 = 满色相）
 COVER_SEC = 3.0                     # 片头封面的默认时长（秒，静音）
 TITLE_PX = 74.0
 LABEL_PX = 11.5
@@ -71,6 +75,9 @@ FSRC = {
                  "C:/Windows/Fonts/NotoSerifSC-VF.ttf"],
     "sans_sc": ["official_pv/engine/fonts/NotoSansSC_wght_.ttf",
                 "C:/Windows/Fonts/NotoSansSC-VF.ttf"],
+    # 日文歌用同族的 JP 版（假名 / 汉字字形是日文写法，与 SC 同设计，视觉上是一套字）
+    "sans_jp": ["official_pv/engine/fonts/NotoSansJP_wght_.ttf",
+                "C:/Windows/Fonts/NotoSansJP-VF.ttf"],
 }
 
 VS = """
@@ -120,31 +127,45 @@ uniform vec2 u_res;
 uniform float u_frame;
 void main(){
     vec2 p = v_uv;
-    /* 环境底只取「色」，不取「形」：
-       96x54 的源帧上取 6 个固定点做加权平均，得到这一帧的整体环境色，
-       再用垂直渐变铺满。人形亮斑不会被放大成鬼影（那是上一版的硬伤）。 */
+    /* 环境色：96x54 的源帧上取 6 个固定点做平均，得到这一帧的整体色调。
+       只取「色」不取「形」——人形亮斑不会被放大成鬼影（那是旧版的硬伤）。 */
     vec3 a = texture(u_bg, vec2(0.14, 0.18)).rgb;
     vec3 b = texture(u_bg, vec2(0.50, 0.22)).rgb;
     vec3 c1 = texture(u_bg, vec2(0.86, 0.18)).rgb;
     vec3 d = texture(u_bg, vec2(0.14, 0.82)).rgb;
     vec3 e = texture(u_bg, vec2(0.50, 0.78)).rgb;
     vec3 f = texture(u_bg, vec2(0.86, 0.82)).rgb;
-    vec3 base = (a + b + c1 + d + e + f) / 6.0;
-    base = mix(vec3(dot(base, vec3(0.299, 0.587, 0.114))), base, 0.70);
+    vec3 amb = (a + b + c1 + d + e + f) / 6.0;
+    float lum = dot(amb, vec3(0.299, 0.587, 0.114));
+    amb = clamp(mix(vec3(lum), amb, 1.45), vec3(0.0), vec3(1.0));   // 提饱和：色要站得住
 
-    // 垂直渐变：上略亮（承接人物那侧的光），下压暗给底栏让位
-    float v = smoothstep(0.0, 1.0, p.y);
-    vec3 col = base * mix(1.30, 0.55, v);
-    // 右侧再压一档，歌词才读得清
-    col *= mix(1.0, 0.42, smoothstep(0.42, 1.0, p.x));
-    col *= 0.42;
-    // 一点品牌色空气光，避免右半张「空」
-    vec2 g = (p - vec2(0.88, 0.26)) * vec2(1.4, 1.2);
-    col += vec3(0.62, 0.36, 0.44) * exp(-dot(g, g) * 3.4) * 0.045;
-    // 底部左侧暗池
+    /* ---- 左半（人物面板底）：几乎全被视频盖住，只在溶解边与底部渐隐处露一点 */
+    vec3 left = mix(vec3(0.023, 0.021, 0.026), amb * 0.10, 0.40);
     vec2 dd = (p - vec2(0.21, 0.90)) * vec2(1.45, 4.6);
-    col *= (1.0 - 0.86 * exp(-dot(dd, dd) * 1.55));
-    // 极轻颗粒
+    left *= (1.0 - 0.86 * exp(-dot(dd, dd) * 1.55));
+
+    /* ---- 右栏：一块「有颜色的深场」，不是纯黑。
+       色相全部来自这一帧的环境色 → 换场景自动换色，不需要人工配色。
+       亮度归一到 0.132：白字压上去的对比度 ≈ 12:1，任何色相下都清楚。 */
+    vec3 field = amb;
+    float fl = max(0.02, dot(field, vec3(0.299, 0.587, 0.114)));
+    field = field * (0.112 / fl);
+    field *= mix(1.32, 0.54, smoothstep(0.0, 1.0, p.y));          // 上亮下暗
+
+    // 接缝溢光：人物那侧的光往歌词区洇过来 → 两块区域不是「板上钉板」拼的
+    float sx = (p.x - 0.565) / 0.20;
+    field += amb * 0.10 * exp(-sx * sx);
+
+    // 焦点柔光：活动行所在高度一团极宽的椭圆光，把当前行「托」起来
+    vec2 g = (p - vec2(0.775, 0.325)) * vec2(1.0 / 0.34, 1.0 / 0.30);
+    field += amb * 0.080 * exp(-dot(g, g) * 2.1);
+
+    // 右缘收暗：画面要有边界，但不用画线
+    field *= mix(1.0, 0.74, smoothstep(0.86, 1.0, p.x));
+
+    vec3 col = mix(left, field, smoothstep(0.30, 0.62, p.x));
+
+    // 极轻颗粒（材质层：让大面积渐变不出现色带）
     float hn = fract(sin(dot(v_uv * u_res, vec2(12.9898, 78.233)) + u_frame * 3.7) * 43758.5453);
     col += (hn - 0.5) * 0.010;
     f_color = vec4(col, 1.0);
@@ -178,25 +199,33 @@ in vec2 v_uv;
 in float v_sx;
 out vec4 f_color;
 uniform sampler2D u_tex;
+uniform sampler2D u_amb;   // 96x54 环境帧：墨色的色相从这里取
 uniform vec4 u_color;
 uniform vec4 u_fill;   // x: 填充像素（纹理空间，<0 关闭）; y: 过渡宽; z: 未唱系数
 uniform vec2 u_fade_l; // 左缘软淡入区间（设计坐标，u_fade_l.y <= u_fade_l.x 即关闭）
 uniform vec2 u_size;   // 纹理绘制尺寸（像素）
+uniform float u_tint;  // 墨色向环境色相偏移的强度（0 = 纯白）
 void main(){
     vec2 p = v_uv;
     float a = texture(u_tex, p).a;
-    // 长行横向滚动时，滚出列框的字在 [x0, x1] 内线性化掉。作用在**屏幕横坐标**上
-    // （不是纹理坐标），所以同一行滚到哪儿、放大多少倍，淡出边界都钉在列框上。
+    // 长行横向滚动时，滚出列框的字在 [x0, x1] 内化掉。作用在**屏幕横坐标**上，
+    // 所以同一行滚到哪儿、放大多少倍，淡出边界都钉在列框上。
     if (u_fade_l.y > u_fade_l.x) {
         a *= smoothstep(u_fade_l.x, u_fade_l.y, v_sx);
     }
     if (u_fill.x >= 0.0) {
         float x = p.x * u_size.x;
         float m = smoothstep(u_fill.x - u_fill.y, u_fill.x + u_fill.y, x);
-        // m=0 已唱（不透明）→ m=1 未唱（乘系数）
+        // m=0 已唱（满亮）→ m=1 未唱（乘系数）。单遍完成，不再两遍叠加提亮。
         a *= mix(1.0, u_fill.z, m);
     }
-    f_color = vec4(u_color.rgb, a * u_color.a);
+    /* 墨色 = 近白 × 这一帧的色相。做法：把环境色按最大通道归一成「纯色相」，
+       再只允许各通道向下偏移 → 亮度只降不升，色相跟着画面走，且永远不会变灰变脏。 */
+    vec3 amb = texture(u_amb, vec2(0.52, 0.34)).rgb;
+    float am = max(0.02, max(amb.r, max(amb.g, amb.b)));
+    amb = amb / am;
+    vec3 rgb = clamp(u_color.rgb * (vec3(1.0) + (amb - vec3(1.0)) * u_tint), 0.55, 1.0);
+    f_color = vec4(rgb, a * u_color.a);
 }
 """
 
@@ -400,8 +429,11 @@ class LiveRenderer:
 
         main_text = "".join(l["text"] for l in self.lines)
         lang = body_lang(main_text)
-        self.serif = "serif_sc" if lang == "zh" else "serif_jp"
+        self.serif = "serif_sc" if lang == "zh" else "serif_jp"   # 片头封面（海报语言，保留衬线）
         self.sans = "sans_sc"
+        # 歌词：粗体无衬线（A 方案）。日文歌用 JP 字形，中文歌用 SC 字形，同族同设计。
+        self.body_font = "sans_sc" if lang == "zh" else "sans_jp"
+        self.trans_font = "sans_sc"
         # 行高：有译文才需要 104（原文 + 译文 + 呼吸），纯原文用 80 更紧凑
         self.LH = LH if self.trans else LH_NOTRANS
         log("[live] %d 行歌词 · 语言 %s · 译文 %d 行 · %.2fs"
@@ -423,7 +455,6 @@ class LiveRenderer:
 
         self._build_gl()
         self._build_sprites()
-        self._build_decor()
         if self.cover_frames:
             self._build_cover()
         self._open_pipes()
@@ -485,14 +516,20 @@ class LiveRenderer:
         return tex
 
     def _build_sprites(self):
-        """每行：原文（含 5 档模糊）+ 译文。逐字 x 供卡拉 OK 填充。"""
+        """每行：原文（含 5 档模糊）+ 译文。逐字 x 供卡拉 OK 填充。
+
+        字体迁移自 A 方案：**粗体无衬线**（Noto Sans / 700），日文歌走 JP 版、
+        中文歌走 SC 版（同设计的一族字，字形语言一致）。译文用同族 500，
+        只靠字号与字重分主次，不换字族 —— 这是「原文与译文统一风格」的落点。
+        """
         t0 = time.time()
         self.sprites = []
         blur_levels = (0.0, 3.0, 6.0, 9.0, 12.0)
         for i, ln in enumerate(self.lines):
             sp = {"i": i, "t": ln["t"], "end": ln["end"], "words": ln["words"],
                   "xs": None, "w": 0, "h": 0, "blurs": []}
-            img, w, h, xs = text_mask(ln["text"], self.serif, BASE_PX, 380, pad=14, ss=2.0)
+            img, w, h, xs = text_mask(ln["text"], self.body_font, BASE_PX,
+                                      BASE_WEIGHT, pad=16, ss=2.0)
             sp["w"], sp["h"], sp["xs"] = w, h, xs
             sp["blurs"] = [self._upload(img if b <= 0.01 else
                                         img.filter(ImageFilter.GaussianBlur(b * 2.0)))
@@ -502,9 +539,8 @@ class LiveRenderer:
             if tr:
                 # 译文与原文**同一套字号阶梯**：5 档模糊各烘一张，绘制时按原文当前的
                 # 模糊档位取同一张 —— 这就是「同步模糊」的实现方式（不是叠加滤镜）。
-                # 字体：原文用 Noto Serif JP，译文用同族 Noto Serif SC（衬线、同 x-height 气质），
-                # 字重比原文轻一档（330 vs 380），只靠字号与字重分主次，不靠「清晰/模糊」分。
-                ti, tw, th, _ = text_mask(tr, "serif_sc", TRANS_PX, TRANS_WEIGHT, pad=10, ss=2.0)
+                ti, tw, th, _ = text_mask(tr, self.trans_font, TRANS_PX, TRANS_WEIGHT,
+                                          pad=12, ss=2.0)
                 sp["tr"] = self._upload(ti)
                 sp["tr_blurs"] = [self._upload(ti if b <= 0.01 else
                                                ti.filter(ImageFilter.GaussianBlur(b * 2.0)))
@@ -512,7 +548,8 @@ class LiveRenderer:
                 sp["tw"], sp["th"] = tw, th
             self.sprites.append(sp)
         # 固定文案
-        self.tex_title = self._label(self.job.get("title") or "", self.serif, TITLE_PX, 380, 16)
+        # 底栏歌名与歌词同一套粗体，整片只有一个「字体声音」
+        self.tex_title = self._label(self.job.get("title") or "", self.body_font, TITLE_PX, 800, 16)
         self.tex_artist = self._label(self._artist_line(), self.sans, LABEL_PX, 300, 8)
         self.tex_vocal = self._label(self._vocal_line(), self.sans, LABEL_PX, 300, 8)
         self.tex_clock = self._label("00:00", self.sans, CLOCK_PX, 400, 8)
@@ -697,170 +734,6 @@ class LiveRenderer:
             % (self.cover_sec, self.cover_frames, tpx, time.time() - t0))
 
     # ---------------- 右侧版面装饰 ----------------
-    def _build_decor(self):
-        """右侧歌词栏的「版面层」：一次烘焙成一块 RGBA，每帧只画一个 quad。
-
-        为什么是烘焙而不是每帧画：这些元素（细线、同心弧、点阵、空心字）**完全不随时间
-        变化**，逐帧重画只是白白吃掉 4K 下的填充率；烘一次，之后整片零成本。
-
-        视觉语言与片头封面同源（印刷边线 / 裁切标记 / 空心字回声 / 品牌色小方块），
-        但角色相反：封面是「一张海报」，这里只是**背景版式** —— 全部元素 alpha ≤ 0.12，
-        且刻意避开歌词列框内的正文区，保证字永远是画面里对比度最高的东西。
-
-        构成（由结构到影像）：
-          结构层  列框（顶栏 / 底栏 / 左侧轨线 / 右缘出血线）+ 四角裁切标记 + 顶栏刊头
-          几何层  右上同心弧、左下点阵、右下节奏条（等距竖条，长度伪随机）
-          影像层  超大空心字从右缘切出、右下暖光、右上冷光
-        """
-        t0 = time.time()
-        r = self.res
-        OX = DECOR_X0                     # 只烘右侧这一条，左边全是透明不画
-        DW = int(round((SW - OX) * r))
-        DH = self.H
-
-        # ---- 底：两团光（右下暖 / 右上冷），低分辨率算完再放大，天然平滑
-        gw, gh = max(8, DW // 8), max(8, DH // 8)
-        gx = np.linspace(OX / SW, 1.0, gw, dtype=np.float32)[None, :]
-        gy = np.linspace(0.0, 1.0, gh, dtype=np.float32)[:, None]
-        warm = np.exp(-((((gx - 0.86) / 0.26) ** 2 + ((gy - 0.76) / 0.30) ** 2) * 2.2))
-        cool = np.exp(-((((gx - 0.97) / 0.22) ** 2 + ((gy - 0.04) / 0.24) ** 2) * 2.6))
-        wa, ca = 0.085, 0.050
-        A = warm * wa + cool * ca
-        den = np.maximum(A, 1e-6)
-        R = (232 * warm * wa + 110 * cool * ca) / den
-        G = (164 * warm * wa + 140 * cool * ca) / den
-        B = (182 * warm * wa + 205 * cool * ca) / den
-
-        def up(arr, mode, size):
-            im = Image.fromarray(arr.astype(np.uint8), mode)
-            return im.resize(size, Image.BICUBIC)
-
-        base_rgb = Image.merge("RGB", [up(np.clip(c, 0, 255), "L", (DW, DH)) for c in (R, G, B)])
-        base_a = up(np.clip(A * 255.0, 0, 255), "L", (DW, DH))
-        img = Image.merge("RGBA", (*base_rgb.split(), base_a))
-        d = ImageDraw.Draw(img, "RGBA")
-
-        ink = (242, 236, 230)
-        acc = (232, 164, 182)
-
-        # 所有绘制都接收**设计坐标**，内部换算到这块局部画布
-        def rect(x0, y0, x1, y1, color):
-            a0, b0 = (x0 - OX) * r, y0 * r
-            a1, b1 = (x1 - OX) * r, y1 * r
-            if max(a1, a0) <= 0:
-                return
-            d.rectangle([min(a0, a1), min(b0, b1), max(a0, a1), max(b0, b1)], fill=color)
-
-        def line(x0, y0, x1, y1, color, w=0.6):
-            d.line([(x0 - OX) * r, y0 * r, (x1 - OX) * r, y1 * r],
-                   fill=color, width=max(1, int(round(w * r))))
-
-        def ring(cx, cy, rad, color, w=0.7):
-            d.ellipse([(cx - rad - OX) * r, (cy - rad) * r,
-                       (cx + rad - OX) * r, (cy + rad) * r],
-                      outline=color, width=max(1, int(round(w * r))))
-
-        def tw(text, px, kind, weight, track=0.0):
-            f = get_font(kind, px * r, weight)
-            return (sum(f.getlength(c) for c in text) + track * px * r * max(0, len(text) - 1)) / r
-
-        def tracked(text, x, y, px, kind, weight, color, track=0.0):
-            f = get_font(kind, px * r, weight)
-            cx = x
-            for ch in text:
-                d.text(((cx - OX) * r, y * r), ch, font=f, fill=color, anchor="la")
-                cx += (f.getlength(ch) + track * px * r) / r
-            return cx
-
-        L, Rr = LYR_RAIL_X, SW - 96.0          # 列框左（轨线） / 右（与底栏时间码对齐）
-        TOP, BOT = LYR_TOP, LYR_BOT
-
-        # ---- 结构层 ---------------------------------------------------------
-        # 右缘出血线：一条极淡竖线，让整栏在画布边缘「站住」
-        rect(SW - 30.0, 96, SW - 29.4, 1010, ink + (28,))
-        # 列框上下横线（上粗下细）
-        rect(L, TOP, Rr, TOP + 0.6, ink + (64,))
-        rect(L, BOT, Rr, BOT + 0.5, ink + (48,))
-        # 左侧轨线：贯穿整个歌词带，是竖条与刻度的母题
-        rect(L, TOP, L + 0.5, BOT, ink + (38,))
-        # 底栏分隔线（时间码上方）
-        rect(LYR_X, 940, Rr, 940.5, ink + (30,))
-        # 四角裁切标记（与封面同一套印刷语言）
-        cm = 14.0
-        for cx, sx in ((L, 1), (Rr, -1)):
-            for cy, sy in ((TOP, 1), (BOT, -1)):
-                rect(cx, cy, cx + sx * cm, cy + 0.5, ink + (86,))
-                rect(cx, cy, cx + 0.5, cy + sy * cm, ink + (86,))
-        # 顶栏刊头：品牌色小方块 + LYRICS ／ 歌詞 + 右对齐罗马字
-        rect(L, 94, L + 8, 102, acc + (238,))
-        cx = tracked("LYRICS", L + 20, 92.0, 12.5, "sans_sc", 400, ink + (150,), 0.34)
-        cx = tracked("／", cx + 9.0, 92.0, 12.5, "serif_sc", 300, ink + (86,), 0.0)
-        tracked("歌 詞", cx + 8.0, 92.0, 12.5, "serif_sc", 300, ink + (132,), 0.12)
-        # 刊头右上：罗马字歌名（与封面同一行文案，右对齐）
-        rj = (self.job.get("romaji") or "").strip().upper()
-        if rj:
-            wl = tw(rj, 11.5, "sans_sc", 400, 0.30)
-            tracked(rj, Rr - wl, 93.0, 11.5, "sans_sc", 400, ink + (96,), 0.30)
-
-        # ---- 几何层 ---------------------------------------------------------
-        # 右上同心弧：圆心落在画布外右上，只让左下那几段扫过画面
-        for rad, al in ((300, 52), (356, 40), (412, 30), (468, 22)):
-            ring(1946.0, 18.0, rad, ink + (al,), 0.7)
-        # 中下的一枚大圆：歌词退场后那一块是空的，用一个几何「落点」把它锚住
-        # （半径特意做到跨过最后两行字的区域，淡淡的弧线从字后面穿过，不动声色地加层次）
-        ring(1478.0, 648.0, 168.0, ink + (46,), 0.8)
-        ring(1478.0, 648.0, 196.0, ink + (28,), 0.7)
-        # 左下点阵（12×5），密度跟着「留白」走：越靠外越稀
-        for j in range(5):
-            for k in range(12):
-                dx = 1150.0 + k * 22.0
-                dy = 806.0 + j * 26.0
-                al = int(62 - 6.0 * j - 1.5 * k)
-                if al > 6:
-                    rect(dx, dy, dx + 2.0, dy + 2.0, ink + (al,))
-        # 歌词带下半部的稀疏点阵：字退场之后这块是空的，用极淡的网格把它「织」起来
-        for j in range(7):
-            for k in range(26):
-                dx = 1150.0 + k * 24.0
-                dy = 604.0 + j * 26.0
-                al = int(34 - 2.2 * abs(j - 3) - 0.45 * k)
-                if al > 5:
-                    rect(dx, dy, dx + 1.6, dy + 1.6, ink + (al,))
-        # 右下节奏条：等距竖条、长度伪随机、整体向右收窄（像一段被切掉的数据）
-        rng = np.random.default_rng(20261128)
-        bx = 1444.0
-        while bx < Rr - 2:
-            bh = float(rng.integers(10, 74))
-            fade = 1.0 - 0.7 * (bx - 1444.0) / max(1.0, Rr - 1444.0)
-            rect(bx, 916.0 - bh, bx + 2.0, 916.0, acc + (int(88 * fade) + 10,))
-            bx += 7.4
-
-        # ---- 影像层 ---------------------------------------------------------
-        # 超大空心字：歌名首字，从右缘切出去，只保留轮廓 —— 封面的「空心回声」在这里
-        # 变成一条压在最底下的纹理。它是**空心**且 alpha 极低，所以永远不会盖过歌词。
-        title = (self.job.get("title") or "").strip()
-        if title:
-            gpx = 430.0
-            f = get_font(self.serif, gpx * r, 900)
-            d.text(((1694.0 - OX) * r, 352.0 * r), title[0], font=f,
-                   fill=(0, 0, 0, 0), anchor="la",
-                   stroke_width=max(1, int(round(1.3 * r))),
-                   stroke_fill=ink + (26,))
-
-        tex = self.ctx.texture((DW, DH), 4, img.tobytes())
-        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        tex.repeat_x = False
-        tex.repeat_y = False
-        self.tex_decor = tex
-        self._decor_on = not os.environ.get("SONGCUT_NO_DECOR")
-        log("[live] 版面装饰 %dx%d（%.1fs）%s"
-            % (DW, DH, time.time() - t0, "" if self._decor_on else " [已关闭]"))
-
-    def _draw_decor(self, t):
-        if not getattr(self, "_decor_on", True):
-            return
-        self._draw_img(self.tex_decor, DECOR_X0, 0, SW - DECOR_X0, SH, 1.0)
-
     def _draw_img(self, tex, x, y, w, h, alpha):
         p = self.p_img
         p["u_tex"].value = 0
@@ -986,7 +859,10 @@ class LiveRenderer:
             k = 9.0 if tg > sp.get("act", 0.0) else 4.2
             sp["act"] = sp.get("act", 0.0) + (tg - sp.get("act", 0.0)) * min(1.0, self.dt * k)
             if raw < 0:
-                base = 0.20 + 0.30 * math.exp(-i / 1.7)
+                # 开唱前：第一行先亮起来（等它开口），其余按距离压在下面。
+                # A 方案的稳态是「当前行 1.0」，这里给 0.70——比任何已唱行都亮，
+                # 又不到满亮，等第一句真的唱出来再逐字点亮。
+                base = 0.70 if i == 0 else 0.20 + 0.30 * math.exp(-i / 1.7)
             elif i < idx:
                 base = 0.30
             elif i == raw:
@@ -1036,10 +912,13 @@ class LiveRenderer:
         self.vbo[name].write(arr.tobytes())
         self.vao[name].render(moderngl.TRIANGLES)
 
-    def _draw_tex(self, tex_info, x, y, w, h, color, fill=None, fadex=None):
+    def _draw_tex(self, tex_info, x, y, w, h, color, fill=None, fadex=None, tint=None):
         p = self.p_txt
         p["u_tex"].value = 0
+        p["u_amb"].value = 1
         tex_info["tex"].use(0)
+        self.tex_env.use(1)          # 墨色色相取自这一帧的环境色（零回读，纯 GPU 取色）
+        p["u_tint"].value = float(INK_TINT if tint is None else tint)
         p["u_color"].value = color
         if fill is None:
             p["u_fill"].value = (-1.0, 1.0, 1.0, 0.0)
@@ -1098,9 +977,6 @@ class LiveRenderer:
         p["u_frame"].value = float(i)
         self.tex_env.use(0)
         self._quad("bg", 0, 0, SW, SH)
-
-        # ---- 版面装饰（静态烘焙，压在人物与歌词之下）
-        self._draw_decor(t)
 
         # ---- 人物：面部锚点 → 裁切窗口
         ex, ey = self._track_xy(t)
@@ -1171,57 +1047,54 @@ class LiveRenderer:
                        -(SH * (s2 - 1.0)) * 0.5 + dy, SW * s2, SH * s2, a)
 
     def _draw_lyrics(self, t, idx):
-        ctx = self.ctx
+        """歌词绘制：A 方案的粗体 + Apple Music 滚动，重新排版到右侧竖栏。
+
+        版式只有三件事：**字**（粗体、大字号、紧行距）、**色**（墨色跟着画面色相走）、
+        **光**（背景里那团焦点柔光）。没有任何框线、圆环、点阵或空心大字 ——
+        空间感来自字号与留白，不来自装饰。
+        """
         fade = LYR_FADE
         rows = []
         for i, sp in enumerate(self.sprites):
-            ytop = i * self.LH - self.scrollY     # 旧版 yTop = LY.y + i*LH - scrollY（视口顶记 0）
+            ytop = i * self.LH - self.scrollY
             if ytop > LYR_BOT + self.LH or ytop + self.LH < LYR_TOP - self.LH:
                 continue
             a = sp.get("act", 0.0)
             bs = sp.get("bs", 0.0)
             bl = sp.get("bl", 0.0)
-            # 视口边缘淡出：上下都按歌词带（LYR_TOP..LYR_BOT）算，不再用整幅 SH。
-            # 顶边收得比底边急：越过顶栏横线的行必须**先化没**，否则字会压住那条线。
-            edge = min(_sstep(ytop, LYR_TOP - 6.0, LYR_TOP + 72.0),
-                       _sstep(ytop + self.LH, LYR_BOT + 18.0, LYR_BOT - 96.0))
+            # 视口上下沿淡出：顶边收得急（不让字溢出到画面上部），底边留得缓。
+            edge = min(_sstep(ytop, LYR_TOP - 8.0, LYR_TOP + 86.0),
+                       _sstep(ytop + self.LH, LYR_BOT + 22.0, LYR_BOT - 112.0))
             edge = max(0.0, min(1.0, edge))
             alpha = (bs + (1.0 - bs) * a) * edge
-            if alpha < 0.01:
+            if alpha < 0.012:
                 continue
             rows.append((i, sp, ytop, alpha, a, bl, edge))
 
-        # ---- 左侧轨线刻度（先画：它在列框左缘之外，不受文字淡入影响）
-        # 每一行在轨线上留一枚小刻痕，当前行换成品牌色竖条 + 横向短引线。
-        # 位置全部锚在 LYR_RAIL_X，与文字起始 x 之间恒留 40px 空档：
-        # 长行横向滚动最多只能把文字推到 LYR_TEXT_X − ox，而 ox 再大也会在
-        # LYR_FADE 区间里化到 0 —— 竖条与刻度因此永远不会被字压住。
+        # ---- 活动行标记：整块版式里唯一的图形元素。
+        # 它不是装饰，是「指针」—— 双语对照下，一眼看出正在唱的是哪一行。
         for (i, sp, ytop, alpha, a, bl, edge) in rows:
-            cy = ytop + self.LH * 0.52
-            if i == idx:
-                self.p_sol["u_color"].value = (ACCENT[0], ACCENT[1], ACCENT[2],
-                                               0.92 * a * edge)
-                self._quad("sol", LYR_RAIL_X - 1.3, cy - self.LH * 0.22,
-                           2.6, self.LH * 0.44)
-                self.p_sol["u_color"].value = (ACCENT[0], ACCENT[1], ACCENT[2],
-                                               0.40 * a * edge)
-                self._quad("sol", LYR_RAIL_X, cy - 0.6, 17.0, 1.2)
-            else:
-                self.p_sol["u_color"].value = (INK[0], INK[1], INK[2], 0.14 * edge)
-                self._quad("sol", LYR_RAIL_X, cy - 0.5, 8.0, 1.0)
+            if i != idx:
+                continue
+            y0 = ytop + sp["h"] * 0.14
+            h = sp["h"] * 0.62
+            self.p_sol["u_color"].value = (ACCENT[0], ACCENT[1], ACCENT[2], 0.92 * edge)
+            self._quad("sol", LYR_MARK_X, y0, 3.0, h)
+            self.p_sol["u_color"].value = (ACCENT[0], ACCENT[1], ACCENT[2], 0.16 * edge)
+            self._quad("sol", LYR_MARK_X, y0 + h, 3.0, 8.0)
 
         for (i, sp, ytop, alpha, a, bl, edge) in rows:
-            sc = (BASE_PX * (1.0 + 0.26 * a)) / BASE_PX
-            # 长行横向滚动：唱到的位置停在列宽 42%
+            # 聚焦放大 1.16×：以**原文底边**为锚向上生长 —— 译文位置不动，
+            # 活动行只是「往上顶出来一点」，不会把下面那行挤跑。
+            sc = 1.0 + 0.26 * a
             w = sp["w"] * sc
             ox = 0.0
             if i == idx and w > LYR_W:
                 fw = self._fill_px(sp, t) * sc
                 want = max(0.0, min(w - LYR_W, fw - LYR_W * 0.42))
-                key = "oxs"
-                cur = sp.get(key, 0.0)
+                cur = sp.get("oxs", 0.0)
                 cur += (want - cur) * min(1.0, self.dt * 3.2)
-                sp[key] = cur
+                sp["oxs"] = cur
                 ox = cur
             elif sp.get("oxs"):
                 cur = sp["oxs"]
@@ -1232,34 +1105,30 @@ class LiveRenderer:
             # 模糊档位（量化到 5 档，与预烘一致）；活动行恒为 0 档（对焦）
             lvl = 0 if bl < 1.5 else min(4, int(round(bl / 3.0)))
             tex = sp["blurs"][lvl]
-            x = LYR_TEXT_X - ox + 6.0 * a
-            y = ytop + 4.0
+            x = LYR_X - ox + 3.0 * a
+            y = ytop + (1.0 - sc) * sp["h"]
+
             if i == idx:
-                # 活动行：整行薄底 → 已唱部分按逐字进度点亮（两层同字形，不会重影）
-                self._draw_tex({"tex": tex}, x, y, sp["w"] * sc, sp["h"] * sc,
-                               (INK[0], INK[1], INK[2], alpha), fadex=fade)
+                # 活动行：**单遍**绘制，未唱部分用 u_fill.z 压暗。
+                # 旧版画两遍（薄底 + 已唱），两层 SRC_ALPHA 叠加会把左缘淡入算成
+                # 1−(1−a)²，淡出窗口看着只有一半宽 —— 现在一遍解决，也省一次填充。
                 fpx = self._fill_px(sp, t) * sc
-                if fpx > 0.5:
-                    self._draw_tex({"tex": tex}, x, y, sp["w"] * sc, sp["h"] * sc,
-                                   (INK[0], INK[1], INK[2], alpha),
-                                   fill=(fpx, 30.0, 0.0), fadex=fade)
+                self._draw_tex({"tex": tex}, x, y, w, sp["h"] * sc,
+                               (INK[0], INK[1], INK[2], alpha),
+                               fill=(fpx, 28.0, 0.42), fadex=fade)
             else:
-                self._draw_tex({"tex": tex}, x, y, sp["w"] * sc, sp["h"] * sc,
+                self._draw_tex({"tex": tex}, x, y, w, sp["h"] * sc,
                                (INK[0], INK[1], INK[2], alpha), fadex=fade)
 
-            # 译文：贴在同一行下方，与原文**同属一个视觉单元** —— 同一个 a（聚焦）、
-            # 同一个 bs（已唱亮度）、同一个 edge（视口边缘淡出）、同一个 lvl（模糊档位）。
-            # 旧版的毛病是：原文取 blurs[lvl] 会随状态变糊，译文却永远用那张清晰纹理，
-            # 于是出现「原文糊了、译文还锐利」的割裂。现在译文烘的是同一套 5 档模糊。
+            # 译文：与原文同属一个视觉单元 —— 同一个 act / bs / edge / 模糊档位，
+            # 同一族字体、同一套墨色（色相偏移一致），只是字号小一档、字重轻一档。
             if sp.get("tr"):
-                tsc = 1.0 + 0.10 * a
+                tsc = 1.0 + 0.06 * a
                 ta = alpha * TRANS_K
-                # 活动行原文放大了 (sc-1) 倍，译文必须跟着下推同样的量，
-                # 否则放大后的字形会直接压住译文（实测活动行译文完全被吃掉）。
-                ty = ytop + TRANS_DY + (sc - 1.0) * sp["h"] * 0.55
+                ty = ytop + sp["h"] - 20.0          # 贴着原文底边（含 sprite 内边距）
                 tb = sp.get("tr_blurs")
                 ttex = tb[lvl] if tb else sp["tr"]
-                self._draw_tex({"tex": ttex}, x + 2.0, ty,
+                self._draw_tex({"tex": ttex}, x + 1.0, ty,
                                sp["tw"] * tsc, sp["th"] * tsc,
                                (INK[0], INK[1], INK[2], ta), fadex=fade)
 
@@ -1320,8 +1189,11 @@ class LiveRenderer:
                 for it in parse_lrc(f.read()):
                     self.trans[round(it["t"] * 100)] = it["text"]
         lang = body_lang("".join(l["text"] for l in self.lines))
-        self.serif = "serif_sc" if lang == "zh" else "serif_jp"
+        self.serif = "serif_sc" if lang == "zh" else "serif_jp"   # 片头封面（海报语言，保留衬线）
         self.sans = "sans_sc"
+        # 歌词：粗体无衬线（A 方案）。日文歌用 JP 字形，中文歌用 SC 字形，同族同设计。
+        self.body_font = "sans_sc" if lang == "zh" else "sans_jp"
+        self.trans_font = "sans_sc"
         self.LH = LH if self.trans else LH_NOTRANS
         for i, ln in enumerate(self.lines):
             nxt = self.lines[i + 1]["t"] if i + 1 < len(self.lines) else self.duration
@@ -1333,7 +1205,6 @@ class LiveRenderer:
                 self.track = json.load(f)
         self._build_gl()
         self._build_sprites()
-        self._build_decor()
         if self.cover_frames:
             self._build_cover()
         log("[live] W,H=%d,%d  p_txt u_res=%s  p_vid u_res=%s"
@@ -1382,7 +1253,6 @@ class LiveRenderer:
         p["u_frame"].value = float(i)
         self.tex_env.use(0)
         self._quad("bg", 0, 0, SW, SH)
-        self._draw_decor(t)
         self._draw_video(t)
         self._draw_lyrics(t, idx)
         self._draw_footer(t)
