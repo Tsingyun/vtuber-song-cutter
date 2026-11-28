@@ -304,6 +304,19 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("[serve] %s %s\n" % (self.address_string(), fmt % args))
 
+    def handle_one_request(self):
+        # 浏览器 seek 会主动掐掉上一路 Range 连接；BaseHTTPRequestHandler 只兜 socket.timeout，
+        # WinError 10053 会一路冒到 serve_forever 之外把整个服务打死（实测跑 3h50m 后发生）。
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
+        except OSError as e:
+            if getattr(e, "winerror", None) in (10053, 10054, 10038):
+                self.close_connection = True
+            else:
+                raise
+
     def _resolve(self, path: str):
         if path in ("", "/"):
             return PAGE_DIR / "index.html"
