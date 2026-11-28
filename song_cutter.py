@@ -2627,6 +2627,11 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         # NVENC 档位：实测 4K60 全片 p7=68fps / p6=73 / p5=74 / p4=129（本机 5070 Ti）。
         # p6 是拐点 —— 再往上只多花时间换不到肉眼可见的画质，往下画质开始有代价。
         job["nvencPreset"] = os.environ.get("SONGCUT_NVENC_PRESET") or "p6"
+        # 片头封面（默认 3s，静音）：只作用于 live 版式。SONGCUT_COVER_SEC=0 可关。
+        # ⚠ 它会让成片比「切点跨度 + head_pad」多 cover_sec 秒，混流与 QC 都必须知道，
+        # 否则 A02 直接报 BLOCK（音频比期望长 3s）。
+        job["cover_sec"] = float(os.environ.get("SONGCUT_COVER_SEC") or 3.0)
+        job["title_zh"] = seg.get("title_zh") or ""
         log("  画面层：源 %s @ %.2fs｜轨迹 %s｜译文 %s"
             % (os.path.basename(src), cs,
                "有" if job["track"] else "无", "有" if job["trans"] else "无"))
@@ -2649,11 +2654,16 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     render_player_video(workdir, job, ffmpeg)
 
     # 5. 混流：渲染画面 + MP3 音轨 → 最终 MP4（视频流直拷，音轨 AAC 重编码）
+    # 片头封面期间必须完全静音：画面比音轨长 cover_sec 秒，所以要给音轨在**前面**补等长
+    # 静音。补完再 apad，否则 -shortest 会反过来把画面尾部截掉（音轨短 3s 就是 3s 黑尾）。
+    _cover = float(job.get("cover_sec") or 0.0)
+    _af = ["adelay=%d:all=1" % int(round(_cover * 1000)), "apad"] if _cover > 0.001 else []
     rc, err = -1, ""
     try:
         rc, _, err = run([ffmpeg, "-y", "-v", "error", "-i", render_tmp, "-i", mux_audio,
                           "-map", "0:v:0", "-map", "1:a:0",
-                          "-c:v", "copy", "-c:a", "aac", "-b:a", OUT_AUDIO_BR,
+                          "-c:v", "copy"] + (["-af", ",".join(_af)] if _af else []) +
+                         ["-c:a", "aac", "-b:a", OUT_AUDIO_BR,
                           "-movflags", "+faststart", "-shortest", out_mp4])
     finally:
         # 混流**成功**才收掉 .render.mp4；失败必须留着 —— 4K60 重渲要 80+ 分钟，
@@ -2667,8 +2677,8 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         elif os.path.exists(render_tmp):
             log("  ⚠ 混流失败，已保留画面中间件供补混：%s" % render_tmp)
             log("     补混：ffmpeg -i \"<上面那个>\" -i \"%s\" -map 0:v:0 -map 1:a:0 "
-                "-c:v copy -c:a aac -b:a %s -movflags +faststart -shortest \"<成片路径>\""
-                % (out_mp3, OUT_AUDIO_BR))
+                "%s-c:v copy -c:a aac -b:a %s -movflags +faststart -shortest \"<成片路径>\""
+                % (out_mp3, ("-af \"%s\" " % ",".join(_af)) if _af else "", OUT_AUDIO_BR))
     if rc != 0:
         raise RuntimeError("混流失败：%s" % err[-300:])
     log("  渲染+混流完成，耗时 %.0fs" % (time.time() - t0))
@@ -2687,6 +2697,7 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
                 "核定 seg.cut_start_abs/cut_end_abs 后 --force 重渲")
     return {"lrc_path": lrc_snap, "lrc_src_path": src_snap,
             "cut_start": cs, "cut_end": ce, "head_pad": round(head_pad, 3),
+            "cover_sec": round(float(job.get("cover_sec") or 0.0), 3),
             "timeline_offset_s": (round(tl_offset, 2) if tl_offset is not None else None),
             "orig_duration_s": (round(linfo["netease_duration_ms"] / 1000.0, 1)
                                 if linfo.get("netease_duration_ms") else None),

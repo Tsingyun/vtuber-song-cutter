@@ -880,7 +880,9 @@ def run_qc(mp4, *, entry=None, lrc_text=None, ref_lrc_text=None, ffmpeg=None,
     # 期望时长
     want_dur = None
     if entry.get("cut_end") and entry.get("cut_start"):
-        want_dur = float(entry["cut_end"]) - float(entry["cut_start"]) + float(entry.get("head_pad", 0) or 0)
+        want_dur = (float(entry["cut_end"]) - float(entry["cut_start"])
+                    + float(entry.get("head_pad", 0) or 0)
+                    + float(entry.get("cover_sec", 0) or 0))   # 片头封面是静音的等长附加段
     head_pad = float(entry.get("head_pad", 0) or 0)
 
     # D01: 成片时长 vs 原曲官方时长（manifest.orig_duration_s，来自网易云元数据）。

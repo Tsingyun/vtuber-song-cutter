@@ -184,3 +184,30 @@ python tools/liveplayer.py play --date 2026-11-27 --index 0   # 备料+起服务
 - live 版式与 A/B 风格互斥（不读 player 页面、不画封面/JIZURA）。
 - 源是 1080p，4K 输出靠 `scale_cuda` 上采样，边缘略软（源限制）。
 - 源画面自带的弹幕挂件/伴奏窗口会带进取景（真实录制内容，未擦除）。
+
+---
+
+# 任务四：片头封面 + 译文与原文同一套模糊（2026-11-28 下午）
+
+## 改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `renderer/live_render.py` | 译文改 5 档模糊（与原文共用 `lvl`/`alpha`/缩放）、改 Noto Serif SC；新增 `FS_IMG` + `_build_cover`/`_draw_cover`/`_draw_img`；`render_frame` 前 `cover_frames` 帧走封面分支 |
+| `song_cutter.py` | live 分支写 `job["cover_sec"]`（默认 3.0，`SONGCUT_COVER_SEC` 可覆盖）；混流加 `-af "adelay=<cover>:all=1,apad"`；manifest 记 `cover_sec` |
+| `songcut/qc.py` | A02 的 `want_dur` 加 `cover_sec`（否则封面片必 BLOCK） |
+
+`renderer/gpu_render.py`、`player/*`、`songcut/*`（除 qc 一行）未动，`--renderer gpu|browser` 照旧。
+
+## Demo 实测（《またあした》副歌 33.5~88.0s）
+
+- 3840×2160@60，3492 帧 / 53.5s = 65.2 fps（15.3ms/帧），成片 58.20s / 133MB / 17.98Mbps。
+- 封面：0~3.00s，第 0 帧满亮（不再淡入），2.95s 已基本全黑 → 正片 0.28s 从黑浮出。
+- 静音：0~3.70s RMS −180dB；音乐 3.70s 起（= head_pad 0.7 + 封面 3.0）。
+- 歌词：41.30s 仍高亮「ぴかぴか」，41.80s 已切「あさがきて」→ 切换点 41.55s 与轴一致。
+- 译文：与日文同族衬线体、同档模糊；隔 3 行以上两者一起糊到不可读，活动行两者一起清晰。
+
+## 未做
+
+- 全片（336s）未重渲，只验了副歌窗口；song_cutter 的混流 `-af` 组合在 Demo 里用同一套参数验证过。
+- 封面标题按「40% 处断行」自动拆分，长标题（>8 字）需要人工看一次。
