@@ -38,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
@@ -73,11 +74,15 @@ NODE_PATH_ENV = CFG.node_modules_path()
 
 _PLAYER_DIR = os.path.join(ROOT, "renderer", "player")
 _RENDER_CJS = os.path.join(ROOT, "renderer", "render_song.cjs")
+# live 版式（主播画面 + 动态歌词）的 GPU 直算渲染器，与 gpu_render.py 并行存在
+_LIVE_RENDER = os.path.join(ROOT, "renderer", "live_render.py")
+_FACE_TRACK = os.path.join(ROOT, "tools", "face_track.py")
 # 播放器页面：同目录下可并存多版（index.html = 明纸版，index_v10.html = 深夜电台版）。
 # 优先级：--player-page > 环境变量 SONGCUT_PLAYER_PAGE > index.html（保持历史行为）。
 PLAYER_PAGE = os.environ.get("SONGCUT_PLAYER_PAGE") or "index.html"
 # 画面渲染器（2026-11-20）：browser = Chromium 逐帧 toBlob（默认，B 手书唯一通路）；
-# gpu = moderngl 显卡直算 + NVENC（仅 A 唱片 index.html，实测 4K60 72ms/帧 → 15ms/帧）。
+# gpu = moderngl 显卡直算 + NVENC（仅 A 唱片 index.html，实测 4K60 72ms/帧 → 15ms/帧）；
+# live = 主播实时画面版式（面部居中裁切 + Apple Music 式歌词滚动），同为显卡直算。
 RENDERER = os.environ.get("SONGCUT_RENDERER") or "browser"
 # 风格：A=唱片（index.html）/ B=手书（index_pv.html + 风格弧线 + 人物挂点 + JIZURA）。
 # --style 是高层入口：一个名字同时决定版式与三个可选层，不必在命令行里手拼
@@ -1334,6 +1339,128 @@ def _render_player_video_gpu(workdir, job, ffmpeg=None):
         raise RuntimeError("GPU 渲染失败（rc=%d）" % proc.returncode)
 
 
+def _live_track(src, cs, ce, workdir, title=""):
+    """面部视觉中心轨迹（双眼中点）。缓存命中即复用，缺失才跑跟踪。
+
+    跟踪是纯 CPU（NVDEC 解码 + OpenCV 掩膜），一首 5 分钟的歌约 1340 个采样帧，
+    重复跑一遍要一分多钟，所以按「源文件 + 切点 + 片长」做键缓存到 _media_cache/。
+    失败返回 None —— 渲染器会退回「画面中心」，绝不因此中断出片。
+    """
+    import hashlib
+    key = "%s_%s" % (sanitize(title or "track")[:24],
+                     hashlib.md5(("%s|%.2f|%.2f" % (os.path.abspath(src), cs, ce))
+                                 .encode("utf-8")).hexdigest()[:10])
+    out = os.path.join(workdir, "_media_cache", "_track_%s.json" % key)
+    if os.path.exists(out) and os.path.getsize(out) > 256:
+        try:
+            with io.open(out, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if d.get("frames"):
+                log("  面部轨迹：复用缓存 %d 点（%s）" % (len(d["frames"]), os.path.basename(out)))
+                return out
+        except (OSError, ValueError):
+            pass
+    if not os.path.exists(_FACE_TRACK):
+        log("  ⚠ 找不到面部跟踪脚本，画面退回居中裁切：%s" % _FACE_TRACK)
+        return None
+    log("  面部跟踪：识别双眼中点 → 3 级降级（戴镜/低头/侧脸），预计 1~2 min")
+    t0 = time.time()
+    rc = subprocess.call([sys.executable, _FACE_TRACK, "--src", src,
+                          "--start", "%.3f" % cs, "--end", "%.3f" % ce, "--out", out])
+    if rc != 0 or not os.path.exists(out):
+        log("  ⚠ 面部跟踪失败（rc=%d），画面退回居中裁切" % rc)
+        return None
+    try:
+        with io.open(out, "r", encoding="utf-8") as f:
+            st = (json.load(f).get("stats") or {})
+        log("  面部轨迹：%.1fs｜眼 %s / 模板 %s / 保持 %s｜眼距中位 %s"
+            % (time.time() - t0, st.get("eyes"), st.get("tpl"), st.get("hold"),
+               st.get("eye_dist_median")))
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def _live_trans(title, lrc_text, workdir):
+    """取中文译文（网易云 tlyric），写成与正片轴逐行对齐的 .zh.lrc。
+
+    入参是**歌词正文**（不是路径）：produce_one 里的 `lrc` 变量在 override 分支
+    已被替换成文本本身，当成路径去 open 会静默失败。
+    译文只影响排版不影响时间轴：to_lrc() 直接沿用我方时间戳，行序一一对应。
+    中文歌 / 取不到 / 网络失败一律返回 None，渲染器不画译文行。
+    """
+    try:
+        from songcut import lyrics_trans as LT
+    except Exception as e:                     # noqa: BLE001
+        log("  ⚠ 译文模块不可用（%r），跳过译文" % (e,))
+        return None
+    if not (lrc_text or "").strip():
+        return None
+    try:
+        rec = LT.fetch_and_cache(title, lrc_text, Path(workdir) / "_media_cache",
+                                 key=sanitize(title)[:40] or "tr")
+    except Exception as e:                     # noqa: BLE001
+        log("  ⚠ 译文获取失败（%r），本片只出原文" % (e,))
+        return None
+    if not rec or not (rec.get("lrc") or "").strip():
+        log("  译文：未取到（中文歌或平台无译文）→ 只出原文")
+        return None
+    out = os.path.join(workdir, "_media_cache",
+                       "_tr_%s.zh.lrc" % (sanitize(title)[:40] or "tr"))
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    # ⚠ 译文缓存里的时间戳是**上一版轴**的，不能直接拿来对行：
+    # 本片的轴可能已经整体平移过（override 补静音 / 重核锚点），沿用旧时间戳会让
+    # 每一行都对不上、译文整片不显示（实测差 4.0s，画面上只看得到原文）。
+    # 译文只贡献「文字」，时间一律取我方轴：先按时间戳对齐，再退化成行序对齐。
+    try:
+        ours = LT.parse_lrc(lrc_text)
+        cand = LT.parse_lrc(rec.get("lrc") or "")
+    except Exception:                          # noqa: BLE001
+        ours, cand = [], []
+    idx = {}
+    if ours and cand:
+        by_t = {}
+        for k, (ts, txt) in enumerate(cand):
+            by_t[round(ts * 100)] = txt
+        for k, (ts, _txt) in enumerate(ours):
+            txt = by_t.get(round(ts * 100))
+            if txt:
+                idx[k] = txt
+        if len(cand) == len(ours) and len(idx) < len(ours) * 0.6:
+            # 时间戳对不上的行占多数、且行数一致 → 行序即对应关系
+            #（网易云译文与本片轴同为逐行；轴整体平移时就是这种情况）
+            idx = {k: txt for k, (_ts, txt) in enumerate(cand)}
+            log("  译文：缓存时间戳与本片轴不同步，按行序重挂（%d 行）" % len(idx))
+    if not idx:
+        log("  译文：缓存与本片轴对不上，本片只出原文")
+        return None
+    io.open(out, "w", encoding="utf-8", newline="").write(LT.to_lrc(lrc_text, idx))
+    log("  译文：%d 行 → %s" % (len(idx), os.path.basename(out)))
+    return out
+
+
+def _render_player_video_live(workdir, job, ffmpeg=None):
+    """live 版式：主播实时画面（面部居中）+ 动态歌词 → 4K60，全显卡直算。
+
+    与 gpu_render.py（A 唱片封面版）同一条链路形态：不落 mjpeg、不写中间帧，
+    解码 NVDEC → moderngl 合成 → 回读 → NVENC，一帧都不上盘。
+    旧版一行未改，`--renderer gpu|browser` 照常可用，随时可回退。
+    """
+    job_f = os.path.join(workdir, "_render_job.json")
+    io.open(job_f, "w", encoding="utf-8", newline="").write(
+        json.dumps(job, ensure_ascii=False))
+    if not os.path.exists(_LIVE_RENDER):
+        raise RuntimeError("找不到 live 渲染器：%s" % _LIVE_RENDER)
+    env = dict(os.environ)
+    if ffmpeg:
+        env["FFMPEG_BIN"] = ffmpeg
+    py = sys.executable or "python"
+    log("[render] live 版式：NVDEC 解码 + moderngl 合成 + NVENC 编码 → %s" % job["out"])
+    proc = subprocess.run([py, _LIVE_RENDER, "--job", job_f], env=env)
+    if proc.returncode != 0:
+        raise RuntimeError("live 渲染失败（rc=%d）" % proc.returncode)
+
+
 def render_player_video(workdir, job, ffmpeg=None):
     """调 render_song.cjs：无头浏览器离线逐帧渲染播放器画面并编码落盘。
 
@@ -1367,6 +1494,8 @@ def render_player_video(workdir, job, ffmpeg=None):
     log("[DISK] Available: %.1f GB" % (_free / GB))
 
     # GPU 直算模式：不写 mjpeg，无需按 P=2 估峰值；画面由 moderngl 在显卡上算完直接进 NVENC。
+    if RENDERER == "live":
+        return _render_player_video_live(workdir, job, ffmpeg)
     if RENDERER == "gpu" and str(job.get("page") or "index.html") == "index.html":
         return _render_player_video_gpu(workdir, job, ffmpeg)
 
@@ -2203,6 +2332,17 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
     tl_src = "raw"
     tl_offset = None          # ASR 对齐推出的「原曲起点 − 切点」，用于切点自检
     if LRC_OVERRIDE and os.path.exists(LRC_OVERRIDE):
+        # ⚠ 自噬保护（2026-11-28 实测踩到）：override 文件如果是**本片的歌词快照**
+        # （cuts/<成片名>.lrc），那它每跑一次都会被 head_pad 再平移一遍 ——
+        # 跑 4 次就整体晚 4s，而 QC 的 L09 只会把偏差报出来、不会拦（人工轴自证）。
+        # 权威轴必须放 segments/ov_<歌名>.lrc，那里从来不被写。
+        _snap_abs = os.path.abspath(os.path.splitext(out_mp4)[0] + ".lrc")
+        if os.path.abspath(LRC_OVERRIDE) == _snap_abs:
+            raise SystemExit(
+                "--lrc-override 指向的正是本片的歌词快照：%s\n"
+                "  快照每次出片都会被 head_pad 再平移一遍，越跑越晚（实测 4 次累计晚 4s）。\n"
+                "  请把权威轴放 segments/ov_<歌名>.lrc（口径：cut 相对时间、不含补静音）再指那里。"
+                % LRC_OVERRIDE)
         _ov_text = io.open(LRC_OVERRIDE, encoding="utf-8").read()
         # 前奏闸门（2026-11-24 事故）：override 的「首行相对时间」应当≈原曲官方首行
         # 时间。如果它只有 1~2s 而抓取稿首行有 20s，说明切点落在了第一句歌词上，
@@ -2473,6 +2613,23 @@ def produce_one(ffmpeg, ffprobe, src, seg, out_dir, disp, date, workdir, srt_ent
         "head_pad": round(head_pad, 3),
         "out": render_tmp,
     }
+    if RENDERER == "live":
+        # live 版式多要几样：源视频（画面层）、切点（源时间轴起点）、面部轨迹、译文。
+        # ⚠ job["lrc"] 在浏览器通路里是**歌词正文**（页面自己解析）；live 渲染器要的是
+        # 文件路径，所以这里必须落一份 .lrc 再传路径（直接把正文当路径会报「缺少歌词文件」）。
+        _live_lrc = os.path.join(render_tmp_dir(workdir, date), "_live_axis.lrc")
+        io.open(_live_lrc, "w", encoding="utf-8", newline="").write(lrc or "")
+        job["lrc"] = _live_lrc
+        job["source"] = src
+        job["cutStart"] = round(cs, 3)
+        job["track"] = _live_track(src, cs, ce, workdir, seg.get("title_guess") or "")
+        job["trans"] = _live_trans(seg.get("title_guess") or "", lrc, workdir)
+        # NVENC 档位：实测 4K60 全片 p7=68fps / p6=73 / p5=74 / p4=129（本机 5070 Ti）。
+        # p6 是拐点 —— 再往上只多花时间换不到肉眼可见的画质，往下画质开始有代价。
+        job["nvencPreset"] = os.environ.get("SONGCUT_NVENC_PRESET") or "p6"
+        log("  画面层：源 %s @ %.2fs｜轨迹 %s｜译文 %s"
+            % (os.path.basename(src), cs,
+               "有" if job["track"] else "无", "有" if job["trans"] else "无"))
     # 音轨副本必须在**开渲之前**备好：out_mp3 在 cuts/<date>/ 下，属人看得到的地方，
     # 并发工具链整理目录时会把它搬走（11-09 实测被搬进 _legacy_<date>/，混流直接报
     # "No such file or directory"，80 分钟渲染白费）。副本在 _render_tmp 里，谁也动不到。
@@ -2666,10 +2823,12 @@ def main():
     ap.add_argument("--arc", action="store_true",
                     help="风格弧线（逐句调制配色/字距/转场）。--style B 已默认开启；"
                          "此处供 --player-page index_pv.html 手动组合时使用")
-    ap.add_argument("--renderer", choices=["browser", "gpu"], default=None,
+    ap.add_argument("--renderer", choices=["browser", "gpu", "live"], default=None,
                     help="画面渲染器：browser=Chromium 逐帧（默认，兼容 B 手书）；"
                          "gpu=显卡直算 moderngl+NVENC（仅 A 唱片 index.html，"
-                         "4K60 约 15ms/帧，比浏览器快约 4 倍）")
+                         "4K60 约 15ms/帧，比浏览器快约 4 倍）；"
+                         "live=主播实时画面版式（面部居中裁切 + Apple Music 式歌词滚动，"
+                         "同为显卡直算，需 --src 指向录播）")
     ap.add_argument("--live", default="", help="人物挂点 live.json；不给则按 "
                                                "cuts/<date>/<歌名>/live/live.json 自动探测")
     ap.add_argument("--jz", default="", help="JIZURA 序列 jz.json；不给则按 "
@@ -2700,6 +2859,13 @@ def main():
     if RENDERER == "gpu" and "pv" in (PLAYER_PAGE or "").lower():
         log("[render] --renderer gpu 只支持 A 唱片（index.html）；B 手书自动回退 browser")
         RENDERER = "browser"
+    if RENDERER == "live":
+        # live 版式不读 player 页面，也不用封面/装饰/JIZURA —— 它是独立的一套画面，
+        # 与 A/B 风格互斥。误带 --style B 时明确告知，避免以为挂了手书层。
+        if STYLE.get("key") not in ("A", ""):
+            log("[render] --renderer live 是独立版式：忽略风格 %s（%s）的封面/挂点层"
+                % (STYLE["key"], STYLE.get("name")))
+        log("[render] live 版式：主播画面（面部居中）+ 动态歌词，全显卡直算")
     _pp = os.path.join(_PLAYER_DIR, PLAYER_PAGE)
     if not os.path.exists(_pp):
         raise SystemExit("播放器页面不存在：%s（可选：%s）" % (

@@ -141,3 +141,46 @@ python tools/liveplayer.py play --date 2026-11-27 --index 0   # 备料+起服务
 ```
 
 回退：删除 `renderer/player/live/`、`tools/liveplayer.py`、`tools/track_host.py`、`_media_cache/live/`。
+
+---
+
+# 任务三：把歌切做成真正出片的 MP4 管线（2026-11-28）
+
+## 做了什么
+
+新增 `--renderer live`：在旧链路上加一路「主播实时画面」渲染器，产出 4K60 MP4。
+
+| 文件 | 性质 | 说明 |
+|---|---|---|
+| `renderer/live_render.py` | 新增（约 940 行） | NVDEC 解码 → moderngl 合成 → 回读 → NVENC；与 `gpu_render.py` 并列，互不影响 |
+| `tools/face_track.py` | 新增（约 340 行） | 面部锚点轨迹（双眼中点，三级降级） |
+| `tools/verify_head_pad.py` | 新增 | 片头补静音期画面是否冻结的量化验收 |
+| `song_cutter.py` | 改（+169 / −3） | 新增 `live` 分支、轨迹/译文装配、override 自噬硬拦 |
+| `gpu_render.py` / `player/*` / `songcut/*` | **一行未改** | 旧通路随时可回退 |
+
+## 实测（11/27《またあした》，3840×2160@60，336.4s，735MB）
+
+- 渲染器：20187 帧 / **254.7s = 79.3 fps（12.6 ms/帧）**；含混流总 266s。
+- 旧版同 preset（p7，339s / 415s 两次）：**339s → 266s**，同 preset 快 15%，总耗时快 21.5%。
+- GPU 采样（1Hz，渲染窗口 220 个点）：GPU 3D 均值 17.3%（峰 31）、NVENC 45.7%（峰 52）、
+  NVDEC 2.7%（峰 9）、整卡功耗 62.9W。
+- 面部：1342 点轨迹，眼 1282 / 模板 34 / 保持 26（98.1% 检出），眼距中位 132.6px。
+- 成片抽帧：活动行落在画幅 48.5%~55.4%（设计 52%），人物面部完整、不被切。
+- 片头冻结：pad 内灰度差 0.71（冻结）、跨 pad 44.2（走帧）。
+- QC：0 BLOCK / 4 WARN。
+
+## 过程中修掉的坑（都已写进 RULES §161）
+
+1. `job["lrc"]` 在浏览器通路是**歌词正文**，live 渲染器要的是路径 → 落一份 `_live_axis.lrc`。
+2. 译文缓存里的时间戳属于上一版轴 → 按时间戳对齐失败时**按行序重挂**（实测差 4.0s，译文整片不显示）。
+3. 活动行放大 1.26× 会压住译文 → 译文按 `(sc−1)*h*0.95` 同步下推，LH 96 → 104。
+4. `--lrc-override` 指向成片快照会「每跑一次晚 head_pad」→ 已加硬拦，权威轴放 `segments/ov_<歌名>.lrc`。
+5. `face_track._ffmpeg()` 用 `os.path.sep in c` 判绝对路径，Windows 正斜杠会失手退到裸 `ffmpeg`，
+   CreateProcess 直接 PermissionError、跟踪静默降级成「画面居中」。
+6. RGBA→NV12 显卡转换零收益且有半幅刷新 bug → 已删，别再加。
+
+## 未做 / 已知
+
+- live 版式与 A/B 风格互斥（不读 player 页面、不画封面/JIZURA）。
+- 源是 1080p，4K 输出靠 `scale_cuda` 上采样，边缘略软（源限制）。
+- 源画面自带的弹幕挂件/伴奏窗口会带进取景（真实录制内容，未擦除）。
