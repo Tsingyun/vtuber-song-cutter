@@ -3076,7 +3076,10 @@ def main():
             for _f in _spec_fails:
                 log("  ✗ " + _f)
             if ref_extra:
-                want = ref_extra["cut_end"] - ref_extra["cut_start"] + ref_extra.get("head_pad", 0)
+                # cover_sec 必须算进来：片头封面 3s 是**画面独有**的，成片时长 =
+                # 切点跨度 + head_pad + cover_sec。漏了它每首都会误报「时长偏差超 1.5s」（§166.4）。
+                want = (ref_extra["cut_end"] - ref_extra["cut_start"]
+                        + ref_extra.get("head_pad", 0) + ref_extra.get("cover_sec", 0))
                 if abs(specs["duration"] - want) > 1.5:
                     ok = False
                     log("  ⚠ 成片时长 %.2fs 与音频 %.2fs 偏差超 1.5s" % (specs["duration"], want))

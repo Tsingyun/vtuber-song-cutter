@@ -588,7 +588,14 @@ def check_video(ffmpeg, mp4, nframes, windows=12, win=10, seed=20260930, deep=Fa
 
 
 # ── 检查项：歌词 ────────────────────────────────────────────────────────
-def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050):
+def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050, cover=0.0):
+    """歌词节自检。
+
+    cover = 片头静音封面秒数（§162）。歌词轴是**正片时间**，而成片音轨/时长比歌词轴
+    多 cover 秒（画面先播 cover 秒黑场封面，音频 adelay 同样秒数）。凡是要拿歌词时间
+    去比「成片音频 / 成片时长」的地方，一律 `+ cover`，否则 L09 会整体错 3s、
+    把锚点配到相邻乐句上（偏差看着不大，其实全是错配）。
+    """
     out = []
     if not rows:
         return [Finding("L01", "歌词", "歌词存在", BLOCK, False, "未找到歌词（无 .lrc 或空）", {},
@@ -759,7 +766,7 @@ def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050):
                        "大间隔多半是中间掉了几行歌词（间奏除外，需听音频确认）"))
 
     # L07 覆盖率
-    cov = (rows[-1]["end"] / dur) if dur > 1 else 1.0
+    cov = ((rows[-1]["end"] + cover) / dur) if dur > 1 else 1.0
     if cov < TH["cov_block"]:
         sev, ok = BLOCK, False
     elif cov < TH["cov_warn"]:
@@ -787,12 +794,13 @@ def check_lyrics(rows, raw_text, ref_rows, dur, x=None, sr=22050):
         from songcut import vocal_activity as VA
         from songcut.verify_sync import match_anchors
         runs, _sal, _ts = VA.detect_phrases(x, sr)
-        res = match_anchors(rows, runs)
+        _rows_abs = ([dict(r, t=r["t"] + cover) for r in rows] if cover > 0 else rows)
+        res = match_anchors(_rows_abs, runs)
         devs = []
         for (i, j, d, anchor) in res:
             if d is None or not anchor or abs(d) > 2.5:
                 continue
-            t = rows[i]["t"]
+            t = rows[i]["t"] + cover          # 歌词轴是正片时间 → 搬回成片时间轴再比
             if any(s + 0.35 < t <= e + 0.3 for (s, e) in runs):
                 continue                        # legato 内部行，单点不可测
             devs.append((i, d))
@@ -945,7 +953,8 @@ def run_qc(mp4, *, entry=None, lrc_text=None, ref_lrc_text=None, ffmpeg=None,
                             lyric_times=_lt)
     findings += vf
     findings += check_lyrics(rows, lrc_text, ref_rows, ctx["duration"],
-                             x, sr if x is not None else 22050)
+                             x, sr if x is not None else 22050,
+                             cover=float((entry or {}).get("cover_sec") or 0.0))
 
     blockers = [f for f in findings if f["sev"] == BLOCK]
     warns = [f for f in findings if f["sev"] == WARN]

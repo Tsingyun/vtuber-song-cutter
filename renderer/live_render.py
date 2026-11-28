@@ -42,9 +42,12 @@ SW, SH = 1920.0, 1080.0
 PANEL_W = SW * 0.55                 # 人物面板宽（55%，与新播放器一致）
 PANEL_X = 0.0
 LYR_X = 1102.0                      # 歌词列左缘（文字起点 / 淡入边界都按这条线算）
-LYR_MARK_X = LYR_X - 116.0          # 活动行标记竖条：必须落在淡出窗口**左端之外**，
-                                    # 否则滚出的字会以半透明残影压在竖条上（§165）
+LYR_MARK_X = LYR_X - 158.0          # 当前行标记（浅色短横条）左端：必须落在淡出窗口
+LYR_MARK_W = 44.0                   # **左端之外**，否则滚出的字会以半透明残影压在上面（§165）
+MARK_ALPHA = 0.46                   # 横条不透明度：它是「指针」不是高亮，压到 0.5 以下
 LYR_W = 722.0                       # 列宽：LYR_X + 722 = 1824 = 底栏时间码右对齐线
+LYR_FADE_R = (LYR_X + LYR_W - 68.0, LYR_X + LYR_W)   # 右缘软淡出（只对「宽于列宽」的行启用）：
+                                    # 超宽行滚到尾时右端会顶到列框，不淡就是硬切半个字（§166.5）
 LYR_FADE = (LYR_X - 104.0, LYR_X)   # 左缘软淡出区间（设计坐标 / 屏幕空间），宽度 ≈ 2 倍字宽：
                                     # 滚出列框的文字在这里化到 0；竖条右缘在 LYR_X−113，
                                     # 落在窗口之外，横移永远压不到它，也不会出现「半个字」的断口
@@ -204,6 +207,7 @@ uniform sampler2D u_amb;   // 96x54 环境帧：墨色的色相从这里取
 uniform vec4 u_color;
 uniform vec4 u_fill;   // x: 填充像素（纹理空间，<0 关闭）; y: 过渡宽; z: 未唱系数
 uniform vec2 u_fade_l; // 左缘软淡入区间（设计坐标，u_fade_l.y <= u_fade_l.x 即关闭）
+uniform vec2 u_fade_r; // 右缘软淡出区间（同上，只在超宽行滚动时开）
 uniform vec2 u_size;   // 纹理绘制尺寸（像素）
 uniform float u_tint;  // 墨色向环境色相偏移的强度（0 = 纯白）
 void main(){
@@ -213,6 +217,10 @@ void main(){
     // 所以同一行滚到哪儿、放大多少倍，淡出边界都钉在列框上。
     if (u_fade_l.y > u_fade_l.x) {
         a *= smoothstep(u_fade_l.x, u_fade_l.y, v_sx);
+    }
+    // 右缘同理：超宽行滚到尾时最后一字顶在列框上，软化掉才不像「被裁掉」
+    if (u_fade_r.y > u_fade_r.x) {
+        a *= 1.0 - smoothstep(u_fade_r.x, u_fade_r.y, v_sx);
     }
     if (u_fill.x >= 0.0) {
         float x = p.x * u_size.x;
@@ -555,6 +563,7 @@ class LiveRenderer:
         self.tex_vocal = self._label(self._vocal_line(), self.sans, LABEL_PX, 300, 8)
         self.tex_clock = self._label("00:00", self.sans, CLOCK_PX, 400, 8)
         self.tex_total = self._label(self._fmt_dur(self.duration), self.sans, CLOCK_PX * 0.66, 300, 8)
+        self.tex_head = self._build_head()
         log("[live] 歌词纹理 %d 行（%.1fs）" % (len(self.sprites), time.time() - t0))
 
     def _label(self, text, kind, px, weight, pad):
@@ -562,6 +571,32 @@ class LiveRenderer:
             return None
         img, w, h, _ = text_mask(text, kind, px, weight, pad=pad, ss=2.0)
         return {"tex": self._upload(img), "w": w, "h": h}
+
+    def _label_tracked(self, text, kind, px, weight, track=0.0, pad=8.0, ss=2.0):
+        """带字距的小标签（刊头文字）。text_mask 不做 tracking，这里逐字排。"""
+        if not text:
+            return None
+        fpx = max(4, int(round(px * ss)))
+        ppad = pad * ss
+        font = get_font(kind, fpx, weight)
+        dummy = ImageDraw.Draw(Image.new("L", (4, 4)))
+        bbox = dummy.textbbox((0, 0), text, font=font)
+        adv = [float(font.getlength(c)) for c in text]
+        gap = track * fpx
+        w = sum(adv) + gap * max(0, len(text) - 1) + ppad * 2
+        h = max(1.0, bbox[3] - bbox[1] + ppad * 2)
+        img = Image.new("L", (max(1, int(round(w))), max(1, int(round(h)))), 0)
+        d = ImageDraw.Draw(img)
+        cx, base = ppad - bbox[0], ppad - bbox[1]
+        for c, a in zip(text, adv):
+            d.text((cx, base), c, font=font, fill=255)
+            cx += a + gap
+        return {"tex": self._upload(img), "w": img.size[0] / ss, "h": img.size[1] / ss}
+
+    def _build_head(self):
+        """歌词栏刊头：一枚小字标签。与封面同族印刷语言，但只做「这一栏是什么」的说明。"""
+        head = "LYRICS / 歌詞" if self.body_font == "sans_jp" else "LYRICS / 歌词"
+        return self._label_tracked(head, "sans_sc", 15.0, 500, track=0.34, pad=6.0)
 
     # ---------------- 片头封面 ----------------
     def _fit_px(self, text, kind, weight, max_w, track=0.0):
@@ -913,7 +948,7 @@ class LiveRenderer:
         self.vbo[name].write(arr.tobytes())
         self.vao[name].render(moderngl.TRIANGLES)
 
-    def _draw_tex(self, tex_info, x, y, w, h, color, fill=None, fadex=None, tint=None):
+    def _draw_tex(self, tex_info, x, y, w, h, color, fill=None, fadex=None, tint=None, fader=None):
         p = self.p_txt
         p["u_tex"].value = 0
         p["u_amb"].value = 1
@@ -926,6 +961,7 @@ class LiveRenderer:
         else:
             p["u_fill"].value = (fill[0], fill[1], fill[2], 0.0)
         p["u_fade_l"].value = fadex if fadex else (0.0, 0.0)
+        p["u_fade_r"].value = fader if fader else (0.0, 0.0)
         p["u_size"].value = (w, h)
         self._quad("txt", x, y, w, h)
 
@@ -1072,17 +1108,21 @@ class LiveRenderer:
                 continue
             rows.append((i, sp, ytop, alpha, a, bl, edge))
 
-        # ---- 活动行标记：整块版式里唯一的图形元素。
-        # 它不是装饰，是「指针」—— 双语对照下，一眼看出正在唱的是哪一行。
+        # ---- 当前行指针：一枚浅色短横条。
+        # 从竖条改成横条是刻意的：竖条是「高亮」，会和歌词抢注意力；横条只是一撇
+        # 视线引导，颜色取墨白不走品牌粉，alpha 压在 0.5 以下 —— 有它知道唱到哪儿，
+        # 没它也不觉得少东西。位置钉在左缘淡出窗口之外，长行横移永远扫不到（§165.4）。
+        # 刊头：LYRICS / 歌詞，跟歌词左缘对齐，只做「这一栏是什么」的说明。
+        if getattr(self, "tex_head", None):
+            s = self.tex_head
+            self._draw_tex(s, LYR_X, 62.0, s["w"], s["h"],
+                           (INK[0], INK[1], INK[2], 0.40))
+
         for (i, sp, ytop, alpha, a, bl, edge) in rows:
             if i != idx:
                 continue
-            y0 = ytop + sp["h"] * 0.14
-            h = sp["h"] * 0.62
-            self.p_sol["u_color"].value = (ACCENT[0], ACCENT[1], ACCENT[2], 0.92 * edge)
-            self._quad("sol", LYR_MARK_X, y0, 3.0, h)
-            self.p_sol["u_color"].value = (ACCENT[0], ACCENT[1], ACCENT[2], 0.16 * edge)
-            self._quad("sol", LYR_MARK_X, y0 + h, 3.0, 8.0)
+            self.p_sol["u_color"].value = (INK[0], INK[1], INK[2], MARK_ALPHA * edge)
+            self._quad("sol", LYR_MARK_X, ytop + sp["h"] * 0.50, LYR_MARK_W, 2.6)
 
         for (i, sp, ytop, alpha, a, bl, edge) in rows:
             # 聚焦放大 1.16×：以**原文底边**为锚向上生长 —— 译文位置不动，
@@ -1109,6 +1149,9 @@ class LiveRenderer:
             x = LYR_X - ox + 3.0 * a
             y = ytop + (1.0 - sc) * sp["h"]
 
+            # 超宽行才开右缘淡出：正常行右端没有顶到列框，淡出会白白削掉尾部
+            fr = LYR_FADE_R if (w + x - LYR_X) > LYR_W else None
+
             if i == idx:
                 # 活动行：**单遍**绘制，未唱部分用 u_fill.z 压暗。
                 # 旧版画两遍（薄底 + 已唱），两层 SRC_ALPHA 叠加会把左缘淡入算成
@@ -1116,10 +1159,10 @@ class LiveRenderer:
                 fpx = self._fill_px(sp, t) * sc
                 self._draw_tex({"tex": tex}, x, y, w, sp["h"] * sc,
                                (INK[0], INK[1], INK[2], alpha),
-                               fill=(fpx, 28.0, 0.42), fadex=fade)
+                               fill=(fpx, 28.0, 0.42), fadex=fade, fader=fr)
             else:
                 self._draw_tex({"tex": tex}, x, y, w, sp["h"] * sc,
-                               (INK[0], INK[1], INK[2], alpha), fadex=fade)
+                               (INK[0], INK[1], INK[2], alpha), fadex=fade, fader=fr)
 
             # 译文：与原文同属一个视觉单元 —— 同一个 act / bs / edge / 模糊档位，
             # 同一族字体、同一套墨色（色相偏移一致），只是字号小一档、字重轻一档。
@@ -1129,9 +1172,10 @@ class LiveRenderer:
                 ty = ytop + sp["h"] - 20.0          # 贴着原文底边（含 sprite 内边距）
                 tb = sp.get("tr_blurs")
                 ttex = tb[lvl] if tb else sp["tr"]
-                self._draw_tex({"tex": ttex}, x + 1.0, ty,
-                               sp["tw"] * tsc, sp["th"] * tsc,
-                               (INK[0], INK[1], INK[2], ta), fadex=fade)
+                tr_w = sp["tw"] * tsc
+                self._draw_tex({"tex": ttex}, x + 1.0, ty, tr_w, sp["th"] * tsc,
+                               (INK[0], INK[1], INK[2], ta), fadex=fade,
+                               fader=(LYR_FADE_R if (x + 1.0 + tr_w - LYR_X) > LYR_W else None))
 
     def _draw_footer(self, t):
         # 歌名
@@ -1206,6 +1250,7 @@ class LiveRenderer:
                 self.track = json.load(f)
         self._build_gl()
         self._build_sprites()
+        self.tex_head = self._build_head()
         if self.cover_frames:
             self._build_cover()
         log("[live] W,H=%d,%d  p_txt u_res=%s  p_vid u_res=%s"
